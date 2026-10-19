@@ -34,7 +34,7 @@
     $('modeBanner').classList.toggle('hidden', !m || onView);
     $('viewBanner').classList.toggle('hidden', !onView);
     $('modeText').textContent = m === 'group' ? '在成图上从第一个泳道名拖到最后一个' : '';
-    $('viewModeText').textContent = m === 'addrow' ? '点击蛋白所在的高度，添加一行'
+    $('viewModeText').textContent = m === 'addrow' ? '拖出一个框（只按框里的条带识别泳道），或点蛋白所在的高度'
       : m === 'addseg' ? '点这个蛋白在另一条膜条上的位置（点在已有的行上 = 两行拼成一行）'
       : m === 'marks' ? '点 Marker 带添加刻度；拖动微调，点数字修改或删除' : '';
     $('viewModeCancel').textContent = m === 'marks' ? '完成' : '取消 (Esc)';
@@ -293,6 +293,7 @@
     return wrap;
   }
   function selectRow(id, showImage) {
+    if (App.selRow !== id) { App.selSeg = null; App.selLane = null; }
     App.selRow = id;
     const row = App.row(id);
     if (row && showImage) { App.viewBlot = row.blot; App.viewImg = row.img; }
@@ -330,38 +331,43 @@
     $('laneList').querySelectorAll('[data-j]').forEach(c => c.addEventListener('change', done(e => { st.lanes[+c.dataset.j - 1].hidden = !e.target.checked; })));
     const fl = App.figLanes(), named = fl.filter(j => st.lanes[j - 1].name).length;
     $('stLanes').textContent = `${fl.length} 条 · ${named}/${fl.length} 已命名`;
-    renderPieces();
+    renderBoxTools();
   }
-  /* each piece's lanes: number = figure column, M = ladder, × = not used. Click a lane to switch it,
-   * ‹ › moves the whole piece by one column, + adds a lane at that end. */
-  function renderPieces() {
-    const st = S(), box = $('pieceBox'), vis = new Set(App.figLanes());
-    const TIP = { sample: '样品道（点击：不用这一道）', skip: '不用（点击：设为 Marker 道）', ladder: 'Marker 道（点击：设为样品道）' };
-    box.innerHTML = st.blots.map(b => (b.pieces || []).length ? `${st.blots.length > 1 ? `<div class="hint" style="margin:6px 0 2px">${esc(App.blotName(b))}</div>` : ''}` +
-      b.pieces.slice().sort((p, q) => String(p.letter).localeCompare(String(q.letter))).map(pc => {
-        const sl = App.slots(pc), clash = st.rows.some(r => r.blot === b.id && r.segs.some(s => s.piece === pc.id) && App.rowClash(r).length);
-        const chips = sl.map(s => {
-          const txt = s.role === 'sample' ? s.col : s.role === 'ladder' ? 'M' : '×';
-          const cls = s.role === 'sample' ? (vis.has(s.col) ? 'on' : 'off') : s.role;
-          return `<button class="lchip ${cls}" data-p="${pc.id}" data-m="${s.m}" title="膜条 ${esc(pc.letter)} 第 ${s.m + 1} 道：${s.role === 'sample' ? `成图第 ${s.col} 列${vis.has(s.col) ? '' : '（不在成图范围内或已剪除）'}｜` : ''}${TIP[s.role]}">${txt}</button>`;
-        }).join('');
-        return `<div class="piece-row${App.selPiece === pc.id ? ' sel' : ''}${clash ? ' clash' : ''}">
-          <button class="ptag" data-sel="${pc.id}" title="在膜图上显示这条膜条（选中后 ←→ 微调泳道位置，Alt+←→ 调泳道间距）">${esc(pc.letter || '?')}</button>
-          <button class="pnav" data-shift="${pc.id}" data-d="-1" title="整条往前挪一列">‹</button>
-          <div class="lchips"><button class="lchip add" data-ext="${pc.id}" data-side="-1" title="在左端加一道">+</button>${chips}<button class="lchip add" data-ext="${pc.id}" data-side="1" title="在右端加一道">+</button></div>
-          <button class="pnav" data-shift="${pc.id}" data-d="1" title="整条往后挪一列">›</button>
-          ${pc.edited ? `<button class="pnav" data-reset="${pc.id}" title="恢复自动识别的泳道">↺</button>` : ''}
+  /* the selected row's boxes: how many lanes each has and where they go in the figure; re-detect them from
+   * the box's pixels, or space a given number evenly across it */
+  function renderBoxTools() {
+    const el = $('boxTools'), row = App.selRow && App.row(App.selRow);
+    if (!row) { el.innerHTML = '<p class="hint" style="margin:2px 0 0">在中间膜图上点一个框（或在上面"图中的行"里选一行）。框里的竖线就是这一行的泳道，框上方的数字是这一道在成图里的列。</p>'; return; }
+    const b = App.blot(row.blot), cur = App.curSeg(row), clash = App.rowClash(row).length > 0;
+    el.innerHTML = `<div class="bt-head"><span class="swatch" style="background:${App.rowColor(row)}"></span><b>${esc(App.rowLabel(row))}</b>${row.segs.length > 1 ? `<span class="muted">跨 ${row.segs.length} 条膜条</span>` : ''}</div>` +
+      row.segs.map(sg => {
+        const pc = App.piece(b, sg.piece), n = App.nSample(sg), nm = sg.lanes.filter(l => l.r === 'm').length, nx = sg.lanes.filter(l => l.r === 'x').length;
+        const cols = n > 1 ? `${sg.c0}–${App.segEnd(sg)}` : n ? String(sg.c0) : '—';
+        return `<div class="bt-seg${sg === cur ? ' sel' : ''}${clash ? ' clash' : ''}" data-seg="${sg.piece}">
+          <div class="bt-line"><span class="ptag" title="膜条 ${esc(pc ? pc.letter : '?')}">${esc(pc ? pc.letter : '?')}</span>
+            <span class="bt-n"><b>${n}</b> 道${nm ? ` <span class="tag-m">+${nm} M</span>` : ''}${nx ? ` <span class="tag-x">+${nx} 不用</span>` : ''}</span>
+            <span class="bt-cols">成图第 <b>${cols}</b> 列</span>
+            <button class="pnav" data-shift="-1" title="这个框的泳道在成图里往前挪一列">‹</button><button class="pnav" data-shift="1" title="往后挪一列">›</button></div>
+          <div class="bt-line"><button class="btn sm" data-act="redetect" title="只看框里的像素，重新找泳道">框内重新识别</button>
+            <span class="bt-even">均分 <input type="number" class="num" min="1" max="60" value="${sg.lanes.length}"> 道 <button class="btn sm ghost" data-act="even" title="按填的道数在框里等间距排布">排布</button></span></div>
         </div>`;
-      }).join('') : '').join('');
-    const find = id => App.findPiece(id);
-    box.querySelectorAll('[data-m]').forEach(btn => btn.onclick = done(() => { const f = find(btn.dataset.p); App.cycleRole(f.pc, +btn.dataset.m); App.selPiece = f.pc.id; }));
-    box.querySelectorAll('[data-shift]').forEach(btn => btn.onclick = done(() => { const f = find(btn.dataset.shift); App.shiftPiece(f.pc, +btn.dataset.d); App.selPiece = f.pc.id; }));
-    box.querySelectorAll('[data-ext]').forEach(btn => btn.onclick = done(() => { const f = find(btn.dataset.ext); App.extendPiece(f.pc, +btn.dataset.side); App.selPiece = f.pc.id; }));
-    box.querySelectorAll('[data-reset]').forEach(btn => btn.onclick = done(() => { const f = find(btn.dataset.reset); App.resetPiece(f.b, f.pc); }));
-    box.querySelectorAll('[data-sel]').forEach(btn => btn.onclick = () => {
-      const f = find(btn.dataset.sel); App.selPiece = App.selPiece === f.pc.id ? null : f.pc.id;
-      if (App.viewBlot !== f.b.id) { App.viewBlot = f.b.id; App.viewImg = null; }
-      App.emit('select'); $('editorBox').focus({ preventScroll: true });
+      }).join('') +
+      '<p class="hint">拖框的边或角改范围（泳道跟着增减）；拖竖线微调一道，双击框内加一道，点竖线后按 Delete 删掉；点框上方的数字在 样品 / 不用 / Marker 之间切换；选中框后 ←→ 平移这一框的泳道，Alt+←→ 调间距。</p>';
+    el.querySelectorAll('.bt-seg').forEach(div => {
+      const sg = row.segs.find(s => s.piece === div.dataset.seg);
+      if (!sg) return;
+      div.addEventListener('mousedown', () => { if (App.selSeg !== sg.piece) { App.selSeg = sg.piece; App.selLane = null; G.View.draw(); div.parentNode.querySelectorAll('.bt-seg').forEach(x => x.classList.toggle('sel', x === div)); } });
+      div.querySelectorAll('[data-shift]').forEach(btn => btn.onclick = done(() => { if (!App.shiftCols(row, sg, +btn.dataset.shift)) toast('已经从第 1 列开始了'); }));
+      div.querySelector('[data-act="redetect"]').onclick = done(() => {
+        const n = App.editLanes(row, sg, () => App.redetectBox(row, sg));
+        App.findBand(row, sg); App.selLane = null;
+        const nm = sg.lanes.filter(l => l.r === 'm').length;
+        toast(n ? `框内识别出 ${n} 道${nm ? `（另有 ${nm} 道 Marker）` : ''}` : '框里没识别到泳道：拖框调整范围，或填道数后点"排布"', 3200);
+      });
+      const inp = div.querySelector('.bt-even input');
+      const even = done(() => { const n = App.editLanes(row, sg, () => App.evenBox(row, sg, +inp.value), true); App.selLane = null; toast(`框内已等间距排布 ${n} 道`); });
+      div.querySelector('[data-act="even"]').onclick = even;
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter' && !composing(e)) { e.preventDefault(); even(); } });
     });
   }
   const onRange = done(() => {
@@ -564,7 +570,7 @@
     if (!S()) return;
     if (what === 'loaded') { $('emptyState').classList.add('hidden'); $('sections').classList.remove('hidden'); }
     if (what === 'refresh') { updatePreview(); return; }
-    if (what === 'select') { renderBlots(); renderRows(); renderPieces(); renderStageHead(); updatePreview(); G.View.draw(); return; }
+    if (what === 'select') { renderBlots(); renderRows(); renderBoxTools(); renderStageHead(); updatePreview(); G.View.draw(); return; }
     renderBlots(); renderRows(); renderLanes(); renderAnno(); renderStageHead(); syncLayout(); updateCoach(); updatePreview();
   });
   window.addEventListener('resize', () => { if (S()) updatePreview(); });
@@ -593,19 +599,17 @@
       st.rows.filter(r => !r.hidden && r.blot === p.b.id && (p.rec.kind === 'marker' || r.img === p.rec.id)).forEach(r => {
         let last = null;
         r.segs.forEach(sg => {
-          const pc = App.piece(p.b, sg.piece); if (!pc) return;
-          const F = WB.frame(pc.cx, pc.cy, pc.angle), sl = App.slots(pc).filter(s => s.role !== 'skip');
-          if (!sl.length) return;
-          const u0 = sl[0].u - pc.pitch / 2, u1 = sl[sl.length - 1].u + pc.pitch / 2, vT = sg.vc - r.above, vB = sg.vc + r.below;
-          const pts = [[u0, vT], [u1, vT], [u1, vB], [u0, vB]].map(([u, v]) => WB.toImg(F, u, v));
+          const pc = App.piece(p.b, sg.piece); if (!pc || !sg.lanes.length) return;
+          const F = WB.frame(pc.cx, pc.cy, pc.angle), vT = sg.vc - r.above, vB = sg.vc + r.below;
+          const pts = [[sg.x0, vT], [sg.x1, vT], [sg.x1, vB], [sg.x0, vB]].map(([u, v]) => WB.toImg(F, u, v));
           ctx.strokeStyle = '#e03131'; ctx.lineWidth = 2; ctx.beginPath();
           pts.forEach(([x, y], i) => { if (i) ctx.lineTo(x * sc, top + y * sc); else ctx.moveTo(x * sc, top + y * sc); }); ctx.closePath(); ctx.stroke();
           if (!last || pts[1][0] > last[0]) last = pts[1];
           // figure column of every lane along the top of the box; lanes left out marked X, ladder M
           ctx.fillStyle = '#e03131'; ctx.font = `${fs * 0.55}px Arial`; ctx.textAlign = 'center';
-          sl.forEach(s => {
+          App.segCols(sg).forEach(s => {
             const [x, y] = WB.toImg(F, s.u, vT);
-            ctx.fillText(s.role === 'ladder' ? 'M' : vis.has(s.col) ? String(s.col) : 'X', x * sc, top + y * sc - 4);
+            ctx.fillText(s.r === 'm' ? 'M' : s.r === 's' && vis.has(s.col) ? String(s.col) : 'X', x * sc, top + y * sc - 4);
           });
           ctx.textAlign = 'left';
         });
@@ -620,7 +624,7 @@
     const st = S(), C = App.columns(), fl = C.vis;
     const data = C.rows.map((r, ri) => {
       const b = App.blot(r.blot), rec = App.images.get(r.img);
-      const lanes = C.src[ri].map(s => s && { F: WB.frame(s.pc.cx, s.pc.cy, s.pc.angle), uc: s.u, hw: s.pc.pitch * 0.33,
+      const lanes = C.src[ri].map(s => s && s.pc && { F: WB.frame(s.pc.cx, s.pc.cy, s.pc.angle), uc: s.u, hw: App.segPitch(s.sg) * 0.33,
         vTop: s.sg.vc - r.above, vBot: s.sg.vc + r.below, b0: s.sg.vc + s.sg.b0, b1: s.sg.vc + s.sg.b1 });
       return { r, b, rec, d: WB.densitometry(rec.img, rec.cs, lanes) };
     });
@@ -654,13 +658,17 @@
     if (qs.get('ladder')) { st.blots.forEach(b => { b.ladderId = qs.get('ladder'); b.ladderAuto = false; }); App.commit(); }
     if (qs.get('sel')) { const vis = st.rows.filter(r => !r.hidden), r = vis[+qs.get('sel')]; if (r) { App.selRow = r.id; App.viewBlot = r.blot; App.viewImg = r.img; App.emit('select'); } }
     if (qs.get('border') === '1') { st.style.border = true; App.commit(); }
-    if (qs.get('selpiece')) { const pc = (st.blots[0].pieces || []).find(p => p.letter === qs.get('selpiece')); if (pc) { App.selPiece = pc.id; App.emit('select'); } }
+    // &selpiece=B: of the selected row, the box on piece B gets the lane tools
+    if (qs.get('selpiece') && App.selRow) { const r = App.row(App.selRow), sg = r && r.segs.find(s => (App.findPiece(s.piece) || { pc: {} }).pc.letter === qs.get('selpiece')); if (sg) { App.selSeg = sg.piece; App.emit('select'); } }
+    if (qs.get('zoomsel') === '1' && App.selRow) G.View.fitRow(App.row(App.selRow));
     if (qs.get('mode') === 'marks') $('btnMarks').click(); else if (qs.get('mode')) App.setMode(qs.get('mode'));
     if (qs.get('scrollto') && $(qs.get('scrollto'))) $(qs.get('scrollto')).scrollIntoView({ block: 'center' });
-    // scripted checks of the editing functions (tests): a log of pieces, rows and sizes after each step
+    // scripted checks of the editing functions (tests): a log of every row's boxes (piece:first column:lane
+    // roles), its figure columns and size after each step
     const scen = qs.get('scenario'), log = [];
-    const snap = tag => log.push(`${tag} | ${S().blots.map(b => (b.pieces || []).map(p => `${p.letter}:${p.col0}:${p.roles.map(x => x[0]).join('')}`).join(' ')).join(' / ')} | ` +
-      S().rows.map(r => `${r.segs.map(s => (App.findPiece(s.piece) || { pc: {} }).pc.letter).join('+')}[${App.figLanes().filter(j => App.colSource(r, j)).join(',')}]${r.hidden ? 'h' : ''}~${Math.round(App.rowKda(r) || 0)}`).join(' '));
+    const letter = id => (App.findPiece(id) || { pc: {} }).pc.letter;
+    const segStr = r => r.segs.map(s => `${letter(s.piece)}:${s.c0}:${s.lanes.map(l => l.r).join('')}`).join('+');
+    const snap = tag => log.push(`${tag} | ` + S().rows.map(r => `${segStr(r)}[${App.figLanes().filter(j => App.colSource(r, j)).join(',')}]${r.hidden ? 'h' : ''}~${Math.round(App.rowKda(r) || 0)}`).join(' '));
     if (scen === 'stitch') {
       snap('start');
       const top = S().rows[0]; App.splitRow(top); App.commit(); snap('split');
@@ -670,15 +678,80 @@
       snap('stray:' + App.addSeg(S().rows[0], cx, cy)); App.commit(); snap('after stray');
     }
     if (scen === 'lanes') {
-      const b = S().blots[0], P = l => b.pieces.find(p => p.letter === l);
+      // lane edits of one box (the lowest visible row): resize, re-detect, even spacing, add / switch / remove
+      // a lane, move its columns, and in a stitched row the box to the right follows
+      // (fetched again for every step: undo replaces the state objects)
+      const vis = () => S().rows.filter(r => !r.hidden), R = () => vis()[vis().length - 1], Sg = () => R().segs[0];
+      const p = App.segPitch(Sg()), x1 = Sg().x1;
+      const base = sg => ({ lanes: JSON.parse(JSON.stringify(sg.lanes)), c0: sg.c0, p: sg.p });
+      const ed = (tag, fn) => { const row = R(), sg = row.segs[0]; App.editLanes(row, sg, () => fn(row, sg)); App.commit(); snap(tag); };
       snap('start');
-      App.shiftPiece(P('C'), -2); App.commit(); snap('C<<');
-      App.shiftPiece(P('C'), 2); App.commit(); snap('C>>');
-      App.cycleRole(P('D'), 0); App.commit(); snap('D0>skip');
-      App.cycleRole(P('D'), 0); App.commit(); snap('D0>ladder');
-      App.cycleRole(P('D'), 0); App.commit(); snap('D0>sample');
-      App.extendPiece(P('A'), -1); App.commit(); snap('A+left');
+      ed('shrink 2', (row, sg) => App.setBox(row, sg, sg.x0, x1 - 2 * p, base(sg)));
+      ed('grow 2', (row, sg) => App.setBox(row, sg, sg.x0, x1, base(sg)));
+      ed('left -1', (row, sg) => App.setBox(row, sg, sg.x0 + p, sg.x1, base(sg)));
+      ed('left +1', (row, sg) => App.setBox(row, sg, sg.x0 - p, sg.x1, base(sg)));
+      ed('redetect', (row, sg) => App.redetectBox(row, sg));
+      ed('even 4', (row, sg) => App.evenBox(row, sg, 4));
       App.undo(); snap('undo');
+      ed('cycle 0', (row, sg) => App.cycleLane(sg, 0));
+      ed('cycle 0 again', (row, sg) => App.cycleLane(sg, 0));
+      ed('cycle 0 back', (row, sg) => App.cycleLane(sg, 0));
+      ed('remove 1', (row, sg) => App.removeLane(row, sg, 1));
+      ed('add at 1', (row, sg) => App.addLane(row, sg, (sg.lanes[0].u + sg.lanes[1].u) / 2));
+      App.shiftCols(R(), Sg(), 1); App.commit(); snap('shift +1');
+      App.shiftCols(R(), Sg(), -1); App.commit(); snap('shift -1');
+      // the stitched row: its left box loses a lane, the right one moves up a column with it
+      const st2 = vis().find(r => r.segs.length > 1);
+      if (st2) {
+        const a = st2.segs[0], ba = { lanes: JSON.parse(JSON.stringify(a.lanes)), c0: a.c0, p: a.p };
+        App.editLanes(st2, a, () => App.setBox(st2, a, a.x0 + App.segPitch(a), a.x1, ba)); App.commit(); snap('stitched left -1');
+        App.undo(); snap('undo');
+      }
+    }
+    if (scen === 'detect') {
+      // lanes read from each row's box alone, in every exposure: the box as it is, and a sloppy box over the
+      // whole piece width (margins and neighbouring smears included)
+      S().rows.forEach(r => r.segs.forEach(sg => {
+        const pc = App.pieceOf(r, sg), out = [];
+        App.chemiOf(App.blot(r.blot)).forEach(rec => {
+          ['tight', 'loose'].forEach(kind => {
+            const t = JSON.parse(JSON.stringify(sg));
+            if (kind === 'loose') { t.x0 = -pc.w / 2; t.x1 = pc.w / 2; }
+            const n = App.redetectBox(r, t, rec.id);
+            out.push(`${kind[0]}${App.expoLabel(rec).slice(0, 2)}:${n ? t.lanes.map(l => l.r).join('') : '-'}`);
+          });
+        });
+        log.push(`${letter(sg.piece)}~${Math.round(App.rowKda(r) || 0)} had ${sg.lanes.map(l => l.r).join('')} | ${out.join(' ')}`);
+      }));
+    }
+    if (scen === 'drag') {
+      // the gestures on the membrane view as mouse / key events: resize a box by its handles, drag a lane,
+      // double-click a lane in, delete it, move the box, draw a new box
+      const row = S().rows.filter(r => !r.hidden).slice(-1)[0], sg = row.segs[0];
+      App.selRow = row.id; App.selSeg = sg.piece; App.viewBlot = row.blot; App.viewImg = row.img; App.emit('select'); G.View.fitFull();
+      const cv = $('editor'), R = cv.getBoundingClientRect();
+      const ev = (type, [x, y], opt) => (type === 'mousedown' || type === 'dblclick' ? cv : window).dispatchEvent(new MouseEvent(type, Object.assign({ clientX: R.left + x, clientY: R.top + y, bubbles: true }, opt)));
+      const pull = (a, b2, opt) => { ev('mousedown', a, opt); ev('mousemove', [(a[0] + b2[0]) / 2, (a[1] + b2[1]) / 2], opt); ev('mousemove', b2, opt); ev('mouseup', b2, opt); };
+      const geo = tag => snap(`${tag} box=${Math.round(sg.x0)}..${Math.round(sg.x1)} h=${Math.round(row.above)}+${Math.round(row.below)} vc=${Math.round(sg.vc)}`);
+      geo('start');
+      let pr = G.View.probe(row, sg); const L = App.segPitch(sg) * pr.scale;
+      pull(pr.handles.e, [pr.handles.e[0] - 2.2 * L, pr.handles.e[1]]); geo('e -2 lanes');
+      pr = G.View.probe(row, sg); pull(pr.handles.e, [pr.handles.e[0] + 2.2 * L, pr.handles.e[1]]); geo('e +2 lanes');
+      pr = G.View.probe(row, sg); pull(pr.handles.nw, [pr.handles.nw[0] + 1.2 * L, pr.handles.nw[1] - 15]); geo('nw corner');
+      pr = G.View.probe(row, sg); pull(pr.lanes[0], [pr.lanes[0][0] + 0.2 * L, pr.lanes[0][1]]); geo('lane 0 dragged');
+      pr = G.View.probe(row, sg); const mid = [(pr.lanes[0][0] + pr.lanes[1][0]) / 2, pr.lanes[0][1]];
+      ev('mousedown', mid); ev('mouseup', mid); ev('dblclick', mid); geo('dblclick add');
+      $('editorBox').dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true })); geo('Delete lane');
+      // grab the box between two lanes and pull it down
+      pr = G.View.probe(row, sg); const ctr = [(pr.lanes[1][0] + pr.lanes[2][0]) / 2, pr.lanes[1][1]];
+      pull(ctr, [ctr[0], ctr[1] + 12]); geo('moved down');
+      // a new row from a box drawn on the top piece
+      const top = S().rows.filter(r => !r.hidden)[0], ts = top.segs[top.segs.length - 1];
+      App.selRow = top.id; App.emit('select');
+      pr = G.View.probe(top, ts);
+      App.setMode('addrow');
+      pull([pr.handles.sw[0] + 0.1 * L, pr.handles.sw[1] + 25], [pr.handles.se[0] - 0.1 * L, pr.handles.se[1] + 70]);
+      geo('drawn box');
     }
     if (scen === 'marks') {
       const b2 = S().blots[S().blots.length - 1], pc = b2.pieces[0], r = S().rows.find(r => r.segs.some(s => s.piece === pc.id));
@@ -732,9 +805,9 @@
       exports: window.__exports, scen: window.__scen,
       blots: st.blots.map(b => { const A = App.analysis[b.id]; return { n: b.images.length, kinds: b.images.map(id => App.images.get(id).name.slice(0, 2) + App.images.get(id).kind[0]).join(' '), ladder: b.ladderId,
         strips: A && A.strips.map(s => `${Math.round(s.cx)},${Math.round(s.cy)} ${s.angle}° ${Math.round(s.w)}x${Math.round(s.h)}`), pitch: A && Math.round(A.pitch),
-        pieces: (b.pieces || []).map(p => `${p.letter} col0=${p.col0} p=${p.pitch.toFixed(1)} ${p.roles.map(x => x[0]).join('')}${p.marks ? ' marks=' + p.marks.map(m => m.kda).join('/') : ''}`),
+        pieces: (b.pieces || []).map(p => `${p.letter} col0=${p.col0} p=${p.pitch.toFixed(1)} ${(p.roles || []).map(x => x[0]).join('')} lad=${(p.ladderUs || []).map(Math.round).join('/')}${p.marks ? ' marks=' + p.marks.map(m => m.kda).join('/') : ''}`),
         ladderBands: A && A.ladderStrips.map(l => l && l.bands.length + '@' + Math.round(l.uStrip || 0)), rank: A && A.ladderRank.slice(0, 3).map(r => r.id + ':' + r.q.toFixed(2)), notes: A && A.notes }; }), range: st.range,
-      rowsGeo: st.rows.map(r => { const b = App.blot(r.blot); return { segs: r.segs.map(s => (App.piece(b, s.piece) || {}).letter + ':' + Math.round(s.vc)).join('+'), oy: Math.round(App.rowXY(r)[1]), h: Math.round(r.above + r.below), cols: App.figLanes().filter(j => App.colSource(r, j)).join(',') }; }),
+      rowsGeo: st.rows.map(r => { const b = App.blot(r.blot); return { segs: r.segs.map(s => `${(App.piece(b, s.piece) || {}).letter}:${Math.round(s.vc)}:${s.c0}:${s.lanes.map(l => l.r).join('')}`).join('+'), box: r.segs.map(s => `${Math.round(s.x0)}..${Math.round(s.x1)}`).join('+'), oy: Math.round(App.rowXY(r)[1]), h: Math.round(r.above + r.below), cols: App.figLanes().filter(j => App.colSource(r, j)).join(',') }; }),
       rows: st.rows.map(r => ({ b: st.blots.indexOf(App.blot(r.blot)), kda: Math.round(App.rowKda(r) || 0), expo: App.expoLabel(App.images.get(r.img)), best: App.images.get(App.bestExpo(r)) && App.expoLabel(App.images.get(App.bestExpo(r))), verdict: App.expoVerdict(App.rowExpo(r).find(e => e.id === r.img)), hidden: r.hidden, name: r.name })),
       levels: Object.fromEntries(Object.entries(st.levels).filter(([id]) => App.images.get(id)).map(([id, l]) => [App.images.get(id).name.slice(0, 2), `${l.black.toFixed(3)}-${l.white.toFixed(3)}${l.manual ? 'M' : ''}`])),
       expo: st.rows.map(r => { const e = App.rowExpo(r).find(x => x.id === r.img); return e ? `pk${e.peak.toFixed(3)} bg${e.bgMed.toFixed(3)} sig${e.bgSig.toFixed(4)} nz${(e.noise || 0).toFixed(4)} sat${(e.satFrac * 100).toFixed(1)}` : ''; }),

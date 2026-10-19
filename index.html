@@ -53,10 +53,10 @@
         <p class="lead">每行 = 一个蛋白的条带。点名称输入；点曝光按钮可换图（<span class="dot-sat"></span> = 有过曝）。</p>
         <div id="rowList"></div>
         <div class="field inline">
-          <button class="btn sm" id="btnAddRow">+ 在膜图上点选添加</button>
+          <button class="btn sm" id="btnAddRow">+ 在膜图上框选添加</button>
           <span class="inline-label">或按分子量 <input type="number" id="addKda" class="num" placeholder="kDa"> <button class="btn sm ghost" id="btnAddKda">添加</button></span>
         </div>
-        <p class="hint">没曝出来的蛋白：按分子量添加一行，放在它应在的位置，换长曝光看看。</p>
+        <p class="hint">漏掉的蛋白：在膜图上拖一个框把它框住（只按框里的条带识别泳道）；没曝出来的：按分子量添加一行，再换长曝光看看。</p>
       </section>
 
       <section class="sec">
@@ -64,9 +64,8 @@
         <div class="field inline range-row">泳道 <select id="rangeA"></select> – <select id="rangeB"></select> <button class="btn sm ghost" id="btnRangeAuto">自动</button></div>
         <p class="lead">在右侧成图上<b>点灰色泳道号</b>输入名称，回车跳下一条；或在这里一次粘贴整行：</p>
         <textarea id="laneBulk" rows="2" placeholder="Ctrl, siA#1, siA#2 …（逗号、Tab、换行均可）"></textarea>
-        <div class="sub-head">各膜条的泳道 <span class="h3-note">每条膜条单独识别</span></div>
-        <p class="hint" style="margin-top:2px">数字 = 这一道放在成图第几列，M = Marker 道，× = 不用。点一道切换；‹ › 整条膜条前后挪一列；+ 在一端加一道。中间膜图上也可以直接点泳道号。</p>
-        <div id="pieceBox"></div>
+        <div class="sub-head">选中行的泳道 <span class="h3-note">只在框内识别</span></div>
+        <div id="boxTools"></div>
         <details class="adv"><summary>逐列剪除</summary><div id="laneList" class="list"></div>
           <p class="hint">取消"显示" = 从成图剪除这一列，所有行同步剪除并留白间隔（图注需说明）。</p></details>
       </section>
@@ -148,17 +147,17 @@
   <h3>最快的出图方式</h3>
   <ol>
     <li>把这次实验<b>所有图片一次拖进来</b>：每张膜的各个曝光 + Marker 白光图（iBright 的 Chemi 与 Marker 通道）。</li>
-    <li>工具自动归膜、分出各条膜条、每条膜条单独识别泳道、找出条带行、每行挑最清楚又不过曝的曝光（★）、识别 Ladder 并标 kDa。</li>
+    <li>工具自动归膜、分出各条膜条、找出条带行（每个蛋白一个框，泳道只在框里识别）、每行挑最清楚又不过曝的曝光（★）、识别 Ladder 并标 kDa。</li>
     <li>在右侧成图上<b>点灰色的"蛋白名"</b>和<b>泳道号</b>输入名称（回车跳下一个）。</li>
     <li>右上角导出 PNG；"未裁切原图"放补充材料。</li>
   </ol>
   <h3>常见情况</h3>
   <ul>
     <li><b>某个蛋白在这张曝光里太亮 / 太暗</b>：点该行的曝光按钮换图，红点 = 有过曝。每张图只做整图线性调整，同一张图的所有行一起变。</li>
-    <li><b>某个蛋白没曝出来，没被识别</b>："按分子量添加"一行，或点"在膜图上点选添加"，再换长曝光。</li>
-    <li><b>行的上下范围不合适</b>：在中间膜图上拖框的上下边；拖框内部上下移动（按住 Shift 同时移动这一行在各条膜条上的框）。</li>
-    <li><b>泳道没对上</b>：每条膜条的泳道单独识别，膜图上每道标着它在成图里的列号。某条膜条整体错位：在"泳道"里点它的 ‹ ›；多认或漏认了一道：点那一道切换"用 / 不用 / Marker"，或点 + 加一道；泳道位置偏了：点膜条左上角的字母选中它，←→ 微调，Alt+←→ 调间距。</li>
-    <li><b>同一个蛋白在两条膜条上</b>（膜从中间竖着剪开）：在左侧选中这一行，点"＋ 拼接另一条膜条"，再在膜图上点它在另一条膜条上的位置；两条膜条按左右顺序接成连续的列。"拆开"可以撤回。</li>
+    <li><b>某个蛋白漏了，或没曝出来</b>：点"在膜图上框选添加"，在膜图上拖一个框把它框住（只按框里的条带识别泳道）；没曝出来的就"按分子量添加"一行，再换长曝光。</li>
+    <li><b>框的范围不合适</b>：在中间膜图上点框选中这一行，拖框的边或四角自由缩放，框里的泳道跟着增减；拖框内部移动整个框（按住 Shift 同时上下移动这一行在各条膜条上的框）。</li>
+    <li><b>泳道没对上</b>：泳道只在每个框里识别，框里的竖线就是泳道，上方数字是它在成图里的列（M = Marker 道，× = 不用，点数字切换）。多认了：点那根竖线后按 Delete；漏了：双击框内加一道，或把框边拖过去；位置偏了：拖动竖线，或选中框后 ←→ 平移、Alt+←→ 调间距；整个框都不对：在左侧"泳道"里点"框内重新识别"或"均分 N 道"；列号错位：点 ‹ ›。</li>
+    <li><b>同一个蛋白在两条膜条上</b>（膜从中间竖着剪开）：在左侧选中这一行，点"＋ 拼接另一条膜条"，再在膜图上点它在另一条膜条上的位置；两个框按左右顺序接成连续的列。"拆开"可以撤回。</li>
     <li><b>Marker 没识别出来或认错了</b>：点膜图上方的"标 Marker"，在白光图上点 Marker 条带，选它的分子量；拖动可微调，点数字可修改或删除。标了 2 条以上就能估算各行分子量；成图左侧只画手动标的刻度。</li>
     <li><b>只出部分泳道 / 剪掉中间一列</b>：在"泳道"里选范围，或在逐列剪除里取消"显示"（自动留白分隔）。</li>
     <li><b>条带要加边框</b>：在"版式"里勾选"条带加边框"。</li>
@@ -169,7 +168,7 @@
     <li>内参应与目标蛋白在同一张膜上，工具会检查并提示。</li>
     <li>过曝条带不可定量；导出未裁切原图作为补充材料，图注提示会自动生成。</li>
   </ul>
-  <p class="muted small">快捷键：Ctrl+Z 撤销 · 空格+拖动 平移 · 滚轮 缩放 · 选中行后 ↑↓ 移动、Delete 删除 · 选中膜条后 ←→ 微调泳道、Alt+←→ 调间距 · Esc 取消</p>
+  <p class="muted small">快捷键：Ctrl+Z 撤销 · 空格+拖动 平移 · 滚轮 缩放 · 选中行后 ↑↓ 移动、←→ 平移泳道、Alt+←→ 调间距、Delete 删除整行 · 选中竖线后 ←→ 微调、Delete 删掉这一道 · 双击框内 加一道 · Esc 取消</p>
 </div></div>
 
 <div id="busy" class="hidden"><div class="spinner"></div><div class="busy-text" id="busyText">处理中…</div></div>

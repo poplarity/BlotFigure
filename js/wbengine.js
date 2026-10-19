@@ -5,6 +5,7 @@
  *   -> strips (membrane pieces) from the marker photo -> band rows (one per protein) in each piece's frame
  *   -> lanes of each piece on their own (pieces are often not put back in place) -> ladder calibration
  *   -> rows joined across pieces side by side -> first guess of figure columns -> best exposure per row.
+ * Afterwards the editor's boxes (one per row and piece) are read on their own: detectBoxLanes, bandInBox.
  * Coordinates: a piece has a rotated frame centred on it: u along the piece (lanes), v across it (down).
  */
 (function (G) {
@@ -995,7 +996,7 @@
     const pieces = regions.map((rg, ri) => {
       const L = lat[ri];
       return { strip: rg.strip, cx: rg.cx * f, cy: rg.cy * f, angle: Math.round(rg.angle * 100) / 100, w: rg.w * f, h: rg.h * f,
-        u0: L ? L.u0 * f : 0, pitch: L ? L.pitch * f : pitch, roles: L ? L.roles.slice() : [], col0: 1 };
+        u0: L ? L.u0 * f : 0, pitch: L ? L.pitch * f : pitch, roles: L ? L.roles.slice() : [], col0: 1, ladderUs: ladderU[ri].map(u => u * f) };
     });
     assignColumns(pieces, out);
     const colOf = (pc, m) => { if (pc.roles[m] !== 'sample') return null; let c = pc.col0; for (let k = 0; k < m; k++) if (pc.roles[k] === 'sample') c++; return c; };
@@ -1254,6 +1255,155 @@
     return { uStrip: best.u, bands: best.bands, lanes };
   }
 
+  /* ---------- lanes and band inside one box ----------
+   * The box a row is cropped with is the user's statement of where its lanes are, so these read nothing but
+   * the box's own pixels. sig: signal image (bands high); F: piece frame; u0..u1 × v0..v1: the box.
+   * Lanes: lattice positions from the first to the last lane with a band; empty positions between them stay
+   * (wells are contiguous). The spacing is voted from the gaps between lane peaks, preferring the spacing that
+   * implies the fewest empty lanes. opt.pitch, the spacing the membrane's rows show, stands when the box does
+   * not clearly keep another one — unless the box's bands are wider than it, which no lane spacing can be.
+   * Returns {lanes: [u], pitch} (frame units). */
+  function detectBoxLanes(sig, F, u0, u1, v0, v1, opt) {
+    opt = opt || {};
+    // never finer than the pixels: interpolated neighbours would share their noise
+    const step = Math.max(1, (u1 - u0) / 700, (v1 - v0) / 400);
+    const win = sampleWindow(sig, F, u0, u1, v0, v1, step), { w, h, data } = win;
+    const P0 = opt.pitch > 0 ? opt.pitch / step : 0;
+    if (w < 8 || h < 3) return { lanes: [], pitch: opt.pitch || 0 };
+    // column profile: the mean of each column's strongest 15 % (the rows its band runs through), compressed so
+    // a faint lane counts next to a strong one; a background drifting across the box is taken off below
+    const k = Math.max(2, Math.round(h * 0.15)), prof = new Float32Array(w), col = new Float32Array(h);
+    for (let x = 0; x < w; x++) {
+      for (let y = 0; y < h; y++) col[y] = data[y * w + x];
+      col.sort();
+      let s = 0; for (let i = h - k; i < h; i++) s += col[i];
+      prof[x] = Math.sqrt(Math.max(0, s / k));
+    }
+    const sig0 = Math.max(1, w / 250), q0 = gaussSmooth(prof, sig0);
+    // background: an opening wider than any band (1.2 membrane lanes, at least a fifth of the box)
+    const R = Math.max(4, Math.round(Math.min(w / 2.5, Math.max(P0 * 1.2, w / 5))));
+    const bl = slide(slide(q0, R, false), R, true), q = new Float32Array(w);
+    let mx = 0; for (let x = 0; x < w; x++) { q[x] = Math.max(0, q0[x] - bl[x]); mx = Math.max(mx, q[x]); }
+    if (!(mx > 0)) return { lanes: [], pitch: opt.pitch || 0 };
+    // pixel noise of the profile, from differences of columns 2 apart (a lane spans many columns, so they
+    // hardly see the lanes), as it is left after the smoothing: a lane must stand well clear of it — in a
+    // picture where the row's band is missing, noise ripples would otherwise read as dozens of lanes
+    const dif = []; for (let x = 2; x < w; x++) dif.push(Math.abs(prof[x] - prof[x - 2]));
+    dif.sort((a, b) => a - b);
+    const noise = 1.4826 * dif[dif.length >> 1] / Math.SQRT2 / Math.sqrt(2 * Math.sqrt(Math.PI) * sig0);
+    // two peaks of one lane (a band with a dip, the two edges of a smeared or clipped band) are one lane, at
+    // their weighted middle: closer than 0.6 of the membrane's spacing, or — spacing unknown — with only a
+    // shallow dip between them
+    const peaks = [];
+    findPeaks(q, Math.max(3, w / 60, P0 ? P0 * 0.25 : 0), Math.max(mx * 0.07, noise * 6)).forEach(p => {
+      const pv = peaks[peaks.length - 1];
+      if (pv) {
+        let lo = Infinity; for (let x = Math.round(pv.i); x <= p.i; x++) lo = Math.min(lo, q[x]);
+        if (P0 ? p.i - pv.i < 0.6 * P0 : lo > 0.6 * Math.min(pv.v, p.v)) {
+          const wsum = pv.prom + p.prom;
+          pv.i = (pv.i * pv.prom + p.i * p.prom) / wsum; pv.v = Math.max(pv.v, p.v); pv.prom = Math.max(pv.prom, p.prom);
+          return;
+        }
+      }
+      peaks.push({ i: p.i, v: p.v, prom: p.prom });
+    });
+    const U = x => win.u0 + (x + 0.5) * step;
+    if (peaks.length < 2) return { lanes: peaks.map(p => U(p.i)), pitch: opt.pitch || (u1 - u0) };
+    let xs = peaks.map(p => p.i);
+    const gaps = [];
+    for (let i = 1; i < xs.length; i++) gaps.push(xs[i] - xs[i - 1]);
+    const score = p => gaps.reduce((s, g) => {
+      const kk = Math.max(1, Math.round(g / p)), err = Math.abs(g - kk * p) / p;
+      return s + Math.exp(-((err / 0.22) ** 2)) - 0.5 * (kk - 1) - (g < 0.6 * p ? 1 : 0);
+    }, 0);
+    // band width (at half its prominence): neighbouring lanes are at least that far apart
+    const halfW = p => { const lim = p.v - p.prom / 2, c = Math.round(p.i); let a = c, b = c; while (a > 0 && q[a - 1] > lim) a--; while (b < w - 1 && q[b + 1] > lim) b++; return b - a + 1; };
+    const ws = peaks.map(halfW).sort((a, b) => a - b), wBand = ws[ws.length >> 1];
+    // nor narrower than half the spacing the membrane's other rows show
+    const cands = new Set(), pMin = Math.max(4, w / 80, P0 ? P0 * 0.45 : 0, wBand * 0.85);
+    gaps.forEach(g => [1, 2, 3].forEach(d => { const p = g / d; if (p >= pMin && p <= w / 1.2) cands.add(Math.round(p * 2) / 2); }));
+    let pitch = 0, bs = -Infinity;
+    for (const p of cands) {
+      const s = score(p);
+      if (s > bs + 1e-9 || (Math.abs(s - bs) < 1e-9 && p > pitch)) { bs = s; pitch = p; }
+    }
+    // the membrane's spacing (read from all its rows) stands unless this box's lanes keep another one
+    // throughout: gaps that are whole multiples of it are empty lanes, and a few peaks of a faint band, or of
+    // noise, do not overrule it. Bands wider than it say it is not this membrane's spacing after all.
+    const p0ok = P0 >= 4 && P0 >= wBand * 0.85;
+    if (p0ok) {
+      const ratio = pitch / P0, kr = Math.round(ratio);
+      const multiple = kr >= 1 && Math.abs(ratio - kr) < 0.12 * kr;
+      const steady = pitch > 0 && gaps.length >= 3 && gaps.every(g => { const kk = Math.max(1, Math.round(g / pitch)); return Math.abs(g - kk * pitch) / pitch < 0.15; });
+      if (multiple || !steady) pitch = P0;
+    }
+    if (!(pitch > 0)) pitch = Math.max(4, wBand * 1.4);
+    // peaks closer than 0.6 lanes are one lane (a doublet, a band with a dip, a smile): their weighted middle
+    const kept = [];
+    peaks.forEach(p => {
+      const pv = kept[kept.length - 1];
+      if (pv && p.i - pv.x < 0.6 * pitch) { const wsum = pv.w + p.prom; pv.x = (pv.x * pv.w + p.i * p.prom) / wsum; pv.w = wsum; }
+      else kept.push({ x: p.i, w: p.prom });
+    });
+    xs = kept.map(c => c.x);
+    // least-squares lattice x = o + P*k over the lanes with a band
+    const idx = xs.map(x => Math.round((x - xs[0]) / pitch));
+    let P = pitch, O = xs[0];
+    const n = xs.length, sk = idx.reduce((a, b) => a + b, 0), sx = xs.reduce((a, b) => a + b, 0);
+    const skk = idx.reduce((a, b) => a + b * b, 0), skx = idx.reduce((a, b, i) => a + b * xs[i], 0), den = n * skk - sk * sk;
+    if (new Set(idx).size >= 3 && den > 0) { const b = (n * skx - sk * sx) / den; if (Math.abs(b / pitch - 1) < 0.08) P = b; }
+    O = (sx - P * sk) / n;
+    const lanes = [];
+    for (let kk = 0; kk <= idx[idx.length - 1]; kk++) {
+      const c = O + P * kk;
+      // centroid of the lane's own signal when it has one (lanes drift a little); the lattice when empty
+      const a = clamp(Math.round(c - P * 0.3), 0, w - 1), b = clamp(Math.round(c + P * 0.3), 0, w - 1);
+      let lo = Infinity, sw = 0, sxw = 0;
+      for (let x = a; x <= b; x++) lo = Math.min(lo, q[x]);
+      for (let x = a; x <= b; x++) { const v = q[x] - lo; sw += v; sxw += v * x; }
+      let cx = sw > 0 && sw / (b - a + 1) > mx * 0.08 ? sxw / sw : c;
+      if (Math.abs(cx - c) > P * 0.2) cx = c;
+      lanes.push(U(cx));
+    }
+    // a sliver of the neighbouring lane cut by the box edge is not a lane of this box
+    const Pu = P * step;
+    while (lanes.length > 1 && lanes[0] - u0 < Pu * 0.2) lanes.shift();
+    while (lanes.length > 1 && u1 - lanes[lanes.length - 1] < Pu * 0.2) lanes.pop();
+    return { lanes, pitch: Pu };
+  }
+
+  /* The band of a row inside its box: down the lanes' cores, a peak above the box's background and its extent
+   * at 35 % of the peak height. us: lane centres; hw: half width of a lane core. With `near` (a position the
+   * band was at), the band closest to it among those at least half as strong as the strongest; else the
+   * strongest. Returns {v, v0, v1, rel} (frame units) or null. */
+  function bandInBox(sig, F, us, hw, v0, v1, near) {
+    if (!us.length || !(v1 - v0 > 4)) return null;
+    const step = Math.max(0.5, (v1 - v0) / 300), n = Math.max(3, Math.round((v1 - v0) / step)), prof = new Float32Array(n);
+    const du = Math.max(1, hw / 6);
+    for (let j = 0; j < n; j++) {
+      const v = v0 + (j + 0.5) * step;
+      let s = 0, c = 0;
+      us.forEach(u => { for (let d = -hw; d <= hw + 1e-6; d += du) { const [x, y] = toImg(F, u + d, v), val = bilinear(sig, x, y); if (!isNaN(val)) { s += val; c++; } } });
+      prof[j] = c ? s / c : 0;
+    }
+    const sm = gaussSmooth(prof, 1), srt = Array.from(sm).sort((a, b) => a - b), bg = srt[Math.floor(n * 0.3)];
+    let pk = 0; for (let j = 1; j < n; j++) if (sm[j] > sm[pk]) pk = j;
+    if (!(sm[pk] - bg > 0)) return null;
+    if (near != null) {
+      const jn = (near - v0) / step - 0.5;
+      findPeaks(sm, 3, 0).filter(p => p.v - bg >= (sm[pk] - bg) * 0.5)
+        .forEach(p => { if (Math.abs(p.i - jn) < Math.abs(pk - jn)) pk = p.i; });
+    }
+    const top = sm[pk] - bg;
+    const lim = bg + top * 0.35;
+    let a = pk, b = pk;
+    while (a > 0 && sm[a - 1] > lim) a--;
+    while (b < n - 1 && sm[b + 1] > lim) b++;
+    let sw = 0, sv = 0; for (let j = a; j <= b; j++) { const wt = sm[j] - lim; sw += wt; sv += wt * j; }
+    const c = sw > 0 ? sv / sw : pk;
+    return { v: v0 + (c + 0.5) * step, v0: v0 + a * step, v1: v0 + (b + 1) * step, rel: top };
+  }
+
   /* exposure quality of a row in one picture (full resolution). parts: one per piece the row lies on,
    * {F: piece frame, u0, u1: lanes, vTop, vBot: crop, b0, b1: band} */
   function evalExposure(img, cs, parts, factor) {
@@ -1354,7 +1504,7 @@
     down, tophat, blur2d, median3, components, otsu, mad, bilinear, frame, toImg, toFrame, sampleWindow,
     exposureFromName, classify, chemiSignal, groupSessions, stem, findStrips, stripFrame, inStrip,
     pitchFromGaps, latticeOrigin, pieceLattice, assignColumns, calibrateLadder, calibrate, fitSeries, piecesInPlace, kdaAt, vAt, kdaAtK, vAtK,
-    analyzeSession, detectRows, regionsFromSignal, findLadderInStrip, findLadders,
+    analyzeSession, detectRows, regionsFromSignal, findLadderInStrip, findLadders, detectBoxLanes, bandInBox,
     evalExposure, chooseExposure, exposureScore, isCleanExposure, autoLevels, densitometry
   };
 })(window);

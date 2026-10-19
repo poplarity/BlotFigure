@@ -2,10 +2,12 @@
  * images (not undoable): decoded pictures with kind (chemi | marker), exposure and signal.
  * S (undoable): membranes ("blots") with their pieces, figure rows (one per protein), figure lanes
  * (columns), levels, annotations.
- * Pieces are often not put back where they were on the membrane, so each piece has its own lanes:
- * slot m at u = u0 + m*pitch in the piece frame, role sample | ladder | skip; the sample slots fill figure
- * columns col0, col0+1, … in order. A row has a segment on each piece it runs across (band centre vc in
- * that piece's frame, band b0..b1 around it); every segment is cropped vc-above … vc+below.
+ * A row has a segment on each piece it runs across. Every segment is a box on its piece, in the piece frame
+ * (u along the lanes, v down): x0..x1 across, vc-above … vc+below down (band b0..b1 around vc), and it has
+ * lanes of its own — sg.lanes [{u, r}] with r 's' sample | 'm' marker | 'x' left out. The sample lanes fill
+ * figure columns sg.c0, sg.c0+1, … in order. Lanes come from the analysis (the piece's lattice), from the
+ * box's own pixels (WB.detectBoxLanes) or from the user; resizing a box keeps the lanes inside it and
+ * continues their spacing into new room.
  * pc.marks (marker bands set by hand, {u, v, kda}) replace the automatic ladder calibration of a piece.
  */
 (function (G) {
@@ -15,8 +17,9 @@
   let uidN = 1;
   const uid = p => p + (uidN++).toString(36) + Math.random().toString(36).slice(2, 5);
   const tick = () => new Promise(r => setTimeout(r, 16));
+  const pFrame = pc => WB.frame(pc.cx, pc.cy, pc.angle);
 
-  const App = { images: new Map(), analysis: {}, S: null, hist: [], future: [], listeners: [], selRow: null, selPiece: null, viewBlot: null, viewImg: null, mode: null };
+  const App = { images: new Map(), analysis: {}, S: null, hist: [], future: [], listeners: [], selRow: null, selSeg: null, selLane: null, viewBlot: null, viewImg: null, mode: null };
   try { App.prefLadder = localStorage.getItem('blotfig.ladder') || null; } catch (e) { App.prefLadder = null; }
 
   const defaultStyle = () => ({ mmPerLane: 5, fontPt: 7, lineWidthPt: 0.5, labelAngle: 'auto', rowGapPt: 2, blotGapPt: 5,
@@ -36,8 +39,8 @@
     if (App.hist[App.hist.length - 1] !== snap) { App.hist.push(snap); if (App.hist.length > 120) App.hist.shift(); App.future = []; }
     App.emit('change');
   };
-  App.undo = () => { if (App.hist.length < 2) return; App.future.push(App.hist.pop()); App.S = JSON.parse(App.hist[App.hist.length - 1]); App.emit('change'); };
-  App.redo = () => { if (!App.future.length) return; const s = App.future.pop(); App.hist.push(s); App.S = JSON.parse(s); App.emit('change'); };
+  App.undo = () => { if (App.hist.length < 2) return; App.future.push(App.hist.pop()); App.S = JSON.parse(App.hist[App.hist.length - 1]); App.selLane = null; App.emit('change'); };
+  App.redo = () => { if (!App.future.length) return; const s = App.future.pop(); App.hist.push(s); App.S = JSON.parse(s); App.selLane = null; App.emit('change'); };
 
   function busy(on, text) {
     const b = document.getElementById('busy'); if (!b) return;
@@ -50,7 +53,10 @@
   App.blot = id => App.S.blots.find(b => b.id === id);
   App.row = id => App.S.rows.find(r => r.id === id);
   App.piece = (b, id) => (b && b.pieces ? b.pieces.find(p => p.id === id) : null);
+  App.pieceOf = (row, sg) => App.piece(App.blot(row.blot), sg.piece);
   App.findPiece = id => { for (const b of App.S.blots) { const p = App.piece(b, id); if (p) return { b, pc: p }; } return null; };
+  // the selected row's segment the lane tools work on (the one clicked last, else the first)
+  App.curSeg = row => (row ? row.segs.find(s => s.piece === App.selSeg) || row.segs[0] : null);
   // shortest first: by exposure time when known, else by the estimated relative exposure
   App.chemiOf = blot => blot.images.map(id => App.images.get(id)).filter(r => r && r.kind === 'chemi')
     .sort((a, b) => (a.exposure != null && b.exposure != null ? a.exposure - b.exposure : (a.factor || 0) - (b.factor || 0)));
@@ -77,6 +83,7 @@
   };
   App.blotName = b => b.name || `膜 ${App.S.blots.indexOf(b) + 1}`;
   App.pieceName = (b, pc) => (App.S.blots.length > 1 ? App.blotName(b) + ' · ' : '') + '膜条 ' + (pc.letter || '?');
+  App.rowLabel = row => { const k = App.rowKda(row); return row.name || (k ? `≈${Math.round(k)} kDa 行` : '未命名行'); };
 
   /* ---------- loading ---------- */
   function resample(img, W, H) {
@@ -173,14 +180,12 @@
     App.analysis[blot.id] = A;
     if (blot.ladderAuto || !blot.ladderId) blot.ladderId = A.ladderId;
     A._calLadder = A.ladderId;
-    // pieces, in analysis order; a piece found again at the same place keeps the user's marks and lane edits
+    // pieces, in analysis order; a piece found again at the same place keeps the marker bands set by hand
     const old = blot.pieces || [];
-    const fresh = A.pieces.map(p => Object.assign({ id: uid('p'), marks: null, edited: false }, JSON.parse(JSON.stringify(p))));
+    const fresh = A.pieces.map(p => Object.assign({ id: uid('p'), marks: null }, JSON.parse(JSON.stringify(p))));
     fresh.forEach(n => {
       const o = old.find(o => Math.hypot(o.cx - n.cx, o.cy - n.cy) < 40 && Math.abs(o.w - n.w) < 60);
-      if (!o) return;
-      n.id = o.id; n.marks = o.marks;
-      if (o.edited) Object.assign(n, { u0: o.u0, pitch: o.pitch, roles: o.roles.slice(), col0: o.col0, edited: true });
+      if (o) { n.id = o.id; n.marks = o.marks; }
     });
     // letters in reading order: top to bottom, left to right within a band
     const top = p => p.cy - p.h / 2;
@@ -191,17 +196,45 @@
     ch.forEach((r, k) => { r.factor = A.factors[k]; });
     return A;
   };
+  /* the lanes of a piece's lattice (analysis) that fall in figure columns a..z, with the marker / empty slots
+   * between them: the lanes a new box on the piece starts with */
+  App.pieceSlots = pc => { let c = pc.col0; return (pc.roles || []).map((role, m) => ({ m, role, u: pc.u0 + m * pc.pitch, col: role === 'sample' ? c++ : null })); };
+  function latticeLanes(pc, a, z) {
+    const sl = App.pieceSlots(pc), isS = s => s.role === 'sample';
+    let inR = s => isS(s) && s.col >= a && s.col <= z;
+    if (!sl.some(inR)) inR = isS;
+    const i0 = sl.findIndex(inR), i1 = sl.length - 1 - sl.slice().reverse().findIndex(inR);
+    if (i0 < 0) return { lanes: [], c0: 1, p: pc.pitch || 100 };
+    return { lanes: sl.slice(i0, i1 + 1).map(s => ({ u: s.u, r: isS(s) ? 's' : s.role === 'ladder' ? 'm' : 'x' })), c0: sl[i0].col, p: pc.pitch || 100 };
+  }
   App.rowsFromAnalysis = function (blot) {
     const A = App.analysis[blot.id];
     if (!A) return [];
+    const pcs = blot.pieces;
+    // the figure columns most rows have bands in: a stray lattice slot at a piece's end stays out of the boxes
+    const weak = r => { const best = r.expo[r.choice]; return !best || best.snr < 6; };
+    const vis = A.rows.filter(r => !weak(r)), cnt = new Map();
+    vis.forEach(r => {
+      const seen = new Set();
+      r.segs.forEach(sg => { const sl = App.pieceSlots(pcs[sg.region]); sg.ms.forEach(m => { if (sl[m] && sl[m].col) seen.add(sl[m].col); }); });
+      seen.forEach(c => cnt.set(c, (cnt.get(c) || 0) + 1));
+    });
+    let hi = 1; pcs.forEach(pc => App.pieceSlots(pc).forEach(s => { if (s.col) hi = Math.max(hi, s.col); }));
+    let a = 1, z = hi;
+    const need = Math.max(1, vis.length * 0.4);
+    if (vis.length >= 3) { while (a < z && (cnt.get(a) || 0) < need) a++; while (z > a && (cnt.get(z) || 0) < need) z--; }
     return A.rows.map(r => {
-      // very weak rows are offered but start hidden
-      const best = r.expo[r.choice], weak = !best || best.snr < 6;
-      return {
-        id: uid('r'), blot: blot.id, name: '', img: A.chemiIds[r.choice], auto: true, hidden: weak, weak,
-        segs: r.segs.map(sg => ({ piece: blot.pieces[sg.region].id, vc: sg.vc, b0: sg.b0, b1: sg.b1, ms: sg.ms.slice() })),
-        above: r.above, below: r.below
-      };
+      const isWeak = weak(r);
+      const row = { id: uid('r'), blot: blot.id, name: '', img: A.chemiIds[r.choice], auto: true, hidden: isWeak, weak: isWeak, segs: [], above: r.above, below: r.below };
+      r.segs.forEach(s => {
+        const pc = pcs[s.region], L = latticeLanes(pc, a, z);
+        const sg = { piece: pc.id, vc: s.vc, b0: s.b0, b1: s.b1, lanes: L.lanes, c0: L.c0, p: L.p, x0: -pc.w / 2, x1: pc.w / 2 };
+        // a piece without lanes of its own in the analysis: read them from the row's box
+        if (!sg.lanes.length) App.redetectBox(row, sg);
+        App.snapBox(sg);
+        row.segs.push(sg);
+      });
+      return row;
     });
   };
   // re-run after the user changed which pictures belong to a membrane / their kind; keep names where rows match
@@ -265,56 +298,215 @@
     return null;
   };
 
-  /* ---------- lanes: per piece, into figure columns ---------- */
-  App.nSample = pc => pc.roles.filter(r => r === 'sample').length;
-  App.slots = pc => { let c = pc.col0; return pc.roles.map((role, m) => ({ m, role, u: pc.u0 + m * pc.pitch, col: role === 'sample' ? c++ : null })); };
-  // where figure column j of a row comes from: {sg, pc, m, u} or null (no lane of the row's pieces there)
+  /* ---------- lanes: every box has its own ---------- */
+  const spacing = (lanes, p) => {
+    if (!lanes || lanes.length < 2) return p > 4 ? p : 100;
+    const g = []; for (let i = 1; i < lanes.length; i++) g.push(lanes[i].u - lanes[i - 1].u);
+    g.sort((a, b) => a - b);
+    return Math.max(4, g[g.length >> 1]);
+  };
+  App.segPitch = sg => spacing(sg.lanes, sg.p);
+  // edges of lane i: half-way to its neighbours, half a spacing out at the ends
+  App.laneLeft = (sg, i) => { const L = sg.lanes; return i > 0 ? (L[i - 1].u + L[i].u) / 2 : L[i].u - App.segPitch(sg) / 2; };
+  App.laneRight = (sg, i) => { const L = sg.lanes; return i < L.length - 1 ? (L[i].u + L[i + 1].u) / 2 : L[i].u + App.segPitch(sg) / 2; };
+  App.segCols = sg => { let c = sg.c0; return sg.lanes.map((l, i) => ({ i, u: l.u, r: l.r, col: l.r === 's' ? c++ : null })); };
+  App.nSample = sg => sg.lanes.filter(l => l.r === 's').length;
+  App.segEnd = sg => sg.c0 + App.nSample(sg) - 1;
+  // the box spans its lanes exactly: what it shows is what the figure shows
+  App.snapBox = sg => { if (sg.lanes.length) { sg.x0 = App.laneLeft(sg, 0); sg.x1 = App.laneRight(sg, sg.lanes.length - 1); } };
+  // a lane on a ladder lane of the white-light picture is a marker lane (within a third of a real lane width,
+  // whatever spacing the box's lanes have)
+  App.roleAt = (pc, u, p) => (pc && (pc.ladderUs || []).some(x => Math.abs(x - u) < Math.min(p, pc.pitch || p) * 0.3) ? 'm' : 's');
+  App.segX = (row, sg) => { const pc = App.pieceOf(row, sg); return pc ? WB.toImg(pFrame(pc), (sg.x0 + sg.x1) / 2, sg.vc)[0] : 0; };
+  // segments of a row continue each other's columns: when one gains or loses lanes, the ones that followed it
+  // keep following it (before: [{c0, n}] of the row's segments before the edit)
+  const segsState = row => row.segs.map(s => ({ c0: s.c0, n: App.nSample(s) }));
+  function keepJoined(row, sg, before) {
+    const i = row.segs.indexOf(sg);
+    let end = App.segEnd(sg);
+    for (let k = i + 1; k < row.segs.length; k++) {
+      const t = row.segs[k], was = before[k], prev = before[k - 1];
+      if (!was || !prev || was.c0 !== prev.c0 + prev.n) break;
+      t.c0 = end + 1; end = App.segEnd(t);
+    }
+  }
+  App.segsState = segsState;
+  App.keepJoined = keepJoined;
+  // run a lane edit of one segment; the row's later segments keep following it, the box hugs the lanes
+  App.editLanes = function (row, sg, fn, keepBox) {
+    const before = segsState(row);
+    const out = fn();
+    if (!keepBox) App.snapBox(sg);
+    keepJoined(row, sg, before);
+    return out;
+  };
+
+  /* The box of a segment set to x0..x1 (piece frame), from its lanes before the edit (base {lanes, c0, p}):
+   * lanes whose centres lie inside stay where they are, the spacing continues into new room, and the lanes
+   * that stay keep their figure columns. The edges are taken as given (snapBox squares them at the end). */
+  App.setBox = function (row, sg, x0, x1, base) {
+    base = base || { lanes: sg.lanes.map(l => ({ u: l.u, r: l.r })), c0: sg.c0, p: sg.p };
+    const pc = App.pieceOf(row, sg), p = spacing(base.lanes, base.p);
+    const inside = l => l.u >= x0 - 1e-6 && l.u <= x1 + 1e-6;
+    const L = base.lanes.filter(inside).map(l => ({ u: l.u, r: l.r }));
+    if (!L.length) {
+      // moved clear of its lanes: their lattice carried on into the box
+      const o = base.lanes.length ? base.lanes[0].u : (x0 + x1) / 2;
+      for (let u = o + Math.ceil((x0 - o) / p - 1e-9) * p; u <= x1 + 1e-6 && L.length < 80; u += p) L.push({ u, r: App.roleAt(pc, u, p) });
+      if (!L.length) L.push({ u: (x0 + x1) / 2, r: App.roleAt(pc, (x0 + x1) / 2, p) });
+    } else {
+      for (let u = L[0].u - p; u >= x0 - 1e-6 && L.length < 80; u -= p) L.unshift({ u, r: App.roleAt(pc, u, p) });
+      for (let u = L[L.length - 1].u + p; u <= x1 + 1e-6 && L.length < 80; u += p) L.push({ u, r: App.roleAt(pc, u, p) });
+    }
+    let c0 = base.c0;
+    const stay = base.lanes.find(l => l.r === 's' && inside(l));
+    if (stay) {
+      const col = base.c0 + base.lanes.filter(l => l.r === 's' && l.u < stay.u - 1e-6).length;
+      c0 = Math.max(1, col - L.filter(l => l.r === 's' && l.u < stay.u - 1e-6).length);
+    }
+    sg.lanes = L; sg.c0 = c0; sg.p = p; sg.x0 = x0; sg.x1 = x1;
+  };
+  // the chemi signal of an image as a WB image
+  const sigOf = rec => ({ w: rec.img.w, h: rec.img.h, data: rec.cs.sig });
+  /* Lanes again from the box's own pixels: in the row's recommended exposure (clear and not clipped), else
+   * the one it shows, else the longest. The first sample lane keeps the column of the old lane at its place.
+   * Returns the number of sample lanes found. */
+  App.redetectBox = function (row, sg, imgId) {
+    const b = App.blot(row.blot), pc = App.piece(b, sg.piece);
+    if (!pc) return 0;
+    const ch = App.chemiOf(b), best = imgId ? null : sg.lanes.length && App.S.rows.includes(row) ? App.bestExpo(row) : null;
+    const recs = [imgId, best, row.img].map(id => id && App.images.get(id)).concat(ch.slice().reverse()).filter(r => r && r.kind === 'chemi');
+    const x0 = sg.x0 != null ? sg.x0 : -pc.w / 2, x1 = sg.x1 != null ? sg.x1 : pc.w / 2;
+    let res = null;
+    for (const rec of recs) {
+      res = WB.detectBoxLanes(sigOf(rec), pFrame(pc), x0, x1, sg.vc - row.above, sg.vc + row.below, { pitch: pc.pitch || App.segPitch(sg) });
+      if (res.lanes.length) break;
+    }
+    if (!res || !res.lanes.length) return 0;
+    const oldCols = App.segCols(sg).filter(c => c.col != null), p = res.pitch > 4 ? res.pitch : App.segPitch(sg);
+    sg.lanes = res.lanes.map(u => ({ u, r: App.roleAt(pc, u, p) }));
+    sg.p = p;
+    const first = sg.lanes.find(l => l.r === 's');
+    const near = first && oldCols.slice().sort((a, c) => Math.abs(a.u - first.u) - Math.abs(c.u - first.u))[0];
+    if (near && Math.abs(near.u - first.u) < p * 0.5) sg.c0 = near.col;
+    return App.nSample(sg);
+  };
+  // n lanes spread evenly across the box (default: as many as it has now)
+  App.evenBox = function (row, sg, n) {
+    const pc = App.pieceOf(row, sg);
+    n = Math.max(1, Math.min(60, Math.round(n || sg.lanes.length || 1)));
+    const p = (sg.x1 - sg.x0) / n;
+    sg.lanes = Array.from({ length: n }, (_, k) => { const u = sg.x0 + (k + 0.5) * p; return { u, r: App.roleAt(pc, u, p) }; });
+    sg.p = p;
+    return n;
+  };
+  // a lane added at u; when it comes before the first sample lane the lanes already there keep their columns
+  App.addLane = function (row, sg, u) {
+    const pc = App.pieceOf(row, sg), p = App.segPitch(sg), r = App.roleAt(pc, u, p);
+    const at = sg.lanes.filter(l => l.u < u).length, firstS = r === 's' && !sg.lanes.slice(0, at).some(l => l.r === 's');
+    sg.lanes.splice(at, 0, { u, r });
+    if (firstS && App.nSample(sg) > 1 && sg.c0 > 1) sg.c0--;
+    return at;
+  };
+  // a lane taken out (detected where there is none): the lanes after it move up a column
+  App.removeLane = (row, sg, i) => { if (sg.lanes.length > 1 && sg.lanes[i]) sg.lanes.splice(i, 1); };
+  App.moveLane = function (sg, i, u) {
+    const L = sg.lanes, lo = i > 0 ? L[i - 1].u + 3 : -Infinity, hi = i < L.length - 1 ? L[i + 1].u - 3 : Infinity;
+    L[i].u = Math.max(lo, Math.min(hi, u));
+  };
+  // sample -> left out -> marker -> sample
+  App.cycleLane = (sg, i) => { const l = sg.lanes[i]; if (l) l.r = { s: 'x', x: 'm', m: 's' }[l.r] || 's'; };
+  App.nudgeLanes = (sg, du) => sg.lanes.forEach(l => { l.u += du; });
+  App.scaleLanes = function (sg, dp) {
+    const L = sg.lanes; if (L.length < 2) { sg.p = Math.max(6, App.segPitch(sg) + dp); return; }
+    const mid = (L[0].u + L[L.length - 1].u) / 2, p = App.segPitch(sg), k = Math.max(6, p + dp) / p;
+    L.forEach(l => { l.u = mid + (l.u - mid) * k; });
+    sg.p = p * k;
+  };
+  // figure columns of a segment (and the segments after it in the row) moved by d
+  App.shiftCols = function (row, sg, d) {
+    const i = row.segs.indexOf(sg);
+    if (i < 0 || sg.c0 + d < 1) return false;
+    row.segs.slice(i).forEach(t => { t.c0 = Math.max(1, t.c0 + d); });
+    return true;
+  };
+  /* figure columns of a segment from where its lanes lie: as another row's lanes at the same place on the
+   * same piece, else as the piece's lattice from the analysis; unchanged when nothing lines up */
+  App.alignSeg = function (row, sg) {
+    const pc = App.pieceOf(row, sg); if (!pc) return;
+    const p = App.segPitch(sg), mine = App.segCols(sg).filter(s => s.col != null);
+    if (!mine.length) return;
+    let refs = [];
+    App.S.rows.forEach(r => { if (r !== row) r.segs.forEach(t => { if (t.piece === sg.piece) App.segCols(t).forEach(s => { if (s.col != null) refs.push(s); }); }); });
+    if (!refs.length) refs = App.pieceSlots(pc).filter(s => s.col != null);
+    const offs = [];
+    mine.forEach((s, k) => {
+      const m = refs.filter(q => Math.abs(q.u - s.u) < p * 0.35).sort((a, c) => Math.abs(a.u - s.u) - Math.abs(c.u - s.u))[0];
+      if (m) offs.push(m.col - k);
+    });
+    if (offs.length && offs.length >= mine.length * 0.5) { offs.sort((a, c) => a - c); sg.c0 = Math.max(1, offs[offs.length >> 1]); }
+  };
+  // the band inside a box (the row's picture), down its sample lanes: the one it had when that is still
+  // there, else the strongest
+  App.findBand = function (row, sg) {
+    const pc = App.pieceOf(row, sg), rec = App.images.get(row.img);
+    if (!pc || !rec || rec.kind !== 'chemi') return;
+    const us = sg.lanes.filter(l => l.r === 's').map(l => l.u), vT = sg.vc - row.above, vB = sg.vc + row.below;
+    const was = sg.vc + (sg.b0 + sg.b1) / 2;
+    const bd = WB.bandInBox(sigOf(rec), pFrame(pc), us, App.segPitch(sg) * 0.3, vT, vB, was > vT && was < vB ? was : null);
+    if (bd) { sg.b0 = bd.v0 - sg.vc; sg.b1 = bd.v1 - sg.vc; }
+  };
+  // lanes for a new box on a piece: those of the nearest other row on it (the user may have fixed them),
+  // else the piece's lattice over the figure's columns
+  App.pieceLanes = function (b, pc, v) {
+    let best = null;
+    App.S.rows.forEach(r => r.segs.forEach(sg => { if (sg.piece === pc.id && sg.lanes.length && (!best || Math.abs(sg.vc - v) < Math.abs(best.vc - v))) best = sg; }));
+    if (best) return { lanes: best.lanes.map(l => ({ u: l.u, r: l.r })), c0: best.c0, p: App.segPitch(best) };
+    return latticeLanes(pc, App.S.range[0], App.S.range[1]);
+  };
+
+  /* ---------- figure columns ---------- */
+  // where figure column j of a row comes from: {sg, pc, i: lane index, u} or null (no lane of the row there)
   App.colSource = function (row, j) {
     const b = App.blot(row.blot);
     for (const sg of row.segs) {
-      const pc = App.piece(b, sg.piece); if (!pc) continue;
-      const s = App.slots(pc).find(x => x.col === j);
-      if (s) return { sg, pc, m: s.m, u: s.u };
+      const s = App.segCols(sg).find(x => x.col === j);
+      if (s) return { sg, pc: App.piece(b, sg.piece), i: s.i, u: s.u };
     }
     return null;
   };
-  // columns of a row that two of its pieces both claim (the pieces need shifting apart)
+  // columns of a row that two of its boxes both claim (one of them needs shifting)
   App.rowClash = function (row) {
-    const b = App.blot(row.blot), seen = new Map(), clash = [];
-    row.segs.forEach(sg => { const pc = App.piece(b, sg.piece); if (pc) App.slots(pc).forEach(s => { if (s.col == null) return; if (seen.has(s.col) && seen.get(s.col) !== pc) clash.push(s.col); seen.set(s.col, pc); }); });
+    const seen = new Map(), clash = [];
+    row.segs.forEach(sg => App.segCols(sg).forEach(s => { if (s.col == null) return; if (seen.has(s.col) && seen.get(s.col) !== sg) clash.push(s.col); seen.set(s.col, sg); }));
     return clash;
   };
   App.fitLanes = function (resetRange) {
     const S = App.S;
-    let hi = 0;
-    S.blots.forEach(b => (b.pieces || []).forEach(pc => { const n = App.nSample(pc); if (n) hi = Math.max(hi, pc.col0 + n - 1); }));
-    hi = Math.max(hi, 1);
+    let hi = 1, hiVis = 0, lo = Infinity;
+    S.rows.forEach(r => r.segs.forEach(sg => {
+      if (!App.nSample(sg)) return;
+      hi = Math.max(hi, App.segEnd(sg));
+      if (!r.hidden) { hiVis = Math.max(hiVis, App.segEnd(sg)); lo = Math.min(lo, sg.c0); }
+    }));
+    if (!hiVis) hiVis = hi;
+    if (!(lo <= hiVis)) lo = 1;
     while (S.lanes.length < hi) S.lanes.push({ name: '', hidden: false });
     S.conditions.forEach(c => { while (c.values.length < S.lanes.length) c.values.push(''); });
-    // default range: drop edge columns where few rows show a band (stray detections at a piece's end)
-    const vis = S.rows.filter(r => !r.hidden), cnt = new Map();
-    vis.forEach(r => {
-      const b = App.blot(r.blot), seen = new Set();
-      r.segs.forEach(sg => { const pc = App.piece(b, sg.piece); if (!pc) return; const sl = App.slots(pc); (sg.ms || []).forEach(m => { if (sl[m] && sl[m].col) seen.add(sl[m].col); }); });
-      seen.forEach(c => cnt.set(c, (cnt.get(c) || 0) + 1));
-    });
-    let a = 1, z = hi;
-    const need = Math.max(1, vis.length * 0.4);
-    if (vis.length >= 3) { while (a < z && (cnt.get(a) || 0) < need) a++; while (z > a && (cnt.get(z) || 0) < need) z--; }
-    if (resetRange || !S.range || S.range[0] > hi) S.range = [a, z];
-    else if (S.hiCol && S.range[1] === S.hiCol && hi !== S.hiCol) S.range[1] = hi;   // the range ran to the last column: keep it so
-    S.hiCol = hi;
+    if (resetRange || !S.range || S.range[0] > hiVis) S.range = [lo, hiVis];
+    else if (S.hiCol && S.range[1] === S.hiCol && hiVis !== S.hiCol) S.range[1] = hiVis;   // the range ran to the last column: keep it so
+    S.hiCol = hiVis;
   };
   App.figLanes = () => { const out = []; for (let j = App.S.range[0]; j <= App.S.range[1]; j++) if (App.S.lanes[j - 1] && !App.S.lanes[j - 1].hidden) out.push(j); return out; };
   /* Figure columns shown, the source of every row in every column, and where a white gap separates
-   * columns: wherever neighbouring columns are not neighbouring lanes of one piece in some row. */
+   * columns: wherever neighbouring columns are not neighbouring lanes of one box in some row. */
   App.columns = function () {
     const S = App.S, vis = App.figLanes(), rows = S.rows.filter(r => !r.hidden && App.blot(r.blot));
     const src = rows.map(r => vis.map(j => App.colSource(r, j)));
     const gapAfter = new Set();
     for (let k = 0; k + 1 < vis.length; k++) {
       if (vis[k + 1] !== vis[k] + 1) { gapAfter.add(k); continue; }
-      if (src.some(rs => { const a = rs[k], c = rs[k + 1]; return a && c && (a.pc !== c.pc || c.m !== a.m + 1); })) gapAfter.add(k);
+      if (src.some(rs => { const a = rs[k], c = rs[k + 1]; return a && c && (a.sg !== c.sg || c.i !== a.i + 1); })) gapAfter.add(k);
     }
     const segs = []; let cur = null;
     vis.forEach((j, k) => { if (!cur) { cur = []; segs.push(cur); } cur.push(j); if (gapAfter.has(k)) cur = null; });
@@ -323,63 +515,19 @@
   App.segments = () => App.columns().segs;
   App.ensureLane = j => { while (App.S.lanes.length < j) App.S.lanes.push({ name: '', hidden: false }); };
 
-  /* Lane edits on one piece (every row on the piece follows: the lanes belong to the piece). Pieces that
-   * continue its columns side by side (sharing a row, starting right after it) keep following it. */
-  function followerOf(pc) {
-    const ids = new Set(App.S.rows.filter(r => r.segs.some(s => s.piece === pc.id)).flatMap(r => r.segs.map(s => s.piece)));
-    ids.delete(pc.id);
-    for (const id of ids) { const f = App.findPiece(id); if (f && f.pc.cx > pc.cx && sideBySide(pc, f.pc) && f.pc.col0 === pc.col0 + App.nSample(pc)) return f.pc; }
-    return null;
-  }
-  function editPiece(pc, fn) {
-    const chain = [];
-    for (let q = followerOf(pc); q && !chain.includes(q) && q !== pc; q = followerOf(q)) chain.push(q);
-    fn();
-    let prev = pc;
-    chain.forEach(q => { q.col0 = prev.col0 + App.nSample(prev); q.edited = true; prev = q; });
-    pc.edited = true;
-  }
-  App.setRole = (pc, m, role) => editPiece(pc, () => { pc.roles[m] = role; });
-  App.cycleRole = (pc, m) => App.setRole(pc, m, { sample: 'skip', skip: 'ladder', ladder: 'sample' }[pc.roles[m]] || 'sample');
-  App.shiftPiece = (pc, d) => editPiece(pc, () => { pc.col0 = Math.max(1, pc.col0 + d); });
-  App.nudgePiece = (pc, du) => { pc.u0 += du; pc.edited = true; };
-  App.scalePitch = function (pc, dp) {
-    const n = pc.roles.length, mid = pc.u0 + (n - 1) / 2 * pc.pitch;
-    pc.pitch = Math.max(8, pc.pitch + dp); pc.u0 = mid - (n - 1) / 2 * pc.pitch; pc.edited = true;
-  };
-  App.extendPiece = (pc, side) => editPiece(pc, () => {
-    if (side < 0) {
-      pc.roles.unshift('sample'); pc.u0 -= pc.pitch;
-      if (pc.col0 > 1) pc.col0--;          // the lanes already there keep their columns
-      App.S.rows.forEach(r => r.segs.forEach(sg => { if (sg.piece === pc.id && sg.ms) sg.ms = sg.ms.map(m => m + 1); }));
-    } else pc.roles.push('sample');
-  });
-  App.dropEnd = (pc, side) => editPiece(pc, () => {
-    if (pc.roles.length < 2) return;
-    if (side < 0) {
-      const wasSample = pc.roles[0] === 'sample';
-      pc.roles.shift(); pc.u0 += pc.pitch; if (wasSample) pc.col0++;
-      App.S.rows.forEach(r => r.segs.forEach(sg => { if (sg.piece === pc.id && sg.ms) sg.ms = sg.ms.map(m => m - 1).filter(m => m >= 0); }));
-    } else pc.roles.pop();
-  });
-  App.resetPiece = function (b, pc) {
-    const A = App.analysis[b.id], d = A && A.pieces[b.pieces.indexOf(pc)];
-    if (d) Object.assign(pc, { u0: d.u0, pitch: d.pitch, roles: d.roles.slice(), col0: d.col0, edited: false });
-  };
-
   /* ---------- rows: geometry, exposures, levels ---------- */
   App.rowPieces = row => { const b = App.blot(row.blot); return row.segs.map(sg => App.piece(b, sg.piece)).filter(Boolean); };
-  App.rowPitch = row => { const ps = App.rowPieces(row); return ps.length ? ps.reduce((s, p) => s + p.pitch, 0) / ps.length : 100; };
+  App.rowPitch = row => (row.segs.length ? row.segs.reduce((s, sg) => s + App.segPitch(sg), 0) / row.segs.length : 100);
   // image position of a row (band centre on its first piece)
-  App.rowXY = row => { const b = App.blot(row.blot), sg = row.segs[0], pc = sg && App.piece(b, sg.piece); return pc ? WB.toImg(WB.frame(pc.cx, pc.cy, pc.angle), 0, sg.vc) : [0, 0]; };
-  // the windows of a row on its pieces, over the lanes shown in the figure (all lanes if none is shown)
+  App.rowXY = row => { const b = App.blot(row.blot), sg = row.segs[0], pc = sg && App.piece(b, sg.piece); return pc ? WB.toImg(pFrame(pc), 0, sg.vc) : [0, 0]; };
+  // the windows of a row on its boxes, over the lanes shown in the figure (all lanes if none is shown)
   App.rowParts = function (row, all) {
     const b = App.blot(row.blot), vis = new Set(App.figLanes()), parts = [];
     row.segs.forEach(sg => {
-      const pc = App.piece(b, sg.piece); if (!pc) return;
-      const ms = App.slots(pc).filter(s => s.col != null && (all || vis.has(s.col))).map(s => s.m);
-      if (!ms.length) return;
-      parts.push({ F: WB.frame(pc.cx, pc.cy, pc.angle), u0: pc.u0 + (Math.min(...ms) - 0.5) * pc.pitch, u1: pc.u0 + (Math.max(...ms) + 0.5) * pc.pitch,
+      const pc = App.piece(b, sg.piece); if (!pc || !sg.lanes.length) return;
+      const cs = App.segCols(sg).filter(s => s.col != null && (all || vis.has(s.col)));
+      if (!cs.length) return;
+      parts.push({ F: pFrame(pc), u0: App.laneLeft(sg, cs[0].i), u1: App.laneRight(sg, cs[cs.length - 1].i),
         vTop: sg.vc - row.above, vBot: sg.vc + row.below, b0: sg.vc + sg.b0, b1: sg.vc + sg.b1, sg, pc });
     });
     return parts.length || all ? parts : App.rowParts(row, true);
@@ -388,7 +536,7 @@
   App.rowExpo = function (row) {
     const b = App.blot(row.blot); if (!b) return [];
     const ch = App.chemiOf(b);
-    const key = row.id + JSON.stringify([row.segs, row.above, row.below, App.rowPieces(row).map(p => [p.u0, p.pitch, p.roles, p.col0]), App.S.range, App.figLanes()]) + ch.map(c => c.id);
+    const key = row.id + JSON.stringify([row.segs, row.above, row.below, App.S.range, App.figLanes()]) + ch.map(c => c.id);
     if (expoCache.has(key)) return expoCache.get(key);
     const parts = App.rowParts(row);
     const res = parts.length ? ch.map(c => Object.assign(WB.evalExposure(c.img, c.cs, parts, c.factor || 1), { id: c.id })) : [];
@@ -436,15 +584,15 @@
     return v => { let t = (v - lv.black) * sc; t = t < 0 ? 0 : t > 1 ? 1 : t; return Math.round((inv ? 1 - t : t) * 255); };
   };
 
-  // straightened crop of lanes mA..mB of one piece for a row, rendered to a canvas
+  // straightened crop of lanes iA..iB of one box for a row, rendered to a canvas
   const rasterCache = new Map();
-  App.runRaster = function (row, sg, pc, mA, mB, step) {
+  App.runRaster = function (row, sg, pc, iA, iB, step) {
     const rec = App.images.get(row.img), lv = App.levelsOf(row.img);
-    const key = [row.img, lv.black, lv.white, App.S.style.invert, pc.cx, pc.cy, pc.angle, pc.w, pc.h, pc.u0, pc.pitch, sg.vc, row.above, row.below, mA, mB, step.toFixed(3)].join('|');
+    const u0 = App.laneLeft(sg, iA), u1 = App.laneRight(sg, iB), v0 = sg.vc - row.above, v1 = sg.vc + row.below;
+    const key = [row.img, lv.black, lv.white, App.S.style.invert, pc.cx, pc.cy, pc.angle, pc.w, pc.h, u0, u1, v0, v1, step.toFixed(3)].join('|');
     if (rasterCache.has(key)) return rasterCache.get(key);
-    const F = WB.frame(pc.cx, pc.cy, pc.angle);
-    const u0 = pc.u0 + (mA - 0.5) * pc.pitch, u1 = pc.u0 + (mB + 0.5) * pc.pitch, v0 = sg.vc - row.above, v1 = sg.vc + row.below;
-    const win = WB.sampleWindow({ w: rec.img.w, h: rec.img.h, data: rec.cs.sig }, F, u0, u1, v0, v1, step);
+    const F = pFrame(pc);
+    const win = WB.sampleWindow(sigOf(rec), F, u0, u1, v0, v1, step);
     const cv = document.createElement('canvas'); cv.width = win.w; cv.height = win.h;
     const ctx = cv.getContext('2d'), id = ctx.createImageData(win.w, win.h), map = App.mapper(row.img), bgV = map(lv.black);
     for (let j = 0; j < win.h; j++) for (let i = 0; i < win.w; i++) {
@@ -474,10 +622,10 @@
     if (!rec || !e) return null;
     const parts = App.rowParts(row), inv = App.S.style.invert;
     if (!parts.length) return null;
-    const key = [row.id, imgId, JSON.stringify([row.segs, row.above, row.below, parts.map(p => [p.u0, p.u1])]), inv, maxW].join('|');
+    const key = [row.id, imgId, JSON.stringify([row.above, row.below, parts.map(p => [p.u0, p.u1, p.vTop])]), inv, maxW].join('|');
     if (thumbCache.has(key)) return thumbCache.get(key);
     const step = Math.max(1, parts.reduce((s, p) => s + p.u1 - p.u0, 0) / maxW), sep = 2;
-    const wins = parts.map(p => WB.sampleWindow({ w: rec.img.w, h: rec.img.h, data: rec.cs.sig }, p.F, p.u0, p.u1, p.vTop, p.vBot, step));
+    const wins = parts.map(p => WB.sampleWindow(sigOf(rec), p.F, p.u0, p.u1, p.vTop, p.vBot, step));
     let white = e.peak * 1.05;
     if (rec.cs.clip !== Infinity) white = Math.min(white, rec.cs.clip);
     white = Math.max(white, e.bgMed + 0.005, e.bgMed + (e.noise != null ? e.noise : e.bgSig) * 30, rec.bits <= 8 ? e.bgMed + 0.16 : 0);
@@ -506,7 +654,7 @@
   App.pieceAt = function (b, x, y, pad) {
     let best = null;
     (b && b.pieces || []).forEach(pc => {
-      const [u, v] = WB.toFrame(WB.frame(pc.cx, pc.cy, pc.angle), x, y);
+      const [u, v] = WB.toFrame(pFrame(pc), x, y);
       const d = Math.max(0, Math.abs(u) - pc.w / 2) + Math.max(0, Math.abs(v) - pc.h / 2);
       if (!best || d < best.d) best = { pc, u, v, d };
     });
@@ -518,15 +666,33 @@
     if (at < 0) { const last = S.rows.map(r => r.blot).lastIndexOf(row.blot); at = last >= 0 ? last + 1 : S.rows.length; }
     S.rows.splice(at, 0, row);
   }
+  // a row at a clicked height: a box over the lanes the piece's other rows have
   App.addRowAt = function (blotId, x, y) {
     const b = App.blot(blotId), hit = App.pieceAt(b, x, y, 60);
     if (!hit || !App.chemiOf(b).length) return null;
     const { pc, v } = hit;
     const hs = App.S.rows.filter(r => r.blot === blotId).flatMap(r => r.segs.map(s => s.b1 - s.b0)).sort((a, c) => a - c);
     const bandH = hs.length ? hs[hs.length >> 1] : 16, margin = Math.min(100, Math.max(16, bandH * 2.5)), half = pc.h / 2;
-    const row = { id: uid('r'), blot: blotId, name: '', img: App.chemiOf(b)[0].id, auto: true, hidden: false, manual: true,
-      segs: [{ piece: pc.id, vc: v, b0: -bandH / 2, b1: bandH / 2, ms: [] }],
+    const L = App.pieceLanes(b, pc, v);
+    const sg = { piece: pc.id, vc: v, b0: -bandH / 2, b1: bandH / 2, lanes: L.lanes, c0: L.c0, p: L.p, x0: -pc.w / 2, x1: pc.w / 2 };
+    const row = { id: uid('r'), blot: blotId, name: '', img: App.chemiOf(b)[0].id, auto: true, hidden: false, manual: true, segs: [sg],
       above: Math.max(bandH / 2 + 4, Math.min(bandH / 2 + margin, v + half - 2)), below: Math.max(bandH / 2 + 4, Math.min(bandH / 2 + margin, half - v - 2)) };
+    if (!sg.lanes.length && !App.redetectBox(row, sg)) App.evenBox(row, sg, Math.max(1, Math.round(pc.w / (pc.pitch || 100))));
+    App.snapBox(sg);
+    insertRow(row);
+    return row;
+  };
+  // a row from a box drawn on a piece (frame units): lanes and band read from the box alone
+  App.addRowBox = function (blotId, pcId, u0, u1, v0, v1) {
+    const b = App.blot(blotId), pc = App.piece(b, pcId), ch = App.chemiOf(b);
+    if (!pc || !ch.length) return null;
+    const half = Math.max(3, (v1 - v0) / 2);
+    const sg = { piece: pc.id, vc: (v0 + v1) / 2, b0: -half / 2, b1: half / 2, lanes: [], c0: 1, p: pc.pitch || 100, x0: u0, x1: u1 };
+    const row = { id: uid('r'), blot: blotId, name: '', img: ch[ch.length - 1].id, auto: true, hidden: false, manual: true, segs: [sg], above: half, below: half };
+    if (!App.redetectBox(row, sg)) App.evenBox(row, sg, Math.max(1, Math.round((u1 - u0) / (pc.pitch || 100))));
+    App.alignSeg(row, sg);
+    App.snapBox(sg);
+    App.findBand(row, sg);
     insertRow(row);
     return row;
   };
@@ -536,7 +702,7 @@
     for (const b of order) for (const pc of b.pieces || []) {
       const pcal = App.pieceCal(b, pc), v = pcal && WB.vAtK(pcal, kda);
       if (v == null || Math.abs(v) > pc.h / 2 - 8) continue;
-      const [x, y] = WB.toImg(WB.frame(pc.cx, pc.cy, pc.angle), 0, v);
+      const [x, y] = WB.toImg(pFrame(pc), 0, v);
       return App.addRowAt(b.id, x, y);
     }
     return null;
@@ -545,26 +711,27 @@
   const sideBySide = (p, q) => { const A = xRange(p), B = xRange(q), ov = Math.min(A[1], B[1]) - Math.max(A[0], B[0]); return ov < 0.25 * Math.min(A[1] - A[0], B[1] - B[0]); };
   // two pieces one above the other with their lanes on one grid hold the same lanes: never one row
   function sameLanes(p, q) {
-    if (sideBySide(p, q) || !App.nSample(p) || !App.nSample(q)) return false;
-    const xs = pc => App.slots(pc).map(s => WB.toImg(WB.frame(pc.cx, pc.cy, pc.angle), s.u, 0)[0]);
-    const a = xs(p), c = xs(q), tol = 0.25 * Math.min(p.pitch, q.pitch);
+    const sp = App.pieceSlots(p), sq = App.pieceSlots(q);
+    if (sideBySide(p, q) || !sp.length || !sq.length) return false;
+    const xs = (pc, sl) => sl.map(s => WB.toImg(pFrame(pc), s.u, 0)[0]);
+    const a = xs(p, sp), c = xs(q, sq), tol = 0.25 * Math.min(p.pitch, q.pitch);
     return a.filter(x => c.some(y => Math.abs(x - y) < tol)).length >= 0.7 * Math.min(a.length, c.length);
   }
   App.stacked = (row, pc) => App.rowPieces(row).some(q => q !== pc && sameLanes(q, pc));
-  /* Columns of pieces newly joined to a row: a piece whose columns clash with the row's other pieces goes
-   * right after them (or right before, if it lies to their left and there is room). */
-  function placeNew(row, newIds) {
-    const b = App.blot(row.blot), cols = pcs => pcs.flatMap(pc => App.slots(pc).filter(s => s.col != null).map(s => s.col));
-    const old = App.rowPieces(row).filter(pc => !newIds.includes(pc.id));
-    newIds.map(id => App.piece(b, id)).filter(Boolean).sort((p, q) => p.cx - q.cx).forEach(pc => {
+  /* Columns of boxes newly joined to a row: a box whose columns clash with the row's other boxes goes right
+   * after them (or right before, if it lies to their left and there is room). */
+  function placeNew(row, added) {
+    const cols = segs => segs.flatMap(s => App.segCols(s).filter(x => x.col != null).map(x => x.col));
+    const old = row.segs.filter(s => !added.includes(s));
+    added.slice().sort((s, t) => App.segX(row, s) - App.segX(row, t)).forEach(sg => {
       const have = cols(old);
-      if (!have.length || !cols([pc]).some(c => have.includes(c))) { old.push(pc); return; }
-      const lo = Math.min(...have), hi = Math.max(...have), n = App.nSample(pc), left = old.every(o => pc.cx < o.cx);
-      editPiece(pc, () => { pc.col0 = left && lo - n >= 1 ? lo - n : hi + 1; });
-      old.push(pc);
+      if (have.length && cols([sg]).some(c => have.includes(c))) {
+        const lo = Math.min(...have), hi = Math.max(...have), n = App.nSample(sg), left = old.every(o => App.segX(row, sg) < App.segX(row, o));
+        sg.c0 = left && lo - n >= 1 ? lo - n : hi + 1;
+      }
+      old.push(sg);
     });
-    const first = sg => { const pc = App.piece(b, sg.piece), s = pc && App.slots(pc).find(x => x.col != null); return s ? s.col : 1e9; };
-    row.segs.sort((s, t) => first(s) - first(t));
+    row.segs.sort((s, t) => s.c0 - t.c0);
   }
   App.joinRows = function (row, other) {
     const added = other.segs.filter(s => !row.segs.some(t => t.piece === s.piece));
@@ -572,7 +739,7 @@
     if (!row.name && other.name) row.name = other.name;
     App.S.rows = App.S.rows.filter(r => r !== other);
     if (App.selRow === other.id) App.selRow = row.id;
-    placeNew(row, added.map(s => s.piece));
+    placeNew(row, added);
   };
   // stitch: the protein of `row` continues on the piece clicked at (x, y)
   App.addSeg = function (row, x, y) {
@@ -584,9 +751,12 @@
     // clicked on another row on that piece: take its band
     const other = App.S.rows.find(r => r !== row && r.blot === row.blot && r.segs.some(s => s.piece === pc.id && v >= s.vc - r.above && v <= s.vc + r.below));
     if (other) { if (App.rowPieces(other).some(q => App.stacked(row, q))) return 'stacked'; App.joinRows(row, other); return 'joined'; }
-    const ref = row.segs[0];
-    row.segs.push({ piece: pc.id, vc: v, b0: ref ? ref.b0 : -8, b1: ref ? ref.b1 : 8, ms: [] });
-    placeNew(row, [pc.id]);
+    const ref = row.segs[0], L = App.pieceLanes(b, pc, v);
+    const sg = { piece: pc.id, vc: v, b0: ref ? ref.b0 : -8, b1: ref ? ref.b1 : 8, lanes: L.lanes, c0: L.c0, p: L.p, x0: -pc.w / 2, x1: pc.w / 2 };
+    if (!sg.lanes.length) App.redetectBox(row, sg);
+    App.snapBox(sg);
+    row.segs.push(sg);
+    placeNew(row, [sg]);
     return 'added';
   };
   App.splitRow = function (row) {
@@ -597,7 +767,11 @@
   };
 
   /* ---------- marker bands set by hand ---------- */
-  App.ladderU = pc => { const s = App.slots(pc).find(x => x.role === 'ladder'); return s ? s.u : (pc.roles.length ? pc.u0 - pc.pitch * 0.5 : 0); };
+  App.ladderU = pc => {
+    if (pc.ladderUs && pc.ladderUs.length) return pc.ladderUs[0];
+    const s = App.pieceSlots(pc).find(x => x.role === 'ladder');
+    return s ? s.u : ((pc.roles || []).length ? pc.u0 - pc.pitch * 0.5 : -pc.w / 2 + 30);
+  };
   // the piece's marks as editable values; the first edit starts from what was detected automatically
   App.manualMarks = function (b, pc) {
     if (pc.marks) return pc.marks;
@@ -659,8 +833,8 @@
     vis.forEach(r => {
       const e = App.rowExpo(r).find(x => x.id === r.img);
       if (e && e.satFrac > 0.002) warn.push(`「${label(r)}」所选曝光中条带有过曝像素，定量不可靠，建议换短曝光`);
-      if (App.rowClash(r).length) warn.push(`「${label(r)}」跨的几条膜条泳道列重叠了：在"泳道"里把其中一条往后挪（‹ ›）`);
-      if (!C.vis.some(j => App.colSource(r, j))) warn.push(`「${label(r)}」的泳道都不在成图的列范围里：在"泳道"里调整范围或膜条的起始列`);
+      if (App.rowClash(r).length) warn.push(`「${label(r)}」的几个框占了相同的列：选中这一行，在"泳道"里把右边那个框往后挪（›）`);
+      if (!C.vis.some(j => App.colSource(r, j))) warn.push(`「${label(r)}」的泳道都不在成图的列范围里：在"泳道"里调整范围，或把这一行的列挪过来（‹ ›）`);
     });
     const blotsUsed = [...new Set(vis.map(r => r.blot))];
     if (blotsUsed.length > 1) {

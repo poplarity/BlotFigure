@@ -1,6 +1,6 @@
 /* Figure layout: state -> SVG (pt units). Figure columns on a common grid across rows, white gaps where
- * neighbouring columns are not neighbouring lanes on a piece; each row is drawn from its pieces as
- * straightened crops scaled so the lane pitch matches the grid. kDa ticks on the left, protein names on
+ * neighbouring columns are not neighbouring lanes of one box; each row is drawn from its boxes as
+ * straightened crops scaled so the lane spacing matches the grid. kDa ticks on the left, protein names on
  * the right, lane labels / conditions / groups on top. */
 (function (G) {
   'use strict';
@@ -43,21 +43,21 @@
       const h = (row.above + row.below) * sc;
       const step = Math.max(0.35, Math.min(2, pitch / 60));      // ~60 px per lane in the raster
       const srcOf = new Map(C.vis.map((j, k) => [j, C.src[ri][k]]));
-      // one image per run of columns that are neighbouring lanes of one piece; no lane = background
+      // one image per run of columns that are neighbouring lanes of one box; no lane = background
       segs.forEach(run => {
         let cur = null;
         const flush = () => {
           if (!cur) return;
-          const ras = App.runRaster(row, cur.sg, cur.pc, cur.m0, cur.m1, step);
-          const x0 = X.get(cur.j0) - laneW / 2, w = (cur.m1 - cur.m0 + 1) * laneW;
+          const ras = App.runRaster(row, cur.sg, cur.pc, cur.i0, cur.i1, step);
+          const x0 = X.get(cur.j0) - laneW / 2, w = (cur.i1 - cur.i0 + 1) * laneW;
           els.push(`<image ${P ? `data-row="${row.id}" ` : ''}x="${f(x0)}" y="${f(y)}" width="${f(w)}" height="${f(h)}" preserveAspectRatio="none" href="${ras.href}" xlink:href="${ras.href}"/>`);
           if (st.border) els.push(`<rect x="${f(x0)}" y="${f(y)}" width="${f(w)}" height="${f(h)}" fill="none" stroke="#000" stroke-width="${f(lw)}" pointer-events="none"/>`);
           cur = null;
         };
         run.forEach(j => {
           const s = srcOf.get(j);
-          if (s && cur && s.pc === cur.pc && s.m === cur.m1 + 1) cur.m1 = s.m;
-          else { flush(); if (s) cur = { sg: s.sg, pc: s.pc, m0: s.m, m1: s.m, j0: j }; }
+          if (s && cur && s.sg === cur.sg && s.i === cur.i1 + 1) cur.i1 = s.i;
+          else { flush(); if (s && s.pc) cur = { sg: s.sg, pc: s.pc, i0: s.i, i1: s.i, j0: j }; }
         });
         flush();
       });
