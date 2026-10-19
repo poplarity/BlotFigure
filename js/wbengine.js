@@ -812,8 +812,15 @@
         if (s.raw[i] < 0.85 * s.clipDs || k === order[order.length - 1]) { comp[i] = Math.sqrt(s.th[i] / factors[k]); break; }
       }
     }
-    // --- strips from the marker photo
-    const strips = marker ? findStrips(marker.img, f) : [];
+    // --- strips from the marker photo. A photo taken elsewhere (marker.T: grid -> photo, marker.pieces: its
+    // pieces' own) is read as taken — resampling would blur the thin cuts between pieces — and its strips are
+    // mapped onto the grid; ladder lanes and bands are found in each strip's own frame, which carries over.
+    const stripsRaw = marker ? findStrips(marker.img, f) : [];
+    const strips = marker && marker.T ? stripsRaw.map(s => {
+      const g = regFrame(regInverse(marker.T), W, Himg, s);
+      const own = (marker.pieces || []).find(p => { const [u, v] = toFrame(frame(p.cx, p.cy, p.angle), g.cx, g.cy); return Math.abs(u) <= p.w / 2 && Math.abs(v) <= p.h / 2; });
+      return Object.assign({}, s, own ? regFrame(regInverse(own.T), W, Himg, s) : g);
+    }) : stripsRaw;
     if (marker && !strips.length) notes.push('Marker 图中没有识别出膜条');
     // --- regions: membrane strips from the marker photo, else clusters of chemi signal
     const compImg = { w, h, data: comp };
@@ -850,7 +857,7 @@
     // --- ladder lane + bands from the marker photo, per strip
     let ladderStrips = [];
     if (marker && strips.length) {
-      ladderStrips = findLadders(marker.img, strips, pitch);
+      ladderStrips = findLadders(marker.img, stripsRaw, pitch);
       if (!ladderStrips.some(l => l && l.bands.length)) notes.push('Marker 图中没有找到 Ladder 条带');
     }
     // --- ladder choice + calibration (shared slope across strips)
@@ -1500,7 +1507,307 @@
     });
   }
 
+  /* ---------- the same membrane photographed again after it was moved: rigid registration ----------
+   * A transform T = {a, tx, ty} (degrees, full-resolution px) takes a point p of the reference picture to the
+   * same point of the membrane in another picture: R(a)·(p − C) + C + t, C = centre of the picture. Exposures
+   * are compared by their bands, white-light photos by the edges of the membrane and the ladder. A coarse
+   * search (phase correlation over a few angles at ~200 px) is refined by normalised correlation at ~640 px;
+   * the same refinement on one piece's window gives each piece of a cut membrane a transform of its own. */
+  const pow2 = n => { let p = 1; while (p < n) p <<= 1; return p; };
+  const twiddles = new Map();
+  function fft(re, im, inv) {
+    const n = re.length;
+    let tw = twiddles.get(n);
+    if (!tw) {
+      tw = { c: new Float64Array(n >> 1), s: new Float64Array(n >> 1) };
+      for (let k = 0; k < n >> 1; k++) { tw.c[k] = Math.cos(2 * Math.PI * k / n); tw.s[k] = -Math.sin(2 * Math.PI * k / n); }
+      twiddles.set(n, tw);
+    }
+    for (let i = 1, j = 0; i < n; i++) {
+      let bit = n >> 1;
+      for (; j & bit; bit >>= 1) j ^= bit;
+      j ^= bit;
+      if (i < j) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
+    }
+    for (let len = 2; len <= n; len <<= 1) {
+      const half = len >> 1, step = n / len;
+      for (let i = 0; i < n; i += len) for (let k = 0; k < half; k++) {
+        const wr = tw.c[k * step], wi = inv ? -tw.s[k * step] : tw.s[k * step];
+        const a = i + k, b = a + half, xr = re[b] * wr - im[b] * wi, xi = re[b] * wi + im[b] * wr;
+        re[b] = re[a] - xr; im[b] = im[a] - xi; re[a] += xr; im[a] += xi;
+      }
+    }
+  }
+  // 2-D FFT of N×M (row length N); rows past `rows` are all zero (padding) and skipped in the first pass
+  function fft2(re, im, N, M, inv, rows) {
+    const r = new Float64Array(N), i2 = new Float64Array(N);
+    for (let y = 0; y < (rows || M); y++) {
+      const o = y * N;
+      for (let x = 0; x < N; x++) { r[x] = re[o + x]; i2[x] = im[o + x]; }
+      fft(r, i2, inv);
+      for (let x = 0; x < N; x++) { re[o + x] = r[x]; im[o + x] = i2[x]; }
+    }
+    const c = new Float64Array(M), ci = new Float64Array(M);
+    for (let x = 0; x < N; x++) {
+      for (let y = 0; y < M; y++) { c[y] = re[y * N + x]; ci[y] = im[y * N + x]; }
+      fft(c, ci, inv);
+      for (let y = 0; y < M; y++) { re[y * N + x] = c[y]; im[y * N + x] = ci[y]; }
+    }
+  }
+  // what registration compares, at 1/f: the bands of an exposure (img = its signal), the edges of the membrane
+  // and the ladder in a white-light photo
+  function regFeature(img, kind, f) {
+    const d = down(img, f), { w, h } = d;
+    let out;
+    if (kind === 'chemi') {
+      out = tophat(d.data, w, h, Math.max(3, Math.round(40 / f)));
+      for (let i = 0; i < out.length; i++) out[i] = Math.sqrt(out[i]);
+    } else {
+      const b = blur2d(d.data, w, h, 1.2);
+      out = new Float32Array(w * h);
+      for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { const i = y * w + x; out[i] = Math.hypot(b[i + 1] - b[i - 1], b[i + w] - b[i - w]); }
+    }
+    return { w, h, data: out, f, W: img.w, H: img.h };
+  }
+  // the picture centre in feature px (feature px x ↔ full-resolution f·x + (f − 1)/2)
+  const regC = F => [(F.W / 2 - (F.f - 1) / 2) / F.f, (F.H / 2 - (F.f - 1) / 2) / F.f];
+  const rot = (deg, x, y) => { const a = deg * Math.PI / 180, c = Math.cos(a), s = Math.sin(a); return [c * x - s * y, s * x + c * y]; };
+  // T about centre c (any units) re-expressed about centre d: R(p − c) + c + t = R(p − d) + d + t'
+  function regRecentre(T, c, d) {
+    const [rx, ry] = rot(T.a, d[0] - c[0], d[1] - c[1]);
+    return { a: T.a, tx: T.tx + c[0] - d[0] + rx, ty: T.ty + c[1] - d[1] + ry };
+  }
+  // mov (same size as the reference) on the reference grid under T (feature px, about c)
+  function regResample(mov, T, c) {
+    const { w, h } = mov, out = new Float32Array(w * h), a = T.a * Math.PI / 180, co = Math.cos(a), si = Math.sin(a);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const dx = x - c[0], dy = y - c[1], v = bilinear(mov, c[0] + co * dx - si * dy + T.tx, c[1] + si * dx + co * dy + T.ty);
+      out[y * w + x] = isNaN(v) ? 0 : v;
+    }
+    return { w, h, data: out };
+  }
+  // spectrum of a feature, mean-free and tapered towards the edges (the frame of the picture is no feature)
+  function regSpectrum(F, N, M) {
+    const { w, h, data } = F, re = new Float64Array(N * M), im = new Float64Array(N * M);
+    let m = 0; for (let i = 0; i < w * h; i++) m += data[i]; m /= w * h;
+    const bw = Math.max(2, Math.round(Math.min(w, h) * 0.08));
+    const tp = (i, n) => { const d = Math.min(i, n - 1 - i); return d >= bw ? 1 : 0.5 - 0.5 * Math.cos(Math.PI * (d + 0.5) / bw); };
+    for (let y = 0; y < h; y++) { const ty = tp(y, h); for (let x = 0; x < w; x++) re[y * N + x] = (data[y * w + x] - m) * ty * tp(x, w); }
+    fft2(re, im, N, M, false, h);
+    return { re, im };
+  }
+  // shifts s with ref(q) ≈ mov(q + s) by phase correlation: the k highest peaks (height 0..1), strongest first
+  function regPeaks(A, B, N, M, k) {
+    const n = N * M, re = new Float64Array(n), im = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const xr = A.re[i] * B.re[i] + A.im[i] * B.im[i], xi = A.re[i] * B.im[i] - A.im[i] * B.re[i], m = Math.hypot(xr, xi);
+      if (m > 1e-12) { re[i] = xr / m; im[i] = xi / m; }
+    }
+    fft2(re, im, N, M, true);
+    const at = (x, y) => re[((y + M) % M) * N + ((x + N) % N)];
+    const sub = (l, c, r) => { const d = l - 2 * c + r; return d < 0 ? clamp(0.5 * (l - r) / d, -0.5, 0.5) : 0; };
+    // local maxima (3×3), the k highest
+    const top = [];
+    for (let y = 0; y < M; y++) for (let x = 0; x < N; x++) {
+      const v = re[y * N + x];
+      if (top.length >= k && v <= top[top.length - 1].v) continue;
+      if (v < at(x - 1, y) || v < at(x + 1, y) || v < at(x, y - 1) || v < at(x, y + 1) || v < at(x - 1, y - 1) || v < at(x + 1, y + 1) || v < at(x - 1, y + 1) || v < at(x + 1, y - 1)) continue;
+      top.push({ x, y, v }); top.sort((a, b) => b.v - a.v); if (top.length > k) top.pop();
+    }
+    return top.map(({ x, y, v }) => {
+      let sx = x + sub(at(x - 1, y), v, at(x + 1, y)), sy = y + sub(at(x, y - 1), v, at(x, y + 1));
+      if (sx > N / 2) sx -= N; if (sy > M / 2) sy -= M;
+      return { sx, sy, peak: v / n };
+    });
+  }
+  /* coarse candidates (feature px, about the picture centre) over the candidate angles: the few highest peaks
+   * of all angles — a regular pattern of lanes also correlates one lane off, so the refinement decides */
+  function regCoarse(ref, mov, angles, keep, near) {
+    const N = pow2(ref.w), M = pow2(ref.h), c = regC(ref), A = regSpectrum(ref, N, M);
+    let all = [];
+    (angles || [-10, -8, -6, -4, -2.5, -1.2, 0, 1.2, 2.5, 4, 6, 8, 10]).forEach(a => {
+      regPeaks(A, regSpectrum(regResample(mov, { a, tx: 0, ty: 0 }, c), N, M), N, M, near ? 12 : 3).forEach(p => {
+        const [tx, ty] = rot(a, p.sx, p.sy);
+        if (!near || near({ a, tx, ty })) all.push({ a, tx, ty, peak: p.peak });
+      });
+    });
+    all.sort((p, q) => q.peak - p.peak);
+    // one candidate per place: the same shift at neighbouring angles is the same candidate
+    const out = [];
+    all.forEach(p => { if (out.length < (keep || 5) && !out.some(o => Math.hypot(o.tx - p.tx, o.ty - p.ty) < 2.5 && Math.abs(o.a - p.a) < 3)) out.push(p); });
+    return out;
+  }
+  // sample points of a feature: its strongest pixels and a sparse grid over the rest, optionally only those
+  // where keep(x, y) holds
+  function regPoints(F, keep, max) {
+    const { w, h, data } = F, pick = [];
+    const vals = []; for (let i = 0; i < w * h; i += 3) vals.push(data[i]);
+    vals.sort((a, b) => a - b);
+    const thr = Math.max(1e-9, vals[Math.floor(vals.length * 0.88)]);
+    for (let y = 2; y < h - 2; y++) for (let x = 2; x < w - 2; x++) {
+      const i = y * w + x;
+      if ((data[i] >= thr || (x % 4 === 0 && y % 4 === 0)) && (!keep || keep(x, y))) pick.push(i);
+    }
+    if (pick.length <= (max || 12000)) return pick;
+    const k = pick.length / (max || 12000), out = [];
+    for (let j = 0; j < pick.length; j += k) out.push(pick[Math.floor(j)]);
+    return out;
+  }
+  // normalised correlation of ref and mov under T (about c) over the sample points that fall inside the other
+  // picture (a membrane moved partly out of view still matches), scaled down when that is under 85 % of them
+  // (a small overlap does not make a good match)
+  function regNcc(ref, mov, T, c, pts) {
+    const a = T.a * Math.PI / 180, co = Math.cos(a), si = Math.sin(a), w = ref.w, mw = mov.w, mh = mov.h, md = mov.data, rd = ref.data;
+    const ox = c[0] + T.tx - co * c[0] + si * c[1], oy = c[1] + T.ty - si * c[0] - co * c[1];
+    let n = 0, sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0;
+    for (let k = 0; k < pts.length; k++) {
+      const i = pts[k], x = i % w, y = (i - x) / w, X = ox + co * x - si * y, Y = oy + si * x + co * y;
+      if (X < 0 || Y < 0 || X > mw - 1 || Y > mh - 1) continue;
+      const x0 = Math.min(mw - 2, X | 0), y0 = Math.min(mh - 2, Y | 0), fx = X - x0, fy = Y - y0, j = y0 * mw + x0;
+      const v = (md[j] * (1 - fx) + md[j + 1] * fx) * (1 - fy) + (md[j + mw] * (1 - fx) + md[j + mw + 1] * fx) * fy, u = rd[i];
+      n++; sa += u; sb += v; saa += u * u; sbb += v * v; sab += u * v;
+    }
+    if (n < 30) return -1;
+    const cov = sab - sa * sb / n, va = saa - sa * sa / n, vb = sbb - sb * sb / n;
+    return (va > 0 && vb > 0 ? cov / Math.sqrt(va * vb) : 0) * Math.min(1, n / (0.85 * pts.length));
+  }
+  // compass search for the best correlation near T0 (feature px, about c); turning about the middle of the
+  // compared region (pivot) keeps angle and shift from trading off against each other
+  function regRefine(ref, mov, T0, c, pts, opt) {
+    opt = opt || {};
+    const piv = opt.pivot || c;
+    let T = regRecentre(T0, c, piv), best = regNcc(ref, mov, regRecentre(T, piv, c), c, pts);
+    let st = opt.step || 1.5, sa = opt.aStep || 0.4;
+    const minSt = opt.minStep || 0.06, minA = opt.minAStep || 0.015;
+    for (let it = 0; it < 80 && (st > minSt || sa > minA); it++) {
+      let moved = false;
+      for (const [k, d] of [['tx', st], ['tx', -st], ['ty', st], ['ty', -st], ['a', sa], ['a', -sa]]) {
+        if ((k === 'a' && sa <= minA) || (k !== 'a' && st <= minSt)) continue;
+        const C = { a: T.a, tx: T.tx, ty: T.ty }; C[k] += d;
+        const s = regNcc(ref, mov, regRecentre(C, piv, c), c, pts);
+        if (s > best + 1e-7) { best = s; T = C; moved = true; }
+      }
+      if (!moved) { st /= 2; sa /= 2; }
+    }
+    return Object.assign(regRecentre(T, piv, c), { ncc: best });
+  }
+  // feature px about the feature centre <-> full resolution about the picture centre
+  const regToFull = (T, F) => ({ a: T.a, tx: T.tx * F.f, ty: T.ty * F.f });
+  const regToFeat = (T, F) => ({ a: T.a, tx: T.tx / F.f, ty: T.ty / F.f });
+  const regIdentity = { a: 0, tx: 0, ty: 0 };
+  // the features of a picture for registration (img = the signal of an exposure): coarse and fine
+  function regFeatures(img, kind) {
+    const big = Math.max(img.w, img.h);
+    return { kind, lo: regFeature(img, kind, Math.max(1, Math.ceil(big / 200))), hi: regFeature(img, kind, Math.max(1, Math.ceil(big / 640))) };
+  }
+  /* Register a picture to the reference (features of the same kind, regFeatures). Returns the transform in
+   * full-resolution px, its correlation (ncc) and that of the pictures as they are (ncc0).
+   * opt.init: a transform to start from — the coarse search runs only when that does not fit (or opt.coarse). */
+  function registerRigid(R, M, opt) {
+    opt = opt || {};
+    const ref = R.hi, mov = M.hi, cH = regC(ref), pts = R.pts || (R.pts = regPoints(ref));
+    // turn about the centre of what is compared (the membrane)
+    if (!R.pivot) { let sw = 0, sx = 0, sy = 0; pts.forEach(i => { const v = ref.data[i]; sw += v; sx += v * (i % ref.w); sy += v * Math.floor(i / ref.w); }); R.pivot = sw > 0 ? [sx / sw, sy / sw] : cH; }
+    const pivot = R.pivot, ncc0 = regNcc(ref, mov, regIdentity, cH, pts), T0 = regToFeat(opt.init || regIdentity, ref);
+    const cands = [regRefine(ref, mov, T0, cH, pts, { pivot, step: 1, aStep: 0.25 })];
+    // a search that wandered far off its start may have stopped on a pattern one lane off: search widely too
+    const wandered = regDist(regToFull(cands[0], ref), regToFull(T0, ref), ref.W, ref.H, { x0: 0, y0: 0, x1: ref.W, y1: ref.H }) > Math.max(3 * ref.f, 40);
+    if (cands[0].ncc < (opt.fit || 0.6) || wandered || opt.coarse) {
+      // every coarse candidate refined roughly, the best one finely
+      const quick = regCoarse(R.lo, M.lo, opt.angles, 5).map(C => regRefine(ref, mov, regToFeat(regToFull(C, R.lo), ref), cH, pts, { pivot, step: 2, aStep: 0.5, minStep: 0.4, minAStep: 0.1 }));
+      quick.sort((a, b) => b.ncc - a.ncc);
+      if (quick.length) cands.push(regRefine(ref, mov, quick[0], cH, pts, { pivot, step: 0.4, aStep: 0.1 }));
+    }
+    const best = cands.sort((a, b) => b.ncc - a.ncc)[0];
+    return Object.assign(regToFull(best, ref), { ncc: best.ncc, ncc0 });
+  }
+  // largest displacement between two transforms over the corners of a box (full resolution)
+  function regDist(A, B, W, H, box) {
+    const ma = regMatrix(A, W, H), mb = regMatrix(B, W, H);
+    return Math.max(...[[box.x0, box.y0], [box.x1, box.y0], [box.x0, box.y1], [box.x1, box.y1]].map(([x, y]) =>
+      Math.hypot(ma[0] * x + ma[1] * y + ma[2] - (mb[0] * x + mb[1] * y + mb[2]), ma[3] * x + ma[4] * y + ma[5] - (mb[3] * x + mb[4] * y + mb[5]))));
+  }
+  // A after B (both about the picture centre): R_A R_B (p − C) + C + R_A t_B + t_A
+  const regCompose = (A, B) => { const [x, y] = rot(A.a, B.tx, B.ty); return { a: A.a + B.a, tx: x + A.tx, ty: y + A.ty }; };
+  const regInverse = T => { const [x, y] = rot(-T.a, T.tx, T.ty); return { a: -T.a, tx: -x, ty: -y }; };
+  /* each piece on its own: refine T on the piece's window (pieces in reference coordinates, full resolution).
+   * Returns per piece {a, tx, ty, ncc, ncc0} or null where the piece shows too little to tell. */
+  function registerPieces(R, M, T, pieces, opt) {
+    opt = opt || {};
+    const ref = R.hi, mov = M.hi, lo = R.lo, f = ref.f, g = lo.f, cH = regC(ref), cL = regC(lo), m = opt.margin == null ? 10 : opt.margin;
+    return pieces.map(pc => {
+      const F = frame(pc.cx, pc.cy, pc.angle), box = { x0: pc.cx - pc.w / 2, y0: pc.cy - pc.h / 2, x1: pc.cx + pc.w / 2, y1: pc.cy + pc.h / 2 };
+      const on = (x, y, k) => { const [u, v] = toFrame(F, k * x + (k - 1) / 2, k * y + (k - 1) / 2); return Math.abs(u) <= pc.w / 2 + m && Math.abs(v) <= pc.h / 2 + m; };
+      const pts = regPoints(ref, (x, y) => on(x, y, f), 6000), ptsL = regPoints(lo, (x, y) => on(x, y, g), 3000);
+      if (pts.length < 60 || ptsL.length < 20) return null;
+      const pivH = [(pc.cx - (f - 1) / 2) / f, (pc.cy - (f - 1) / 2) / f], pivL = [(pc.cx - (g - 1) / 2) / g, (pc.cy - (g - 1) / 2) / g];
+      const ncc0 = regNcc(ref, mov, regToFeat(T, ref), cH, pts);
+      // a piece that already fits where the whole membrane went stayed with it
+      if (ncc0 >= (opt.fits || 0.95)) return Object.assign({ a: T.a, tx: T.tx, ty: T.ty }, { ncc: ncc0, ncc0 });
+      // coarse to fine: broad basins at low resolution first (a long piece's edges alone barely pin it along its length)
+      const local = T0 => {
+        const a = regRefine(lo, M.lo, regToFeat(T0, lo), cL, ptsL, { pivot: pivL, step: 1, aStep: 0.4, minStep: 0.1, minAStep: 0.05 });
+        return regRefine(ref, mov, regToFeat(regToFull(a, lo), ref), cH, pts, { pivot: pivH, step: 0.6, aStep: 0.15 });
+      };
+      let r = local(T);
+      if (r.ncc < ncc0 + 0.02) { const near0 = regRefine(ref, mov, regToFeat(T, ref), cH, pts, { pivot: pivH, step: 0.6, aStep: 0.15 }); if (near0.ncc > r.ncc) r = near0; }
+      // put back away from where the rest of the membrane went: the piece's window searched widely, within reach
+      if (r.ncc < 0.9 || regDist(regToFull(r, ref), T, ref.W, ref.H, box) > 25) {
+        const masked = new Float32Array(lo.data.length);
+        for (let y = 0; y < lo.h; y++) for (let x = 0; x < lo.w; x++) if (on(x, y, g)) masked[y * lo.w + x] = lo.data[y * lo.w + x];
+        const near = C => regDist(regToFull(C, lo), T, ref.W, ref.H, box) < (opt.reach || 220);
+        regCoarse(Object.assign({}, lo, { data: masked }), M.lo, [-4, -2.5, -1.2, 0, 1.2, 2.5, 4].map(d => T.a + d), 4, near).forEach(C => {
+          const q = local(regToFull(C, lo));
+          if (opt.debug) opt.debug.push(`${pc.cx | 0}: cand ${C.a.toFixed(1)} ${(C.tx * g).toFixed(0)},${(C.ty * g).toFixed(0)} pk${C.peak.toFixed(3)} -> ${q.a.toFixed(2)} ${(q.tx * f).toFixed(0)},${(q.ty * f).toFixed(0)} ncc${q.ncc.toFixed(3)} (have ${r.ncc.toFixed(3)})`);
+          if (q.ncc > r.ncc + 0.01) r = q;
+        });
+      }
+      return Object.assign(regToFull(r, ref), { ncc: r.ncc, ncc0 });
+    });
+  }
+  // the affine map of T (full resolution, about the centre of a W×H picture): [x', y'] = [m0 x + m1 y + m2, m3 x + m4 y + m5]
+  function regMatrix(T, W, H) {
+    const a = T.a * Math.PI / 180, co = Math.cos(a), si = Math.sin(a), cx = W / 2, cy = H / 2;
+    return [co, -si, cx + T.tx - co * cx + si * cy, si, co, cy + T.ty - si * cx - co * cy];
+  }
+  const regPoint = (T, W, H, x, y) => { const m = regMatrix(T, W, H); return [m[0] * x + m[1] * y + m[2], m[3] * x + m[4] * y + m[5]]; };
+  // a piece's frame in the other picture
+  const regFrame = (T, W, H, pc) => { const [x, y] = regPoint(T, W, H, pc.cx, pc.cy); return { cx: x, cy: y, angle: pc.angle + T.a }; };
+  /* a picture resampled onto the reference grid: out(p) = src(T(p)), with the transform of the piece p lies on
+   * where pieces have their own (pieces: [{cx, cy, angle, w, h, T}] in reference coordinates); fill outside.
+   * clip: where the nearest source pixel is clipped the output is too (interpolation would hide saturation) */
+  function regWarp(src, T, pieces, fill, clip) {
+    const { w, h, data: d } = src, out = new Float32Array(w * h), q = 8;
+    const mats = [regMatrix(T, w, h)].concat((pieces || []).map(p => regMatrix(p.T, w, h)));
+    // which transform each 8×8 cell takes: the piece it lies on (closest edge if several), else the whole
+    const gw = Math.ceil(w / q), gh = Math.ceil(h / q), lab = new Uint8Array(gw * gh);
+    if (pieces && pieces.length) {
+      const fr = pieces.map(p => frame(p.cx, p.cy, p.angle));
+      for (let gy = 0; gy < gh; gy++) for (let gx = 0; gx < gw; gx++) {
+        let best = 0, bd = 24;
+        pieces.forEach((p, k) => {
+          const [u, v] = toFrame(fr[k], gx * q + q / 2, gy * q + q / 2), dd = Math.max(Math.abs(u) - p.w / 2, Math.abs(v) - p.h / 2);
+          if (dd < bd) { bd = dd; best = k + 1; }
+        });
+        lab[gy * gw + gx] = best;
+      }
+    }
+    for (let y = 0; y < h; y++) {
+      const gy = Math.floor(y / q) * gw;
+      for (let x = 0; x < w; x++) {
+        const m = mats[lab[gy + Math.floor(x / q)]], X = m[0] * x + m[1] * y + m[2], Y = m[3] * x + m[4] * y + m[5];
+        if (X < 0 || Y < 0 || X > w - 1 || Y > h - 1) { out[y * w + x] = fill; continue; }
+        const x0 = Math.min(w - 2, X | 0), y0 = Math.min(h - 2, Y | 0), fx = X - x0, fy = Y - y0, j = y0 * w + x0;
+        out[y * w + x] = clip !== undefined && d[j + (fy >= 0.5 ? w : 0) + (fx >= 0.5 ? 1 : 0)] >= clip - 1e-6 ? clip
+          : (d[j] * (1 - fx) + d[j + 1] * fx) * (1 - fy) + (d[j + w] * (1 - fx) + d[j + w + 1] * fx) * fy;
+      }
+    }
+    return out;
+  }
+
   G.WB = {
+    fft, fft2, regFeature, regFeatures, regCoarse, regRefine, regNcc, regPoints, registerRigid, registerPieces, regMatrix, regPoint, regFrame, regWarp, regC,
+    regDist, regCompose, regInverse,
     down, tophat, blur2d, median3, components, otsu, mad, bilinear, frame, toImg, toFrame, sampleWindow,
     exposureFromName, classify, chemiSignal, groupSessions, stem, findStrips, stripFrame, inStrip,
     pitchFromGaps, latticeOrigin, pieceLattice, assignColumns, calibrateLadder, calibrate, fitSeries, piecesInPlace, kdaAt, vAt, kdaAtK, vAtK,

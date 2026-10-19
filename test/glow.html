@@ -1,0 +1,30 @@
+﻿<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>glow</title>
+<style>body{margin:0;background:#222;color:#ddd;font:12px sans-serif} canvas{display:block;margin:4px} .r{display:flex;flex-wrap:wrap}</style></head>
+<body><div class="r" id="r"></div>
+<script src="../js/tiff.js"></script>
+<script src="../js/engine.js"></script>
+<script src="../js/wbengine.js"></script>
+<script>
+/* What an exposure shows besides its bands: the background level (the membrane glows a little brighter than
+ * the tray?), stretched hard; and the registration feature. ?dir=&names=a.tif,b.tif */
+(async () => {
+  const q = new URLSearchParams(location.search), dir = q.get('dir'), names = q.get('names').split(',');
+  for (const n of names) {
+    const d = await TIFF.decode(await (await fetch(dir + '/' + n)).arrayBuffer()), img = { w: d.width, h: d.height, data: d.data };
+    const kind = WB.classify(img, { name: 'x.tif' }), src = kind === 'chemi' ? { w: img.w, h: img.h, data: WB.chemiSignal(img).sig } : img;
+    const f = Math.ceil(Math.max(img.w, img.h) / 380), sm = WB.down(src, f);
+    // background: opening removes bands; then a hard stretch between low percentiles
+    const bg = kind === 'chemi' ? WB.median3(sm.data, sm.w, sm.h) : sm.data;
+    const [lo, hi] = Engine.percentiles(bg, kind === 'chemi' ? [2, 60] : [1, 99], 1);
+    const feat = WB.regFeature(src, kind, f), [flo, fhi] = Engine.percentiles(feat.data, [1, 99.5], 1);
+    [[bg, lo, hi], [feat.data, flo, fhi]].forEach(([arr, a, b]) => {
+      const c = document.createElement('canvas'); c.width = sm.w; c.height = sm.h; const ctx = c.getContext('2d'), id = ctx.createImageData(sm.w, sm.h);
+      for (let i = 0; i < sm.w * sm.h; i++) { const v = Math.max(0, Math.min(255, (arr[i] - a) / Math.max(1e-9, b - a) * 255)); id.data[i * 4] = id.data[i * 4 + 1] = id.data[i * 4 + 2] = v; id.data[i * 4 + 3] = 255; }
+      ctx.putImageData(id, 0, 0); ctx.fillStyle = '#ff0'; ctx.fillText(n.slice(0, 2) + ' ' + kind, 4, 12);
+      document.getElementById('r').appendChild(c);
+    });
+  }
+  document.title = 'DONE';
+})();
+</script></body></html>

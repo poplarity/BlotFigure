@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>register</title></head>
+<body><pre id="out">running</pre>
+<script src="../js/tiff.js"></script>
+<script src="../js/engine.js"></script>
+<script src="../js/wbladders.js"></script>
+<script src="../js/wbengine.js"></script>
+<script src="../js/wbdemo.js"></script>
+<script>
+/* Registration self-test: pictures of one membrane taken after it was moved.
+ * Without ?dir: synthetic membranes (demo). With ?dir=<url>&names=a.tif,...: real pictures, moved by known
+ * transforms (whole membrane, and single pieces). Errors = largest displacement error at the corners of the
+ * membrane / piece, px. Title: REG {fails, out}. */
+(async () => {
+  const q = new URLSearchParams(location.search), out = [], T0 = () => performance.now();
+  let fails = 0;
+  const say = () => { document.title = 'REG ' + JSON.stringify({ fails, out }); document.getElementById('out').textContent = out.join('\n'); };
+  const inv = T => { const a = -T.a * Math.PI / 180, c = Math.cos(a), s = Math.sin(a); return { a: -T.a, tx: -(c * T.tx - s * T.ty), ty: -(s * T.tx + c * T.ty) }; };
+  // a picture as it would look with the membrane moved by T (whole) and pieces by their own T
+  const moved = (img, T, pieces) => ({ w: img.w, h: img.h, data: WB.regWarp(img, inv(T), (pieces || []).map(p => Object.assign(WB.regFrame(p.T, img.w, img.h, p), { w: p.w, h: p.h, T: inv(p.T) })), 0) });
+  const corners = r => [[r.x0, r.y0], [r.x1, r.y0], [r.x0, r.y1], [r.x1, r.y1]];
+  const err = (A, B, W, H, pts) => Math.max(...pts.map(([x, y]) => { const a = WB.regPoint(A, W, H, x, y), b = WB.regPoint(B, W, H, x, y); return Math.hypot(a[0] - b[0], a[1] - b[1]); }));
+  const pcCorners = pc => { const F = WB.frame(pc.cx, pc.cy, pc.angle); return [[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([i, j]) => WB.toImg(F, i * pc.w / 2, j * pc.h / 2)); };
+  const fmt = T => `a=${T.a.toFixed(2)} t=${T.tx.toFixed(1)},${T.ty.toFixed(1)}`;
+  const check = (ok, line) => { if (!ok) fails++; out.push((ok ? 'ok   ' : 'FAIL ') + line); say(); };
+  const sig = img => ({ w: img.w, h: img.h, data: WB.chemiSignal(img).sig });
+  try {
+    if (q.get('dir')) {
+      const dir = q.get('dir'), names = q.get('names').split(','), recs = [];
+      for (const n of names) { const d = await TIFF.decode(await (await fetch(dir + '/' + n)).arrayBuffer()); const img = { w: d.width, h: d.height, data: d.data }; recs.push({ name: n.slice(0, 2), img, kind: WB.classify(img, { name: 'x.tif' }) }); }
+      const W = recs[0].img.w, H = recs[0].img.h;
+      out.push(`size ${W}x${H}`);
+      const ch = recs.filter(r => r.kind === 'chemi'), mk = recs.filter(r => r.kind === 'marker');
+      ch.forEach(r => { r.sig = sig(r.img); });
+      let t = T0(); ch.concat(mk).forEach(r => { r.F = WB.regFeatures(r.kind === 'chemi' ? r.sig : r.img, r.kind); }); out.push(`features ${Math.round(T0() - t)} ms for ${recs.length}`); say();
+      // reference: where most pictures were taken (white light 04, exposure 03)
+      const byName = n => recs.find(r => r.name === n);
+      const refM = byName('04') || mk[0], refC = byName('03') || ch[0];
+      const strips = WB.findStrips(refM.img, 1);
+      const bb = strips.reduce((b, s) => ({ x0: Math.min(b.x0, s.cx - s.w / 2), y0: Math.min(b.y0, s.cy - s.h / 2), x1: Math.max(b.x1, s.cx + s.w / 2), y1: Math.max(b.y1, s.cy + s.h / 2) }), { x0: 1e9, y0: 1e9, x1: -1e9, y1: -1e9 });
+      out.push(`ref ${refC.name} / ${refM.name}, ${strips.length} strips, membrane ${Math.round(bb.x0)},${Math.round(bb.y0)}..${Math.round(bb.x1)},${Math.round(bb.y1)}`);
+      // A after B (both about the centre): R_A R_B (p − C) + C + R_A t_B + t_A
+      const comp = (A, B) => { const r = A.a * Math.PI / 180, c = Math.cos(r), s = Math.sin(r); return { a: A.a + B.a, tx: c * B.tx - s * B.ty + A.tx, ty: s * B.tx + c * B.ty + A.ty }; };
+      // 1. white-light photos as taken: the membrane lay in three places (01 | 04 05 08 10 | 11 13)
+      const mT = {};
+      mk.forEach(r => { t = T0(); const R = WB.registerRigid(refM.F, r.F); mT[r.name] = R; out.push(`white light ${r.name}: ${fmt(R)} ncc ${R.ncc0.toFixed(3)}->${R.ncc.toFixed(3)} ${Math.round(T0() - t)} ms`); });
+      const same = (a, b) => mT[a] && mT[b] && err(mT[a], mT[b], W, H, corners(bb)) < 1.5;
+      check(['05', '08', '10'].every(n => same(n, '04')) && same('11', '13') && !same('01', '04') && !same('11', '04') && !same('01', '11'), 'white light in three places: 01 | 04 05 08 10 | 11 13');
+      check(mk.every(r => mT[r.name].ncc > 0.93), 'white light matches ' + mk.map(r => r.name + ':' + mT[r.name].ncc.toFixed(3)).join(' '));
+      // 2. exposures against the reference exposure, next to the white-light photo of their capture
+      const pair = { '02': '01', '03': '04', '06': '05', '07': '08', '09': '10', '12': '11', '14': '13' };
+      ch.filter(r => r !== refC).forEach(r => {
+        const R = WB.registerRigid(refC.F, r.F, { fit: 0.3 }), m = mT[pair[r.name]], e = m ? err(R, m, W, H, corners(bb)) : NaN;
+        out.push(`exposure ${r.name}: ${fmt(R)} ncc ${R.ncc0.toFixed(3)}->${R.ncc.toFixed(3)} | white light ${pair[r.name]} ${m ? fmt(m) : '-'} | diff ${e.toFixed(1)} px`);
+      });
+      say();
+      // 3. moved copies, exact truth: 11 (white light) and 12 (exposure, against the other exposure 03)
+      const cases = [{ a: 0, tx: 37.3, ty: -21.6 }, { a: 2.5, tx: 140, ty: 85 }, { a: -7, tx: -260, ty: 120 }, { a: 0.6, tx: 8, ty: 5 }];
+      const movC = byName('12'), movM = byName('11');
+      cases.forEach(T => [movC, movM].forEach(r => {
+        const img = moved(r.kind === 'chemi' ? r.sig : r.img, T), F = WB.regFeatures(img, r.kind), truth = comp(T, mT['11']);
+        t = T0(); const R = WB.registerRigid(r.kind === 'chemi' ? refC.F : refM.F, F); const ms = Math.round(T0() - t);
+        const e = err(R, truth, W, H, corners(bb));
+        check(e < 4, `moved ${fmt(T)} ${r.name}${r.kind[0]}: got ${fmt(R)} ncc ${R.ncc0.toFixed(3)}->${R.ncc.toFixed(3)} err ${e.toFixed(2)} px ${ms} ms`);
+      }));
+      // 4. pieces moved on their own (a cut membrane put back piece by piece)
+      const T = { a: 2.5, tx: 140, ty: 85 }, extra = { 0: { a: 0.8, tx: -18, ty: 9 }, 3: { a: -1.5, tx: 25, ty: -14 } };
+      const base = mT['11'], pcsT = strips.map((s, k) => Object.assign({}, s, WB.regFrame(base, W, H, s), { T: extra[k] ? comp(extra[k], T) : T }));
+      [movC, movM].forEach(r => {
+        const img = moved(r.kind === 'chemi' ? r.sig : r.img, T, pcsT.filter((p, k) => extra[k])), F = WB.regFeatures(img, r.kind), RF = r.kind === 'chemi' ? refC.F : refM.F;
+        const dbg = [];
+        t = T0(); const G0 = WB.registerRigid(RF, F), P = WB.registerPieces(RF, F, G0, strips, { debug: dbg }); const ms = Math.round(T0() - t);
+        P.forEach((p, k) => {
+          // a piece that shows too little to tell (low correlation) keeps the whole membrane's transform
+          const truth = comp(pcsT[k].T, base), e0 = err(G0, truth, W, H, pcCorners(strips[k])), e = p ? err(p, truth, W, H, pcCorners(strips[k])) : Infinity;
+          const told = p && p.ncc >= 0.7, nccT = WB.registerPieces(RF, F, truth, [strips[k]], { reach: 1 })[0];
+          // exposures of one piece against another exposure: ~7 px when they show the bands differently
+          check(told ? e < (r.kind === 'chemi' ? 8 : 4) : !extra[k], `piece ${k}${extra[k] ? ' (moved on its own)' : ''} ${r.name}${r.kind[0]}: whole err ${e0.toFixed(1)} -> ${told ? 'piece err ' + e.toFixed(2) + ' px' : 'too little to tell'} ncc ${p ? p.ncc0.toFixed(3) + '->' + p.ncc.toFixed(3) : '-'} (at truth ${nccT ? nccT.ncc0.toFixed(3) : '-'}) | truth ${fmt(truth)} got ${p ? fmt(p) : '-'}`);
+        });
+        dbg.forEach(d => out.push('     ' + d));
+        out.push(`  pieces ${r.name}: ${ms} ms`);
+      });
+    } else {
+      // synthetic: the cut membrane, moved; a different membrane (scatter) must not match
+      const s1 = WBDemo.cutSession(), s2 = WBDemo.scatterSession();
+      const im = x => ({ w: x.width, h: x.height, data: x.data });
+      const c1 = im(s1.images[2]), m1 = im(s1.images[3]), c2 = im(s2.images[0]), m2 = im(s2.images[1]), W = c1.w, H = c1.h;
+      const F1 = WB.regFeatures(sig(c1), 'chemi'), M1 = WB.regFeatures(m1, 'marker');
+      const bb = { x0: 230, y0: 60, x1: 1230, y1: 1070 };
+      [{ a: 0, tx: 31, ty: -17 }, { a: 4, tx: -90, ty: 60 }, { a: -8, tx: 120, ty: 40 }].forEach(T => {
+        [['chemi', c1, F1], ['marker', m1, M1]].forEach(([kind, img, RF]) => {
+          const F = WB.regFeatures(moved(kind === 'chemi' ? sig(img) : img, T), kind);
+          const t = T0(), R = WB.registerRigid(RF, F), ms = Math.round(T0() - t), e = err(R, T, W, H, corners(bb));
+          check(e < 3, `demo moved ${fmt(T)} ${kind}: got ${fmt(R)} ncc ${R.ncc0.toFixed(3)}->${R.ncc.toFixed(3)} err ${e.toFixed(2)} ${ms} ms`);
+          if (e >= 3) out.push('   coarse: ' + WB.regCoarse(RF.lo, F.lo, null, 8).map(c => `${c.a}:${(c.tx * RF.lo.f).toFixed(0)},${(c.ty * RF.lo.f).toFixed(0)}/${c.peak.toFixed(3)}`).join(' '));
+        });
+      });
+      // a later capture: the membrane moved, its middle strip on its own as well (pieces must be recovered)
+      const comp = (A, B) => { const r = A.a * Math.PI / 180, c = Math.cos(r), s = Math.sin(r); return { a: A.a + B.a, tx: c * B.tx - s * B.ty + A.tx, ty: s * B.tx + c * B.ty + A.ty }; };
+      const strips = WBDemo.cutSession().opts.strips.map(s => ({ cx: s.x + s.w / 2 + s.dx, cy: s.y + s.h / 2 + s.dy, angle: s.angle, w: s.w, h: s.h }));
+      // (the strip leaves empty tray where it lay: it is cut out, the rest moved, then the strip put at its new place)
+      const later = (src, T, T2, st, fill) => {
+        const F0 = WB.frame(st.cx, st.cy, st.angle), cut = Float32Array.from(src.data);
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const [u, v] = WB.toFrame(F0, x, y); if (Math.abs(u) <= st.w / 2 && Math.abs(v) <= st.h / 2) cut[y * W + x] = fill; }
+        const rest = WB.regWarp({ w: W, h: H, data: cut }, inv(T), [], fill), piece = WB.regWarp(src, inv(T2), [], fill), F1 = WB.regFrame(T2, W, H, st), Fm = WB.frame(F1.cx, F1.cy, F1.angle);
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const [u, v] = WB.toFrame(Fm, x, y); if (Math.abs(u) <= st.w / 2 && Math.abs(v) <= st.h / 2) rest[y * W + x] = piece[y * W + x]; }
+        return { w: W, h: H, data: rest };
+      };
+      [[{ a: 3, tx: 220, ty: 130 }, { a: 0.6, tx: 15, ty: -8 }], [{ a: -2, tx: -150, ty: 60 }, { a: -0.5, tx: -12, ty: 10 }]].forEach(([T, X]) => {
+        const T2 = comp(X, T);
+        const img = later(m1, T, T2, strips[1], Engine.percentiles(m1.data, [3], 97)[0]), F = WB.regFeatures(img, 'marker');
+        const R = WB.registerRigid(M1, F, { coarse: true }), P = WB.registerPieces(M1, F, R, strips), Pt = WB.registerPieces(M1, F, T, strips, { fits: 2 });
+        P.forEach((p, k) => {
+          const truth = k === 1 ? T2 : T, e = p ? err(p, truth, W, H, pcCorners(strips[k])) : Infinity;
+          check(e < 3, `later capture ${fmt(T)} strip ${k}${k === 1 ? ' (own ' + fmt(X) + ')' : ''}: whole ${fmt(R)} ncc ${R.ncc.toFixed(3)} -> piece ${p ? fmt(p) : '-'} ncc ${p ? p.ncc.toFixed(3) : '-'} err ${e.toFixed(2)} (from truth: ncc ${Pt[k] ? Pt[k].ncc.toFixed(3) : '-'})`);
+        });
+      });
+      // another membrane: the best match stays poor
+      const Rc = WB.registerRigid(F1, WB.regFeatures(sig(c2), 'chemi')), Rm = WB.registerRigid(M1, WB.regFeatures(m2, 'marker'));
+      // bands alone cannot tell membranes with the same layout apart (loading controls in every lane): exposures
+      // only are never merged automatically; white-light photos can
+      check(Rc.ncc < 0.9, `other membrane, exposures: best ncc ${Rc.ncc.toFixed(3)} (${fmt(Rc)})`);
+      check(Rm.ncc < 0.75, `other membrane, white light: best ncc ${Rm.ncc.toFixed(3)} (${fmt(Rm)})`);
+    }
+  } catch (e) { out.push('ERROR ' + (e.stack || e)); fails++; }
+  say();
+})();
+</script></body></html>

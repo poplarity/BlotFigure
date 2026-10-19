@@ -33,15 +33,23 @@
   /* ---------- modes ---------- */
   App.setMode = function (m) {
     if (App.mode === 'marks' && m !== 'marks') closePop();
+    if (App.mode === 'align' && m !== 'align') G.View.alignEnd();
     App.mode = m;
     // the figure's banner for figure modes, the membrane view's banner for clicks on the membrane
-    const onView = m === 'addrow' || m === 'marks';
+    const onView = m === 'addrow' || m === 'marks' || m === 'align';
     $('modeBanner').classList.toggle('hidden', !m || onView);
     $('viewBanner').classList.toggle('hidden', !onView);
     $('modeText').textContent = m === 'group' ? '在成图上从第一个泳道名拖到最后一个' : '';
     $('viewModeText').textContent = m === 'addrow' ? '拖出一个框（只按框里的条带识别泳道），或点蛋白所在的高度'
-      : m === 'marks' ? '点 Marker 带添加刻度；拖动微调，点数字修改或删除' : '';
-    $('viewModeCancel').textContent = m === 'marks' ? '完成' : '取消 (Esc)';
+      : m === 'marks' ? '点 Marker 带添加刻度；拖动微调，点数字修改或删除'
+      : m === 'align' ? '拖动图片让条带落进框里 · Shift+拖动或 [ ] 旋转 · 方向键微调' : '';
+    $('viewModeExtra').innerHTML = m === 'align' ? '<button id="vmAuto" title="按白光图和条带自动对齐（整张膜的图都重新对齐）">自动对齐</button><button id="vmNone" title="按原样使用这张图，不移动">不对齐</button>' : '';
+    if (m === 'align') {
+      const id = App.alignImg;
+      $('vmAuto').onclick = () => { G.View.alignEnd(); App.mode = null; App.busy(true, '自动对齐…'); setTimeout(() => { App.autoAlign(id); App.busy(false); App.commit(); App.setMode('align'); G.View.alignStart(id); toast('已重新自动对齐这张膜的图'); }, 20); };
+      $('vmNone').onclick = () => { G.View.alignEnd(); App.setAlign(id, null); App.commit(); G.View.alignStart(id); toast('这张图按原样使用（不移动）'); };
+    }
+    $('viewModeCancel').textContent = m === 'marks' || m === 'align' ? '完成' : '取消 (Esc)';
     $('btnAddRow').classList.toggle('primary', m === 'addrow');
     $('btnAddGroup').classList.toggle('on', m === 'group');
     $('btnMarks').classList.toggle('on', m === 'marks');
@@ -62,8 +70,8 @@
   async function addFiles(files) {
     const n = await App.addFiles(files);
     if (!n) return;
-    const st = S(), named = st.rows.length;
-    toast(`已载入 ${n} 张图片：${st.blots.length} 张膜，识别出 ${named} 行条带`, 3400);
+    const st = S(), named = st.rows.length, moved = st.blots.reduce((s, b) => s + nMoved(b), 0);
+    toast(`已载入 ${n} 张图片：${st.blots.length} 张膜，识别出 ${named} 行条带` + (moved ? `；有 ${moved} 张拍摄时膜的位置不同，已自动对齐（标"已对齐"，在图片的 ⋯ 里可手动调整）` : ''), moved ? 6000 : 3400);
   }
   ['fileInput', 'fileInput2'].forEach(id => $(id).addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; }));
   async function loadDemo() {
@@ -131,6 +139,7 @@
     c.getContext('2d').putImageData(id, 0, 0);
     return c;
   }
+  const nMoved = b => b.images.filter(id => App.isMoved(id)).length;
   function renderBlots() {
     const st = S(), box = $('blotList'); box.innerHTML = '';
     st.blots.forEach(b => {
@@ -140,7 +149,7 @@
       const lads = G.ProteinLadders.all();
       const auto = A && A.ladderId ? G.ProteinLadders.get(A.ladderId) : null;
       card.innerHTML = `<div class="blot-head"><input type="text" value="${esc(b.name)}" placeholder="${esc(App.blotName(b))}"></div>
-        <div class="blot-sub">${nCh} 张曝光${nM ? ' + Marker 图' : '，<b style="color:var(--warn)">没有 Marker 图</b>'} · ${st.rows.filter(r => r.blot === b.id).length} 行${(b.pieces || []).length > 1 ? ` · ${b.pieces.length} 条膜条` : ''}</div>
+        <div class="blot-sub">${nCh} 张曝光${nM ? ' + Marker 图' : '，<b style="color:var(--warn)">没有 Marker 图</b>'} · ${st.rows.filter(r => r.blot === b.id).length} 行${(b.pieces || []).length > 1 ? ` · ${b.pieces.length} 条膜条` : ''}${nMoved(b) ? ` · <span title="拍摄之间膜的位置变过：这些图已对齐到同一位置">${nMoved(b)} 张已对齐</span>` : ''}</div>
         <div class="thumbs"></div>
         ${nM ? `<select class="ladder-sel"><option value="">Ladder：自动${auto ? '（' + esc(auto.name.replace(/\s*\(.*\)/, '')) + '）' : ''}</option>${lads.map(l => `<option value="${l.id}"${!b.ladderAuto && b.ladderId === l.id ? ' selected' : ''}>${esc(l.name)}</option>`).join('')}</select>` : ''}`;
       const th = card.querySelector('.thumbs');
@@ -152,7 +161,10 @@
         // which figure rows take their bands from this exposure (row colours)
         const users = rec.kind === 'chemi' ? st.rows.filter(r => !r.hidden && r.img === rec.id) : [];
         const usesHtml = users.length ? `<span class="uses" title="成图中用这张曝光的行：${esc(users.map(r => r.name || (App.rowKda(r) ? '≈' + Math.round(App.rowKda(r)) + ' kDa' : '未命名')).join('、'))}">${users.map(r => `<i style="background:${App.rowColor(r)}"></i>`).join('')}</span>` : '';
-        t.insertAdjacentHTML('beforeend', `${rec.kind === 'marker' ? '<span class="kind">Marker</span>' : ''}${usesHtml}<div class="cap">${rec.kind === 'marker' ? '白光' : `<b>${esc(App.expoLabel(rec))}</b>`}</div><button class="more" title="更多">⋯</button>`);
+        // the membrane lay elsewhere in this picture: aligned onto the others (the grid's own picture: 基准)
+        const al = App.alignOf(rec.id), alHtml = App.isMoved(rec.id) ? `<span class="aligned" title="${esc(alignWords(rec, b))}；在 ⋯ 里可手动调整">${al.how === 'manual' ? '手动' : '已对齐'}</span>`
+          : b.frame === rec.id && b.images.some(id => App.isMoved(id)) ? '<span class="aligned base" title="基准：这张膜的其他图都对齐到这张">基准</span>' : '';
+        t.insertAdjacentHTML('beforeend', `${rec.kind === 'marker' ? '<span class="kind">Marker</span>' : ''}${usesHtml}${alHtml}<div class="cap">${rec.kind === 'marker' ? '白光' : `<b>${esc(App.expoLabel(rec))}</b>`}</div><button class="more" title="更多">⋯</button>`);
         t.onclick = e => { if (e.target.classList.contains('more')) return; App.viewBlot = b.id; App.viewImg = rec.id; App.emit('select'); G.View.fitFull(); };
         t.querySelector('.more').onclick = e => { e.stopPropagation(); imagePopover(rec, b, t); };
         th.appendChild(t);
@@ -207,15 +219,34 @@
     pop.querySelector('#pAutoMarks').onclick = () => { pc.marks = null; popCancel = null; closePop(); App.commit(); toast(`${App.pieceName(b, pc)}已恢复自动识别的 Marker`); };
     if (!sug) setTimeout(() => inp.focus(), 0);
   }
+  // where a picture lies on its membrane's grid, in words
+  function alignWords(rec, b) {
+    const al = App.alignOf(rec.id), anyMoved = b.images.some(id => App.isMoved(id));
+    if (App.isMoved(rec.id)) return `${al.how === 'manual' ? '手动对齐' : '拍这张时膜的位置不同，已自动对齐'}（${App.alignText(rec.id)}）`;
+    if (al && al.how === 'manual') return '按原样使用（不移动）';
+    return b.frame === rec.id && anyMoved ? '基准：这张膜的其他图都对齐到这张' : '与其他图位置一致';
+  }
   function imagePopover(rec, b) {
-    const others = S().blots.filter(x => x !== b);
+    const others = S().blots.filter(x => x !== b), al = App.alignOf(rec.id);
     pop.innerHTML = `<h4>${esc(rec.name)}</h4>
       <div class="field inline"><label class="inline-label">类型</label>
         <div class="seg"><button data-k="chemi" class="${rec.kind === 'chemi' ? 'on' : ''}">曝光图</button><button data-k="marker" class="${rec.kind === 'marker' ? 'on' : ''}">Marker 白光</button></div></div>
       ${rec.kind === 'chemi' ? `<div class="field inline"><label class="inline-label">曝光时间</label><input type="number" id="pExpo" class="num" step="any" value="${rec.exposure != null ? rec.exposure : ''}" placeholder="秒"> s</div>` : ''}
       <div class="field inline"><label class="inline-label">移到</label><select id="pMove" style="flex:1"><option value="">—</option>${others.map(o => `<option value="${o.id}">${esc(App.blotName(o))}</option>`).join('')}<option value="new">新的一张膜</option></select></div>
+      <div class="field inline align-row"><label class="inline-label">位置</label><span class="align-info">${esc(alignWords(rec, b))}</span></div>
+      <div class="actions left"><button class="btn sm" id="pAlign" title="在膜图上拖动这张图，让条带落进框里">手动对齐…</button>${al && al.how === 'manual' ? '<button class="btn sm" id="pAutoAlign">恢复自动对齐</button>' : ''}</div>
       <div class="actions"><button class="btn sm danger" id="pDel">移除这张图</button><button class="btn sm primary" id="pOk">完成</button></div>`;
     placePop(event.target);
+    pop.querySelector('#pAlign').onclick = () => {
+      closePop();
+      if (App.mode) App.setMode(null);
+      App.viewBlot = b.id; App.viewImg = rec.id; App.alignImg = rec.id;
+      App.emit('select'); G.View.fitFull();
+      App.setMode('align'); G.View.alignStart(rec.id);
+      $('editorBox').focus({ preventScroll: true });
+    };
+    const aa = pop.querySelector('#pAutoAlign');
+    if (aa) aa.onclick = () => { App.busy(true, '自动对齐…'); setTimeout(() => { App.autoAlign(rec.id); App.busy(false); App.commit(); closePop(); toast('已恢复自动对齐'); }, 20); };
     pop.querySelectorAll('[data-k]').forEach(btn => btn.onclick = () => { App.busy(true, '重新分析…'); setTimeout(() => { App.setKind(rec.id, btn.dataset.k); App.busy(false); App.commit(); closePop(); }, 20); });
     const ex = pop.querySelector('#pExpo');
     if (ex) ex.addEventListener('change', done(e => { App.setExposure(rec.id, +e.target.value); }));
@@ -735,25 +766,26 @@
     const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
     ctx.fillStyle = '#000'; ctx.font = `bold ${fs}px Arial`; ctx.fillText('Uncropped original images', 14, fs * 1.3);
     let y0 = fs * 2;
+    // every picture as taken (not resampled onto the membrane's grid); boxes drawn where they lie in it
     pages.forEach((p, k) => {
-      const sc = Wout / p.rec.img.w, h = p.rec.img.h * sc, top = y0 + fs * 2.2;
+      const sc = Wout / p.rec.img.w, h = p.rec.img.h * sc, top = y0 + fs * 2.2, toRaw = (pc, xy) => App.rawPoint(p.rec.id, pc.id, xy[0], xy[1]);
       ctx.fillStyle = '#000'; ctx.font = `bold ${fs * 0.8}px Arial`;
       ctx.fillText(`${App.blotName(p.b)} — ${p.rec.kind === 'marker' ? 'white-light marker image' : 'exposure ' + App.expoLabel(p.rec)} — ${p.rec.name}`, 14, y0 + fs * 1.4);
-      ctx.drawImage(G.View.dispCanvas(p.rec), 0, top, Wout, h);
+      ctx.drawImage(G.View.dispCanvas(p.rec, true), 0, top, Wout, h);
       const vis = new Set(App.figLanes());
       st.rows.filter(r => !r.hidden && r.blot === p.b.id && (p.rec.kind === 'marker' || r.img === p.rec.id)).forEach(r => {
         let last = null;
         r.segs.forEach(sg => {
           const pc = App.piece(p.b, sg.piece); if (!pc || !sg.lanes.length) return;
           const F = WB.frame(pc.cx, pc.cy, pc.angle), vT = sg.vc - r.above, vB = sg.vc + r.below;
-          const pts = [[sg.x0, vT], [sg.x1, vT], [sg.x1, vB], [sg.x0, vB]].map(([u, v]) => WB.toImg(F, u, v));
+          const pts = [[sg.x0, vT], [sg.x1, vT], [sg.x1, vB], [sg.x0, vB]].map(([u, v]) => toRaw(pc, WB.toImg(F, u, v)));
           ctx.strokeStyle = '#e03131'; ctx.lineWidth = 2; ctx.beginPath();
           pts.forEach(([x, y], i) => { if (i) ctx.lineTo(x * sc, top + y * sc); else ctx.moveTo(x * sc, top + y * sc); }); ctx.closePath(); ctx.stroke();
           if (!last || pts[1][0] > last[0]) last = pts[1];
           // figure column of every lane along the top of the box; lanes left out marked X, ladder M
           ctx.fillStyle = '#e03131'; ctx.font = `${fs * 0.55}px Arial`; ctx.textAlign = 'center';
           App.segCols(sg).forEach(s => {
-            const [x, y] = WB.toImg(F, s.u, vT);
+            const [x, y] = toRaw(pc, WB.toImg(F, s.u, vT));
             ctx.fillText(s.r === 'm' ? 'M' : s.r === 's' && vis.has(s.col) ? String(s.col) : 'X', x * sc, top + y * sc - 4);
           });
           ctx.textAlign = 'left';
@@ -793,8 +825,32 @@
 
   /* ---------- dev params ---------- */
   const qs = new URLSearchParams(location.search);
-  if (qs.get('demo') === '1' || qs.get('srcdir')) setTimeout(async () => {
-    if (qs.get('srcdir')) {
+  if (qs.get('demo') === '1' || qs.get('srcdir') || qs.get('demomove')) setTimeout(async () => {
+    if (qs.get('noalign') === '1') App.devNoAlign = true;
+    if (qs.get('dbg') === '1') App._dbg = [];
+    // &move=a.tif:2.5,140,85;b.tif:…  the membrane as if moved before those pictures (degrees, px)
+    if (qs.get('move')) {
+      App.devMove = {};
+      qs.get('move').split(';').forEach(s => { const [n, v] = s.split(':'), [a, tx, ty] = v.split(',').map(Number); App.devMove[n] = { a, tx, ty }; });
+    }
+    if (qs.get('demomove')) {
+      // the cut demo membrane and a later capture of it (an exposure and its white-light photo): the membrane
+      // moved as a whole, its middle strip on its own as well (&demomove=a,tx,ty,a2,tx2,ty2)
+      const s = G.WBDemo.cutSession(), [a, tx, ty, a2, tx2, ty2] = qs.get('demomove').split(',').map(Number);
+      const T = { a, tx, ty }, T2 = WB.regCompose({ a: a2, tx: tx2, ty: ty2 }, T), W = s.images[0].width, H = s.images[0].height;
+      const st = { cx: 734, cy: 503, angle: -0.4, w: 1000, h: 250 }, inside = (F, x, y) => { const [u, v] = WB.toFrame(F, x, y); return Math.abs(u) <= st.w / 2 && Math.abs(v) <= st.h / 2; };
+      // the strip leaves empty tray where it lay: cut out, the rest moved, the strip put at its new place
+      const later = [2, 3].map(k => {
+        const im = s.images[k], bg = WB.classify({ w: W, h: H, data: im.data }, { name: im.name }) === 'marker' ? 3 : 50;
+        const fill = G.Engine.percentiles(im.data, [bg], 97)[0], F0 = WB.frame(st.cx, st.cy, st.angle), cut = Float32Array.from(im.data);
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (inside(F0, x, y)) cut[y * W + x] = fill;
+        const out = WB.regWarp({ w: W, h: H, data: cut }, WB.regInverse(T), [], fill), piece = WB.regWarp({ w: W, h: H, data: im.data }, WB.regInverse(T2), [], fill);
+        const g = WB.regFrame(T2, W, H, st), F1 = WB.frame(g.cx, g.cy, g.angle);
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (inside(F1, x, y)) out[y * W + x] = piece[y * W + x];
+        return { width: W, height: H, data: out, name: im.name.replace('.tif', '_later.tif') };
+      });
+      await addFiles(G.WBDemo.files(s).concat(later.map(im => ({ name: im.name, buffer: G.WBDemo.encodeTiff16(im) }))));
+    } else if (qs.get('srcdir')) {
       const list = qs.get('srcs').split(','), files = [];
       for (const n of list) files.push({ name: n, buffer: await (await fetch(qs.get('srcdir') + '/' + n)).arrayBuffer() });
       await addFiles(files);
@@ -808,6 +864,25 @@
     if (qs.get('zoomsel') === '1' && App.selRow) G.View.fitRow(App.row(App.selRow));
     if (qs.get('mode') === 'marks') $('btnMarks').click(); else if (qs.get('mode')) App.setMode(qs.get('mode'));
     if (qs.get('scrollto') && $(qs.get('scrollto'))) $(qs.get('scrollto')).scrollIntoView({ block: 'center' });
+    // &popimg=12: the ⋯ menu of the picture whose name starts so; &alignimg=12: aligning it by hand (&alignby=dx,dy,deg)
+    const byStart = p => [...App.images.values()].find(r => r.name.startsWith(p));
+    if (qs.get('popimg') && byStart(qs.get('popimg'))) {
+      const rec = byStart(qs.get('popimg')), th = [...document.querySelectorAll('#blotList .thumb')].find(t => t.title.startsWith(rec.name));
+      if (th) th.querySelector('.more').click();
+    }
+    if (qs.get('alignimg') && byStart(qs.get('alignimg'))) {
+      const rec = byStart(qs.get('alignimg')), b = st.blots.find(x => x.images.includes(rec.id));
+      App.viewBlot = b.id; App.viewImg = rec.id; App.alignImg = rec.id; App.emit('select'); G.View.fitFull();
+      App.setMode('align'); G.View.alignStart(rec.id);
+      if (qs.get('alignby')) {
+        const [dx, dy, deg] = qs.get('alignby').split(',').map(Number), cv = $('editor'), R = cv.getBoundingClientRect();
+        const ev = (type, x, y, opt) => (type === 'mousedown' ? cv : window).dispatchEvent(new MouseEvent(type, Object.assign({ clientX: R.left + x, clientY: R.top + y, bubbles: true }, opt)));
+        const s = G.View.probeScale ? G.View.probeScale() : 1, x0 = R.width / 2, y0 = R.height / 2;
+        ev('mousedown', x0, y0); ev('mousemove', x0 + dx * s / 2, y0 + dy * s / 2); ev('mousemove', x0 + dx * s, y0 + dy * s);
+        if (!qs.get('alignhold')) ev('mouseup', x0 + dx * s, y0 + dy * s);
+        if (deg) { $('editorBox').focus(); for (let k = 0; k < Math.abs(deg) * 10; k++) $('editorBox').dispatchEvent(new KeyboardEvent('keydown', { key: deg > 0 ? ']' : '[', bubbles: true })); }
+      }
+    }
     // scripted checks of the editing functions (tests): a log of every row's boxes (piece:first column:lane
     // roles), its figure columns and size after each step
     const scen = qs.get('scenario'), log = [];
@@ -872,6 +947,26 @@
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', altKey: true, bubbles: true })); order('Alt+Up on 2nd');
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true }));
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true })); order('Alt+Down x2');
+    }
+    if (scen === 'realign') {
+      // aligning exposure 12 by hand: drag, turn with keys, finish; undo / redo resample it again; as taken; automatic
+      const rec = byStart('12'), b = st.blots.find(x => x.images.includes(rec.id)), cv = $('editor');
+      const al = tag => { const a = App.alignOf(rec.id); let s = 0; for (let i = 0; i < rec.cs.sig.length; i += 9973) s += rec.cs.sig[i];
+        log.push(`${tag} | ${a ? `${a.how} ${a.a.toFixed(2)},${a.tx.toFixed(1)},${a.ty.toFixed(1)}` : 'none'} | raw ${rec.raw ? 'kept' : 'none'} sig ${s.toFixed(3)} | rows ${S().rows.length}`); };
+      al('auto');
+      App.viewBlot = b.id; App.viewImg = rec.id; App.alignImg = rec.id; App.emit('select'); G.View.fitFull();
+      App.setMode('align'); G.View.alignStart(rec.id);
+      const R = cv.getBoundingClientRect(), s = G.View.probeScale(), x0 = R.width / 2, y0 = R.height / 2;
+      const ev = (type, x, y) => (type === 'mousedown' ? cv : window).dispatchEvent(new MouseEvent(type, { clientX: R.left + x, clientY: R.top + y, bubbles: true }));
+      ev('mousedown', x0, y0); ev('mousemove', x0 + 30 * s, y0 + 15 * s); ev('mousemove', x0 + 60 * s, y0 + 30 * s); ev('mouseup', x0 + 60 * s, y0 + 30 * s);
+      al('dragged +60,+30');
+      $('editorBox').focus();
+      for (let k = 0; k < 10; k++) $('editorBox').dispatchEvent(new KeyboardEvent('keydown', { key: ']', bubbles: true }));
+      $('editorBox').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', shiftKey: true, bubbles: true }));
+      App.setMode(null); al('turned +1°, left 10, done');
+      App.undo(); al('undo'); App.undo(); al('undo x2'); App.redo(); al('redo');
+      App.setMode('align'); G.View.alignStart(rec.id); $('vmNone').click(); App.setMode(null); al('as taken');
+      App.autoAlign(rec.id); App.commit(); al('automatic again');
     }
     if (scen === 'lanes') {
       // lane edits of one box (the lowest visible row): resize, re-detect, even spacing, add / switch / remove
@@ -1011,8 +1106,10 @@
       G.Export.download = orig;
       window.__exports = got;
     }
+    const nm = id => (App.images.get(id) || { name: '?' }).name.slice(0, 2);
     document.title = 'READY ' + JSON.stringify({
-      exports: window.__exports, scen: window.__scen,
+      exports: window.__exports, scen: window.__scen, dbg: App._dbg,
+      align: st.blots.map(b => `grid ${b.frame ? nm(b.frame) : '-'} marker ${b.marker ? nm(b.marker) : '-'}: ` + b.images.filter(id => st.align && st.align[id]).map(id => { const a = st.align[id]; return `${nm(id)}=${a.a.toFixed(2)},${a.tx.toFixed(1)},${a.ty.toFixed(1)}${a.pieces ? '+' + Object.keys(a.pieces).map(p => (App.piece(b, p) || {}).letter).join('') : ''}/${a.by}`; }).join(' ')),
       blots: st.blots.map(b => { const A = App.analysis[b.id]; return { n: b.images.length, kinds: b.images.map(id => App.images.get(id).name.slice(0, 2) + App.images.get(id).kind[0]).join(' '), ladder: b.ladderId,
         strips: A && A.strips.map(s => `${Math.round(s.cx)},${Math.round(s.cy)} ${s.angle}° ${Math.round(s.w)}x${Math.round(s.h)}`), pitch: A && Math.round(A.pitch),
         pieces: (b.pieces || []).map(p => `${p.letter} col0=${p.col0} p=${p.pitch.toFixed(1)} ${(p.roles || []).map(x => x[0]).join('')} lad=${(p.ladderUs || []).map(Math.round).join('/')}${p.marks ? ' marks=' + p.marks.map(m => m.kda).join('/') : ''}`),

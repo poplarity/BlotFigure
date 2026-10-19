@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>register2</title></head>
+<body><pre id="out">running</pre>
+<script src="../js/tiff.js"></script>
+<script src="../js/engine.js"></script>
+<script src="../js/wbengine.js"></script>
+<script>
+/* Exposure <-> white-light registration by the outline of the membrane: in an exposure the membrane glows a
+ * little above the tray. Every exposure against every white-light photo: transform and correlation.
+ * ?dir=&names=  Title: R2 {out} */
+(async () => {
+  const q = new URLSearchParams(location.search), out = [];
+  const say = () => { document.title = 'R2 ' + JSON.stringify({ out }); document.getElementById('out').textContent = out.join('\n'); };
+  try {
+    const dir = q.get('dir'), names = q.get('names').split(','), recs = [];
+    for (const n of names) { const d = await TIFF.decode(await (await fetch(dir + '/' + n)).arrayBuffer()); const img = { w: d.width, h: d.height, data: d.data }; recs.push({ name: n.slice(0, 2), img, kind: WB.classify(img, { name: 'x.tif' }) }); }
+    const W = recs[0].img.w, H = recs[0].img.h, big = Math.max(W, H);
+    // the glow of the membrane: bands removed (opening), normalised between low percentiles, then its edges
+    const glow = (sig, f) => {
+      const d = WB.down(sig, f), th = WB.tophat(d.data, d.w, d.h, Math.max(3, Math.round(60 / f))), op = new Float32Array(d.data.length);
+      for (let i = 0; i < op.length; i++) op[i] = d.data[i] - th[i];
+      const b = WB.blur2d(op, d.w, d.h, 1.2), [p5, p70] = Engine.percentiles(b, [5, 70], 1), out = new Float32Array(b.length), n = new Float32Array(b.length);
+      for (let i = 0; i < b.length; i++) n[i] = Math.max(0, Math.min(1, (b[i] - p5) / Math.max(1e-9, p70 - p5)));
+      for (let y = 1; y < d.h - 1; y++) for (let x = 1; x < d.w - 1; x++) { const i = y * d.w + x; out[i] = Math.hypot(n[i + 1] - n[i - 1], n[i + d.w] - n[i - d.w]); }
+      return { w: d.w, h: d.h, data: out, f, W, H };
+    };
+    const mk = recs.filter(r => r.kind === 'marker'), ch = recs.filter(r => r.kind === 'chemi');
+    mk.forEach(r => { r.F = WB.regFeatures(r.img, 'marker'); });
+    ch.forEach(r => { const s = { w: W, h: H, data: WB.chemiSignal(r.img).sig }; r.F = { kind: 'glow', lo: glow(s, Math.ceil(big / 200)), hi: glow(s, Math.ceil(big / 640)) }; });
+    const fmt = T => `a=${T.a.toFixed(2)} t=${T.tx.toFixed(1)},${T.ty.toFixed(1)}`;
+    // markers among themselves
+    mk.forEach(m => { const R = WB.registerRigid(mk[0].F, m.F); out.push(`marker ${m.name} vs ${mk[0].name}: ${fmt(R)} ncc ${R.ncc0.toFixed(3)}->${R.ncc.toFixed(3)}`); });
+    say();
+    // exposures among themselves (band features)
+    if (q.get('pairs')) {
+      ch.forEach(r => { r.B = WB.regFeatures({ w: W, h: H, data: WB.chemiSignal(r.img).sig }, 'chemi'); });
+      ch.forEach((a, i) => ch.forEach((b, j) => { if (j <= i) return; const R = WB.registerRigid(a.B, b.B, { fit: 0.3 }); out.push(`chemi ${b.name} vs ${a.name}: ${fmt(R)} ncc ${R.ncc0.toFixed(3)}->${R.ncc.toFixed(3)}`); }));
+      say(); return;
+    }
+    // each exposure's glow against each white-light photo (cross-modal), and against the first marker with the
+    // other markers' transforms as starting points
+    ch.forEach(c => {
+      const line = mk.map(m => { const R = WB.registerRigid(m.F, c.F, { fit: 0.3 }); return `${m.name}:${fmt(R)}/${R.ncc0.toFixed(2)}->${R.ncc.toFixed(2)}`; });
+      out.push(`chemi ${c.name} | ${line.join(' | ')}`); say();
+    });
+  } catch (e) { out.push('ERROR ' + (e.stack || e)); }
+  say();
+})();
+</script></body></html>

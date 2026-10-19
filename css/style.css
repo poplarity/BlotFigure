@@ -105,6 +105,9 @@ body.dragging #dropHint.hidden { display: flex !important; z-index: 5; }
 .mode-banner button { border: none; background: rgba(255,255,255,.14); color: #fff; border-radius: 999px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
 #viewBanner { max-width: calc(100% - 24px); }
 #viewBanner span { overflow: hidden; text-overflow: ellipsis; }
+#viewBanner #viewModeText { min-width: 0; }
+#viewBanner #viewModeExtra { display: flex; gap: 6px; flex: none; overflow: visible; }
+#viewBanner #viewModeExtra:empty { display: none; }
 
 /* ---------- panel ---------- */
 .sec { padding: 14px 16px; border-bottom: 1px solid var(--line-2); }
@@ -237,6 +240,11 @@ body.dragging #dropHint.hidden { display: flex !important; z-index: 5; }
 .thumb .uses { position: absolute; left: 3px; bottom: 19px; display: flex; gap: 2px; padding: 2px 3px; background: rgba(255,255,255,.92); border-radius: 4px; }
 .thumb .uses i { width: 7px; height: 7px; border-radius: 50%; display: block; }
 .thumb .kind { position: absolute; left: 2px; top: 2px; font-size: 9.5px; background: #fff3c4; color: #7a5a00; border-radius: 3px; padding: 0 3px; }
+/* the membrane lay elsewhere in this picture: aligned onto the others */
+.thumb .aligned { position: absolute; right: 2px; bottom: 19px; font-size: 9.5px; background: #e3edff; color: #1d4fbf; border-radius: 3px; padding: 0 3px; }
+.thumb .aligned.base { background: #eef1f5; color: #4a5563; }
+.popover .align-info { font-size: 12px; color: var(--muted); line-height: 1.4; }
+.popover .actions.left { justify-content: flex-start; margin-top: 2px; }
 .ladder-sel { margin-top: 6px; font-size: 12px; }
 .row-item { display: flex; align-items: center; gap: 5px; padding: 4px 6px; border-radius: var(--r-sm); border: 1px solid transparent; }
 .row-item:hover { background: #f6f8fb; }

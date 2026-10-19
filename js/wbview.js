@@ -5,7 +5,8 @@
  * at the same spacing; drag inside to move it (Shift: all the row's boxes up/down); drag a lane line to move
  * that lane; double-click inside to add a lane; click a label to switch sample / left out / marker.
  * Modes: 'addrow' click adds a row at that height, or drag out a box: a row from that box alone; 'marks'
- * click on a piece adds a marker band, drag moves one, click its size to change or delete it. */
+ * click on a piece adds a marker band, drag moves one, click its size to change or delete it; 'align' the
+ * picture as taken is dragged / turned until its bands sit in the boxes (the membrane had moved). */
 (function (G) {
   'use strict';
   const App = G.BApp, WB = G.WB;
@@ -28,22 +29,25 @@
     }
     return App.images.get(App.viewImg);
   }
-  // display canvas of a whole image with its current levels (markers: auto stretch)
-  function dispCanvas(rec) {
+  // display canvas of a whole image with its current levels (markers: auto stretch); raw: the picture as taken
+  // (not resampled onto the membrane's grid)
+  function dispCanvas(rec, raw) {
+    const src = raw && rec.raw ? rec.raw : rec, slot = src === rec ? '_disp' : '_dispRaw';
     const lv = rec.kind === 'chemi' ? App.levelsOf(rec.id) : null;
-    const key = rec.kind === 'chemi' ? [lv.black, lv.white, App.S.style.invert].join('|') : 'm';
-    if (rec._disp && rec._dispKey === key) return rec._disp;
-    const c = document.createElement('canvas'); c.width = rec.img.w; c.height = rec.img.h;
-    const id = new ImageData(rec.img.w, rec.img.h), n = rec.img.w * rec.img.h;
+    const key = (rec.kind === 'chemi' ? [lv.black, lv.white, App.S.style.invert].join('|') : 'm') + (src === rec ? '|' + (rec._alignKey || '') : '');
+    if (rec[slot] && rec[slot + 'Key'] === key) return rec[slot];
+    const c = document.createElement('canvas'); c.width = src.img.w; c.height = src.img.h;
+    const id = new ImageData(src.img.w, src.img.h), n = src.img.w * src.img.h;
     if (rec.kind === 'chemi') {
-      const map = App.mapper(rec.id), s = rec.cs.sig;
+      const map = App.mapper(rec.id), s = src.cs.sig;
       for (let i = 0; i < n; i++) { const v = map(s[i]); id.data[i * 4] = id.data[i * 4 + 1] = id.data[i * 4 + 2] = v; id.data[i * 4 + 3] = 255; }
     } else {
-      const [lo, hi] = G.Engine.percentiles(rec.img.data, [0.5, 99.5], 5), sc = 255 / Math.max(1e-6, hi - lo);
-      for (let i = 0; i < n; i++) { const v = Math.max(0, Math.min(255, (rec.img.data[i] - lo) * sc)); id.data[i * 4] = id.data[i * 4 + 1] = id.data[i * 4 + 2] = v; id.data[i * 4 + 3] = 255; }
+      const [lo, hi] = G.Engine.percentiles(src.img.data, [0.5, 99.5], 5), sc = 255 / Math.max(1e-6, hi - lo);
+      for (let i = 0; i < n; i++) { const v = Math.max(0, Math.min(255, (src.img.data[i] - lo) * sc)); id.data[i * 4] = id.data[i * 4 + 1] = id.data[i * 4 + 2] = v; id.data[i * 4 + 3] = 255; }
     }
     c.getContext('2d').putImageData(id, 0, 0);
-    rec._disp = c; rec._dispKey = key; rec._sat = null;
+    rec[slot] = c; rec[slot + 'Key'] = key;
+    if (src === rec) rec._sat = null;
     return c;
   }
   function satCanvas(rec) {
@@ -121,8 +125,16 @@
     const b = App.blot(App.viewBlot);
     ctx.imageSmoothingEnabled = view.s < 2;
     ctx.save(); ctx.translate(view.ox, view.oy); ctx.scale(view.s, view.s);
-    ctx.drawImage(dispCanvas(rec), 0, 0);
-    if (document.getElementById('showSat').checked && rec.kind === 'chemi') ctx.drawImage(satCanvas(rec), 0, 0);
+    if (aligning(rec)) {
+      // the picture as taken, placed by the transform being set (it maps the grid to the picture: drawn with
+      // its inverse), over the grid's outlines and boxes
+      const m = WB.regMatrix(WB.regInverse(align.T), rec.img.w, rec.img.h);
+      ctx.transform(m[0], m[3], m[1], m[4], m[2], m[5]);
+      ctx.drawImage(dispCanvas(rec, true), 0, 0);
+    } else {
+      ctx.drawImage(dispCanvas(rec), 0, 0);
+      if (document.getElementById('showSat').checked && rec.kind === 'chemi') ctx.drawImage(satCanvas(rec), 0, 0);
+    }
     ctx.restore();
     const line = (pts, close) => { ctx.beginPath(); pts.forEach(([x, y], i) => { const p = toScr(x, y); if (i) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y); }); if (close) ctx.closePath(); };
     const marking = App.mode === 'marks';
@@ -232,10 +244,32 @@
   }
   function roundRect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
 
+  /* ---------- aligning a picture by hand ('align' mode): drag = shift, Shift+drag = turn about the membrane's
+   * middle, ←→↑↓ 1 px (Shift 10), [ ] 0.1° (Shift 1°). Set when a drag ends / the keys rest. ---------- */
+  let align = null;            // {id, T (live), T0 (as the mode began), timer}
+  const aligning = rec => App.mode === 'align' && align && rec && rec.id === align.id;
+  function alignStart(id) {
+    const al = App.alignOf(id);
+    align = { id, T: al ? { a: al.a, tx: al.tx, ty: al.ty } : { a: 0, tx: 0, ty: 0 } };
+    align.T0 = Object.assign({}, align.T);
+    draw();
+  }
+  // the live transform made the picture's alignment (resampled), once it differs from what is set
+  function alignCommit() {
+    if (!align) return;
+    clearTimeout(align.timer);
+    const al = App.alignOf(align.id), cur = al ? { a: al.a, tx: al.tx, ty: al.ty } : { a: 0, tx: 0, ty: 0 };
+    if (Math.abs(cur.a - align.T.a) < 1e-4 && Math.abs(cur.tx - align.T.tx) < 0.01 && Math.abs(cur.ty - align.T.ty) < 0.01) return;
+    App.setAlign(align.id, align.T); App.commit();
+  }
+  function alignEnd() { alignCommit(); align = null; }
+  const alignLater = () => { clearTimeout(align.timer); align.timer = setTimeout(alignCommit, 450); };
+
   function hitTest(sx, sy) {
     const b = App.blot(App.viewBlot); if (!b) return { type: 'pan' };
     if (spaceDown) return { type: 'pan' };
     const p = toImg(sx, sy), tol = 6 / view.s;
+    if (App.mode === 'align') return aligning(curImage()) ? { type: 'align', p } : { type: 'pan', p };
     if (App.mode === 'marks') {
       for (const pc of b.pieces || []) {
         const [u, v] = WB.toFrame(pFrame(pc), p.x, p.y);
@@ -273,7 +307,7 @@
   }
   const CURSORS = { nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize', n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize' };
   const cursorFor = h => (!h ? 'default' : h.type === 'resize' ? CURSORS[h.k] : h.type === 'mark' ? 'ns-resize' : h.type === 'lane' ? 'ew-resize'
-    : h.type === 'move' ? 'move' : h.type === 'lanechip' ? 'pointer' : h.type === 'newmark' || h.type === 'mode' ? 'crosshair' : App.mode ? 'crosshair' : 'grab');
+    : h.type === 'move' || h.type === 'align' ? 'move' : h.type === 'lanechip' ? 'pointer' : h.type === 'newmark' || h.type === 'mode' ? 'crosshair' : App.mode ? 'crosshair' : 'grab');
 
   cv.addEventListener('mousedown', e => {
     if (!App.S) return;
@@ -301,6 +335,7 @@
       return;
     }
     drag = { h, sx, sy, p0: p, view0: Object.assign({}, view), moved: false };
+    if (h.type === 'align') { drag.T0 = Object.assign({}, align.T); drag.turn = e.shiftKey; drag.pivot = App.membraneCentre(b); }
     if (h.type === 'mark') {
       // a detected or predicted band becomes a hand-set mark when touched
       const marks = App.manualMarks(b, h.pc);
@@ -333,6 +368,15 @@
     const h = drag.h, p = toImg(sx, sy);
     if (h.type === 'newbox') { drag.cur = p; draw(); return; }
     if (h.type === 'pan') { view.ox = drag.view0.ox + sx - drag.sx; view.oy = drag.view0.oy + sy - drag.sy; draw(); return; }
+    if (h.type === 'align') {
+      const rec = curImage(), [px, py] = drag.pivot;
+      if (drag.turn) {
+        const deg = (Math.atan2(p.y - py, p.x - px) - Math.atan2(drag.p0.y - py, drag.p0.x - px)) * 180 / Math.PI;
+        align.T = App.alignTurned(drag.T0, deg, px, py, rec.img.w, rec.img.h);
+      } else align.T = App.alignShifted(drag.T0, p.x - drag.p0.x, p.y - drag.p0.y);
+      draw();
+      return;
+    }
     const F = pFrame(h.pc), [u, v] = WB.toFrame(F, p.x, p.y), [u0, v0] = WB.toFrame(F, drag.p0.x, drag.p0.y), du = u - u0, dv = v - v0;
     if (h.type === 'mark') { if (drag.mark && drag.moved) { drag.mark.v = drag.v0 + dv; draw(); App.refresh(); } return; }
     if (!drag.moved) return;
@@ -373,6 +417,7 @@
       } else draw();
       return;
     }
+    if (d.h.type === 'align') { if (d.moved) alignCommit(); return; }
     if (d.h.type === 'pan' && !d.moved) { App.selRow = null; App.selSeg = null; App.selLane = null; App.emit('select'); }
     if (d.h.type === 'mark') {
       if (d.moved) App.commit();
@@ -421,6 +466,15 @@
   // move together (Alt: their spacing), ↑↓ moves the row, Delete removes it
   box.addEventListener('keydown', e => {
     if (e.target !== box || !App.S) return;
+    if (App.mode === 'align' && aligning(curImage())) {
+      const rec = curImage(), k = e.key, big = e.shiftKey;
+      const dir = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[k];
+      if (dir) align.T = App.alignShifted(align.T, dir[0] * (big ? 10 : 1), dir[1] * (big ? 10 : 1));
+      else if (k === '[' || k === ']' || k === '{' || k === '}') { const [px, py] = App.membraneCentre(App.blot(App.viewBlot)); align.T = App.alignTurned(align.T, (k === '[' || k === '{' ? -1 : 1) * (big ? 1 : 0.1), px, py, rec.img.w, rec.img.h); }
+      else return;
+      e.preventDefault(); draw(); alignLater();
+      return;
+    }
     const row = App.selRow && App.row(App.selRow), sg = App.curSeg(row), st = e.shiftKey ? 5 : 1;
     if (!row || !sg) return;
     if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) return;     // Alt+↑↓ reorders the figure (wbui)
@@ -455,5 +509,5 @@
     else if (fitted !== App.viewBlot && App.S) fitFull();
     else draw();
   });
-  G.View = { draw, fitFull, fitRow, resize, curImage, dispCanvas, probe };
+  G.View = { draw, fitFull, fitRow, resize, curImage, dispCanvas, probe, probeScale: () => view.s, alignStart, alignEnd, alignLive: () => align && Object.assign({}, align.T) };
 })(window);

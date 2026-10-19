@@ -24,7 +24,7 @@
 
   const defaultStyle = () => ({ mmPerLane: 5, fontPt: 7, lineWidthPt: 0.5, labelAngle: 'auto', rowGapPt: 2, blotGapPt: 5,
     tickLenPt: 2.5, labelGapPt: 2.5, unitHeader: true, showMW: true, panelLetter: '', dpi: 600, invert: true, border: false });
-  const newState = () => ({ blots: [], rows: [], lanes: [], range: [1, 1], hiCol: 0, levels: {}, conditions: [], groups: [], style: defaultStyle() });
+  const newState = () => ({ blots: [], rows: [], lanes: [], range: [1, 1], hiCol: 0, levels: {}, align: {}, conditions: [], groups: [], style: defaultStyle() });
 
   /* ---------- events / undo ---------- */
   App.on = fn => App.listeners.push(fn);
@@ -39,8 +39,9 @@
     if (App.hist[App.hist.length - 1] !== snap) { App.hist.push(snap); if (App.hist.length > 120) App.hist.shift(); App.future = []; }
     App.emit('change');
   };
-  App.undo = () => { if (App.hist.length < 2) return; App.future.push(App.hist.pop()); App.S = JSON.parse(App.hist[App.hist.length - 1]); App.selLane = null; App.emit('change'); };
-  App.redo = () => { if (!App.future.length) return; const s = App.future.pop(); App.hist.push(s); App.S = JSON.parse(s); App.selLane = null; App.emit('change'); };
+  // (pictures are resampled again where the restored state aligns them differently)
+  App.undo = () => { if (App.hist.length < 2) return; App.future.push(App.hist.pop()); App.S = JSON.parse(App.hist[App.hist.length - 1]); App.selLane = null; App.syncAlign(); App.emit('change'); };
+  App.redo = () => { if (!App.future.length) return; const s = App.future.pop(); App.hist.push(s); App.S = JSON.parse(s); App.selLane = null; App.syncAlign(); App.emit('change'); };
 
   function busy(on, text) {
     const b = document.getElementById('busy'); if (!b) return;
@@ -124,6 +125,10 @@
       for (const f of files) {
         // {name, buffer} = already-read TIFF bytes (demo / tests)
         const d = f.buffer ? await G.TIFF.decode(f.buffer) : await G.TIFF.loadFile(f);
+        // (tests: the membrane as if moved by a known transform before this picture)
+        // (what comes into view is background: the tray of a white-light photo, an exposure's own background)
+        const mv = App.devMove && App.devMove[f.name];
+        if (mv) { const im = { w: d.width, h: d.height, data: d.data }; d.data = WB.regWarp(im, WB.regInverse(mv), [], G.Engine.percentiles(d.data, [WB.classify(im, { name: f.name, spp: d.spp }) === 'marker' ? 3 : 50], 97)[0]); }
         recs.push({ id: uid('i'), name: f.name, img: { w: d.width, h: d.height, data: d.data }, spp: d.spp, bits: d.bits });
         busy(true, `读取图片 ${recs.length}/${files.length}…`); await tick();
       }
@@ -140,19 +145,38 @@
       // group into membranes
       const groups = WB.groupSessions(recs.map(r => ({ id: r.id, name: r.name, w: r.img.w, h: r.img.h, kind: r.kind, thumb: r.thumb })));
       let blots = groups.map(g => ({ id: uid('b'), name: '', images: g.chemi.map(c => c.id).concat(g.markers.map(m => m.id)), marker: g.markers[0] ? g.markers[0].id : null, ladderId: null, ladderAuto: true, pieces: [] }));
-      // stray marker photos join a membrane of the same size that has none
+      // stray marker photos (all of one place) join a membrane of the same size that has none
       blots.filter(b => !App.chemiOf(b).length).forEach(mb => {
         const m = App.images.get(mb.images[0]);
         const host = blots.concat(App.S.blots).find(b => b !== mb && App.chemiOf(b).length && !b.marker && App.chemiOf(b)[0].img.w === m.img.w && App.chemiOf(b)[0].img.h === m.img.h);
-        if (host) { host.images.push(m.id); host.marker = m.id; mb.images = []; }
+        if (host) { host.images.push(...mb.images); host.marker = m.id; mb.images = []; }
       });
       blots = blots.filter(b => b.images.length);
+      // the same membrane photographed in another place (moved between captures) is one membrane, also with one
+      // loaded before: its white-light photo matches once moved back (pictures of exposures alone never join:
+      // replicate membranes show the same bands)
+      busy(true, '比对各次拍摄中膜的位置…'); await tick();
+      const init = new Map(), joined = new Set(), anchors = App.S.blots.filter(b => b.marker).map(b => ({ b, old: true }));
+      blots = blots.filter(b => {
+        const m = b.marker && App.images.get(b.marker);
+        if (!m || App.devNoAlign) return true;
+        for (const a of anchors) {
+          const R = sameMembrane(App.images.get(a.b.marker), m);
+          if (!R) continue;
+          a.b.images.push(...b.images); b.images.forEach(id => init.set(id, round(R)));
+          if (a.old) joined.add(a.b);
+          return false;
+        }
+        anchors.push({ b, old: false });
+        return true;
+      });
       for (const b of blots) {
         App.S.blots.push(b);
-        busy(true, `分析 ${App.blotName(b)}：膜条、条带、泳道、Marker…`); await tick();
-        App.analyze(b);
+        busy(true, `分析 ${App.blotName(b)}：对齐各张图、膜条、条带、泳道、Marker…`); await tick();
+        alignAndAnalyze(b, init, false);
         App.S.rows.push(...App.rowsFromAnalysis(b));
       }
+      for (const b of joined) { busy(true, `重新分析 ${App.blotName(b)}…`); await tick(); alignAndAnalyze(b, init, true); }
       App.fitLanes(first);
       if (!App.viewBlot || !App.blot(App.viewBlot)) App.viewBlot = App.S.blots[0] && App.S.blots[0].id;
       App.refreshChoices(true);
@@ -166,6 +190,247 @@
     } finally { busy(false); }
   };
 
+  /* ---------- pictures of one membrane taken in other places ----------
+   * The membrane is often moved between captures (substrate added, the pieces put back by hand), so its pictures
+   * do not all show it at the same place. Each is brought onto the grid of the membrane's reference picture —
+   * the white-light photo of the place most pictures share — by a rigid transform, and pieces put back on their
+   * own get one of their own: S.align[imgId] = {a, tx, ty, pieces: {pieceId: {a, tx, ty}}, how: 'auto' |
+   * 'manual', by}, mapping reference coordinates to the picture's own. White-light photos are registered to the
+   * reference by the edges of the membrane; exposures to each other by their bands (each paired with the one
+   * most like it), then put on the place of a white-light photo they fit (each capture has a photo of its own).
+   * The picture as taken stays in rec.raw (uncropped originals, another alignment); rec.img / rec.cs hold it
+   * resampled onto the reference grid, so everything else works on aligned pictures. */
+  const I0 = { a: 0, tx: 0, ty: 0 };
+  const placesOf = new Map();      // blot id -> [{T, ids}]: where its white-light photos were taken (reference first)
+  // registration features of a picture as taken
+  const regOf = rec => {
+    if (!rec._reg) { const raw = rec.raw || rec; rec._reg = WB.regFeatures(rec.kind === 'chemi' ? { w: raw.img.w, h: raw.img.h, data: raw.cs.sig } : raw.img, rec.kind); }
+    return rec._reg;
+  };
+  // the membrane's extent in a picture (white light: its mask; exposure: where the signal is), full resolution
+  function membraneBox(rec) {
+    const t = rec.thumb, f = rec.img.w / t.w;
+    const thr = rec.kind === 'marker' ? 0.5 : Array.from(t.data).sort((a, b) => a - b)[Math.floor(t.data.length * 0.9)];
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let y = 0; y < t.h; y++) for (let x = 0; x < t.w; x++) if (t.data[y * t.w + x] > thr) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    return x1 > x0 && y1 > y0 ? { x0: x0 * f, y0: y0 * f, x1: (x1 + 1) * f, y1: (y1 + 1) * f } : { x0: rec.img.w * 0.1, y0: rec.img.h * 0.1, x1: rec.img.w * 0.9, y1: rec.img.h * 0.9 };
+  }
+  const pieceBox = pc => { const F = pFrame(pc), xs = [], ys = []; [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([i, j]) => { const [x, y] = WB.toImg(F, i * pc.w / 2, j * pc.h / 2); xs.push(x); ys.push(y); }); return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) }; };
+  const round = T => ({ a: Math.round(T.a * 1e4) / 1e4, tx: Math.round(T.tx * 100) / 100, ty: Math.round(T.ty * 100) / 100 });
+  /* the white-light photo of another group shows the same membrane (moved): the transform, else null. As a
+   * whole it matches almost perfectly — or, its pieces put back on their own, every piece does by itself. */
+  function sameMembrane(refRec, rec) {
+    if (!refRec || !rec || refRec.img.w !== rec.img.w || refRec.img.h !== rec.img.h) return null;
+    const area = r => r.thumb.data.reduce((s, v) => s + (v > 0.5 ? 1 : 0), 0), ra = area(refRec), rb = area(rec);
+    if (!(Math.min(ra, rb) > 0.75 * Math.max(ra, rb))) return null;
+    const R = WB.registerRigid(regOf(refRec), regOf(rec), { coarse: true });
+    if (App._dbg) App._dbg.push(`same? ${refRec.name}~${rec.name} areas ${ra}/${rb} T ${R.a.toFixed(2)},${R.tx.toFixed(1)},${R.ty.toFixed(1)} ncc ${R.ncc.toFixed(3)}`);
+    if (R.ncc >= 0.9) return R;
+    if (R.ncc < 0.5) return null;
+    const raw = (refRec.raw || refRec).img;
+    const strips = refRec._strips || (refRec._strips = WB.findStrips(raw, Math.max(1, Math.ceil(Math.max(raw.w, raw.h) / 760))));
+    if (strips.length < 2) return null;
+    // (by area: a piece partly out of view matches a little less)
+    const P = WB.registerPieces(regOf(refRec), regOf(rec), R, strips);
+    if (P.some(p => !p || p.ncc < 0.6)) return null;
+    const total = strips.reduce((s, st) => s + st.w * st.h, 0), mean = P.reduce((s, p, k) => s + p.ncc * strips[k].w * strips[k].h, 0) / total;
+    if (App._dbg) App._dbg.push(`  pieces ${P.map(p => `${p.a.toFixed(2)},${p.tx.toFixed(0)},${p.ty.toFixed(0)}/${p.ncc.toFixed(3)}`).join(' ')} mean ${mean.toFixed(3)}`);
+    return mean >= 0.85 ? R : null;
+  }
+  /* transforms of all pictures of a membrane (S.align) onto the grid of blot.frame (a white-light photo of the
+   * place most pictures share: the fewest resampled); init: known starting transforms (pictures of a group that
+   * joined this membrane). The photo the analysis reads strips and ladder from (blot.marker) stays the one it
+   * was — white-light photos taken after an exposure can show strong bands glowing through — resampled onto
+   * the grid like the others. Then all are resampled. */
+  App.alignBlot = function (blot, init) {
+    const S = App.S; S.align = S.align || {};
+    const mks = App.markersOf(blot), chs = App.chemiOf(blot), all = mks.concat(chs);
+    if (!all.length) return;
+    const W = all[0].img.w, H = all[0].img.h;
+    let box = null;
+    const set = (rec, T, by, extra) => {
+      rec._regBy = by;
+      if (S.align[rec.id] && S.align[rec.id].how === 'manual') return;
+      if (!T || WB.regDist(T, I0, W, H, box) < 1) delete S.align[rec.id];
+      else S.align[rec.id] = Object.assign(round(T), { how: 'auto', by }, extra || {});
+    };
+    // white-light photos against the first one, grouped by place; the reference is the place most share
+    const places = [];
+    if (mks.length) {
+      const m0 = mks.find(m => m.id === blot.marker) || mks[0], R0 = regOf(m0);
+      box = membraneBox(m0);
+      const Ts = new Map([[m0.id, I0]]);
+      mks.forEach(m => {
+        if (m === m0) return;
+        const R = WB.registerRigid(R0, regOf(m), { init: init && init.get(m.id) });
+        m._regNcc = R.ncc;
+        Ts.set(m.id, R.ncc > 0.6 ? R : (init && init.get(m.id)) || I0);
+      });
+      m0._regNcc = 1;
+      mks.forEach(m => { const T = Ts.get(m.id), p = places.find(p => WB.regDist(T, p.T, W, H, box) < 1.5); if (p) p.ids.push(m.id); else places.push({ T, ids: [m.id] }); });
+      places.sort((p, q) => q.ids.length - p.ids.length || q.ids.includes(m0.id) - p.ids.includes(m0.id));
+      const inv = WB.regInverse(Ts.get(places[0].ids[0]));
+      blot.frame = places[0].ids[0]; blot.marker = m0.id;
+      places.forEach(p => { p.T = WB.regCompose(p.T, inv); });
+      mks.forEach(m => set(m, WB.regCompose(Ts.get(m.id), inv), 'white light'));
+    } else { box = membraneBox(chs[0]); blot.frame = null; }
+    placesOf.set(blot.id, places);
+    // exposures: all at the one place when every capture has its own white-light photo there
+    chs.forEach(c => { c._place = null; });
+    if (chs.length && places.length === 1 && mks.length >= chs.length) { chs.forEach(c => { c._place = places[0].ids[0]; set(c, I0, 'white light'); }); }
+    else if (chs.length === 1) { chs[0]._place = places.length ? places[0].ids[0] : null; set(chs[0], places.length ? places[0].T : I0, 'white light'); }
+    else if (chs.length > 1) {
+      // exposures paired up with the ones most like them (a tree from the most typical one), each registered with
+      // the weaker of the two as the reference (its bands are in the stronger one too)
+      const F = chs.map(regOf), n = chs.length;
+      F.forEach(x => { if (!x.pts) x.pts = WB.regPoints(x.hi); x.energy = x.energy || x.hi.data.reduce((s, v) => s + v, 0); });
+      const cH = WB.regC(F[0].hi), sim = [...Array(n)].map(() => new Array(n).fill(-1));
+      for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) sim[i][j] = sim[j][i] = (WB.regNcc(F[i].hi, F[j].hi, I0, cH, F[i].pts) + WB.regNcc(F[j].hi, F[i].hi, I0, cH, F[j].pts)) / 2;
+      const tot = sim.map(r => r.reduce((s, v) => s + Math.max(0, v), 0)), root = tot.indexOf(Math.max(...tot));
+      const X = new Array(n), q = new Array(n).fill(1), inT = new Set([root]);
+      X[root] = I0;
+      const start = (i, j) => { const a = init && init.get(chs[i].id), b = init && init.get(chs[j].id); return a || b ? WB.regCompose(b || I0, WB.regInverse(a || I0)) : null; };
+      while (inT.size < n) {
+        let bi = -1, bj = -1, bs = -Infinity;
+        inT.forEach(i => { for (let j = 0; j < n; j++) if (!inT.has(j) && sim[i][j] > bs) { bs = sim[i][j]; bi = i; bj = j; } });
+        const s0 = start(bi, bj);
+        let T, ncc;
+        if (F[bj].energy <= F[bi].energy) { const R = WB.registerRigid(F[bj], F[bi], { init: s0 && WB.regInverse(s0), fit: 0.3 }); T = WB.regInverse(R); ncc = R.ncc; }
+        else { const R = WB.registerRigid(F[bi], F[bj], { init: s0, fit: 0.3 }); T = R; ncc = R.ncc; }
+        X[bj] = WB.regCompose(T, X[bi]); q[bj] = Math.min(q[bi], ncc); inT.add(bj);
+      }
+      if (places.length) {
+        // where the most typical exposure was taken: the place that puts the most exposures on a place too
+        const nearest = T => places.map(p => ({ p, d: WB.regDist(T, p.T, W, H, box) })).sort((a, b) => a.d - b.d)[0];
+        let C0 = places[0].T, best = -1;
+        places.forEach(pk => { const s = X.reduce((s, x, i) => s + (q[i] >= 0.5 && nearest(WB.regCompose(x, pk.T)).d < 4 ? 1 : 0), 0); if (s > best) { best = s; C0 = pk.T; } });
+        // bands pin an exposure down to a few px: within 6 px of a place it was taken there; with a white-light
+        // photo for every exposure each was taken at one of the places, the nearest (a weak exposure's bands
+        // are a few px less sure)
+        const own = mks.length >= chs.length;
+        chs.forEach((c, i) => {
+          const T = WB.regCompose(X[i], C0), nn = nearest(T);
+          if (nn.d < 6 || (own && nn.d < 40) || q[i] < 0.5) { const p = nn.d < 40 || q[i] >= 0.5 ? nn.p : places[0]; c._place = p.ids[0]; set(c, p.T, 'white light'); }
+          else set(c, T, 'bands');
+        });
+      } else chs.forEach((c, i) => set(c, X[i], 'bands'));
+    }
+    all.forEach(App.applyAlign);
+  };
+  /* pieces put back on their own: after the analysis found the pieces, each piece of each white-light photo
+   * against the reference photo; exposures take the pieces of their place's photo (without white light:
+   * against the most typical exposure). Returns whether anything changed (analyse again). */
+  App.alignPieces = function (blot) {
+    const S = App.S, pcs = blot.pieces || [];
+    if (pcs.length < 2) return false;
+    const mks = App.markersOf(blot), chs = App.chemiOf(blot), ref = blot.frame && App.images.get(blot.frame);
+    if (!ref && !chs.length) return false;
+    const W = (ref || chs[0]).img.w, H = (ref || chs[0]).img.h;
+    let changed = false;
+    const alT = r => S.align[r.id] ? { a: S.align[r.id].a, tx: S.align[r.id].tx, ty: S.align[r.id].ty } : I0;
+    const setPieces = (rec, out) => {
+      if (S.align[rec.id] && S.align[rec.id].how === 'manual') return;
+      const before = JSON.stringify((S.align[rec.id] || {}).pieces || null);
+      if (out && Object.keys(out).length) S.align[rec.id] = Object.assign(S.align[rec.id] || { a: 0, tx: 0, ty: 0, how: 'auto', by: rec._regBy || 'white light' }, { pieces: out });
+      else if (S.align[rec.id]) { delete S.align[rec.id].pieces; if (WB.regDist(alT(rec), I0, W, H, pieceBox(pcs[0])) < 1e-6 && !S.align[rec.id].pieces) delete S.align[rec.id]; }
+      if (JSON.stringify((S.align[rec.id] || {}).pieces || null) !== before) changed = true;
+    };
+    const fromResults = (P, base) => {
+      const out = {};
+      P.forEach((p, k) => { if (p && p.ncc >= 0.7 && p.ncc >= p.ncc0 + 0.02 && WB.regDist(p, base, W, H, pieceBox(pcs[k])) > 1.5) out[pcs[k].id] = round(p); });
+      return out;
+    };
+    if (ref) {
+      const R = regOf(ref);
+      // a photo matching the reference almost perfectly as a whole has no piece out of place
+      mks.forEach(m => { if (m !== ref) setPieces(m, (m._regNcc || 0) > 0.99 ? null : fromResults(WB.registerPieces(R, regOf(m), alT(m), pcs), alT(m))); });
+      chs.forEach(c => { if (c._place) { const src = S.align[c._place]; setPieces(c, src && src.pieces ? JSON.parse(JSON.stringify(src.pieces)) : null); } });
+    } else {
+      const root = chs.find(c => !S.align[c.id]) || chs[0], R = regOf(root);
+      chs.forEach(c => { if (c !== root && S.align[c.id]) setPieces(c, fromResults(WB.registerPieces(R, regOf(c), alT(c), pcs), alT(c))); });
+    }
+    if (changed) mks.concat(chs).forEach(App.applyAlign);
+    return changed;
+  };
+  // align the pictures of a membrane, analyse it, and again if pieces turned out to be put back on their own
+  function alignAndAnalyze(b, init, again) {
+    if (!App.devNoAlign) App.alignBlot(b, init);       // (tests: &noalign=1 leaves every picture as taken)
+    if (again) App.reanalyze(b); else App.analyze(b);
+    if (!App.devNoAlign && App.alignPieces(b)) { if (again) App.reanalyze(b); else App.analyze(b); }
+  }
+  App.alignAndAnalyze = alignAndAnalyze;
+  /* a picture resampled onto the reference grid as S.align says (none: as taken). Returns whether it changed. */
+  App.applyAlign = function (rec) {
+    const S = App.S, al = S && S.align && S.align[rec.id], b = al && S.blots.find(x => x.images.includes(rec.id));
+    const pcs = al && al.pieces && b ? (b.pieces || []).filter(p => al.pieces[p.id]).map(p => ({ cx: p.cx, cy: p.cy, angle: p.angle, w: p.w, h: p.h, T: al.pieces[p.id] })) : [];
+    const moved = al && (pcs.length || Math.abs(al.a) > 1e-9 || Math.abs(al.tx) > 1e-9 || Math.abs(al.ty) > 1e-9);
+    const key = moved ? JSON.stringify([al.a, al.tx, al.ty, pcs]) : '';
+    if ((rec._alignKey || '') === key) return false;
+    const raw = rec.raw || { img: rec.img, cs: rec.cs };
+    if (!moved) { rec.img = raw.img; rec.cs = raw.cs; rec.raw = null; }
+    else {
+      rec.raw = raw;
+      const { w, h } = raw.img;
+      if (rec.kind === 'chemi') {
+        // an exposure is only read through its signal once loaded: that alone is resampled (outside the picture:
+        // the background, its median)
+        const sig = WB.regWarp({ w, h, data: raw.cs.sig }, al, pcs, WB.mad(raw.cs.sig, 97).med, raw.cs.clip === Infinity ? undefined : raw.cs.clip);
+        rec.cs = Object.assign({}, raw.cs, { sig });
+        rec.img = { w, h, data: sig };
+      } else rec.img = { w, h, data: WB.regWarp(raw.img, al, pcs, G.Engine.percentiles(raw.img.data, [5], 37)[0]) };
+    }
+    rec._alignKey = key; rec.thumb = thumbOf(rec); rec._disp = null; rec._sat = null;
+    App.clearCaches();
+    return true;
+  };
+  App.syncAlign = () => { let n = 0; App.images.forEach(r => { if (App.applyAlign(r)) n++; }); return n; };
+  App.alignOf = id => (App.S && App.S.align && App.S.align[id]) || null;
+  // whether a picture is resampled at all (moved as a whole or piece by piece)
+  App.isMoved = id => { const al = App.alignOf(id); return !!al && (!!al.pieces || Math.abs(al.a) > 1e-9 || Math.abs(al.tx) > 1e-9 || Math.abs(al.ty) > 1e-9); };
+  // the middle of a membrane on its grid (its pieces), else of the picture
+  App.membraneCentre = function (b) {
+    const pcs = (b && b.pieces) || [];
+    if (pcs.length) return [pcs.reduce((s, p) => s + p.cx, 0) / pcs.length, pcs.reduce((s, p) => s + p.cy, 0) / pcs.length];
+    const r = b && App.images.get(b.images[0]);
+    return r ? [r.img.w / 2, r.img.h / 2] : [0, 0];
+  };
+  // how a picture lies relative to the grid, in words: the turn and the shift of the membrane's middle
+  App.alignText = function (id) {
+    const al = App.alignOf(id), rec = App.images.get(id), b = App.S.blots.find(x => x.images.includes(id));
+    if (!al || !rec) return '';
+    const [cx, cy] = App.membraneCentre(b), [x, y] = WB.regPoint(al, rec.img.w, rec.img.h, cx, cy), d = Math.hypot(x - cx, y - cy);
+    const n = al.pieces ? Object.keys(al.pieces).length : 0;
+    return `旋转 ${Math.abs(al.a) < 0.05 ? '0' : al.a.toFixed(1)}°、平移 ${d < 1 ? '<1' : Math.round(d)} px${n ? `；${n} 条膜条另外单独对齐` : ''}`;
+  };
+  /* turning the transform by hand (the picture's content on the grid): shifted by (dx, dy), turned by deg
+   * about (px, py). T maps the grid to the picture, so the content moves the other way. */
+  const rotDeg = (deg, x, y) => { const a = deg * Math.PI / 180, c = Math.cos(a), s = Math.sin(a); return [c * x - s * y, s * x + c * y]; };
+  App.alignShifted = (T, dx, dy) => { const [x, y] = rotDeg(T.a, dx, dy); return { a: T.a, tx: T.tx - x, ty: T.ty - y }; };
+  App.alignTurned = (T, deg, px, py, W, H) => {
+    const P = [px - W / 2, py - H / 2], [x1, y1] = rotDeg(T.a, P[0], P[1]), [x2, y2] = rotDeg(T.a - deg, P[0], P[1]);
+    return { a: T.a - deg, tx: T.tx + x1 - x2, ty: T.ty + y1 - y2 };
+  };
+  // a point of the grid (on piece pcId) in the picture as taken
+  App.rawPoint = function (id, pcId, x, y) {
+    const al = App.alignOf(id), rec = App.images.get(id);
+    if (!al || !rec) return [x, y];
+    return WB.regPoint((al.pieces && al.pieces[pcId]) || al, rec.img.w, rec.img.h, x, y);
+  };
+  // set by hand (the whole picture; pieces keep their own shift relative to it)
+  App.setAlign = function (id, T) {
+    const S = App.S, old = S.align[id], rec = App.images.get(id);
+    if (!rec) return;
+    if (!T) { S.align[id] = { a: 0, tx: 0, ty: 0, how: 'manual', by: 'hand' }; }
+    else S.align[id] = Object.assign(round(T), { how: 'manual', by: 'hand' }, old && old.pieces ? { pieces: old.pieces } : {});
+    App.applyAlign(rec);
+  };
+  // back to the automatic alignment of the membrane
+  App.autoAlign = function (id) {
+    const S = App.S, b = S.blots.find(x => x.images.includes(id));
+    if (S.align[id]) delete S.align[id];
+    if (b) alignAndAnalyze(b, null, true);
+  };
+
   /* ---------- analysis ---------- */
   App.analyze = function (blot) {
     const ch = App.chemiOf(blot);
@@ -173,7 +438,9 @@
     if (!blot.marker) { const m = App.markersOf(blot)[0]; blot.marker = m ? m.id : null; }
     const mk = blot.marker ? App.images.get(blot.marker) : null;
     if (!ch.length) { App.analysis[blot.id] = null; blot.pieces = []; return null; }
-    const A = WB.analyzeSession(ch.map(r => ({ id: r.id, img: r.img, exposure: r.exposure, cs: r.cs })), mk && { id: mk.id, img: mk.img },
+    // the white-light photo as taken, with where it lies on the grid (strips and ladder are read from it unresampled)
+    const al = mk && App.alignOf(mk.id), mPcs = al && al.pieces ? (blot.pieces || []).filter(p => al.pieces[p.id]).map(p => ({ cx: p.cx, cy: p.cy, angle: p.angle, w: p.w, h: p.h, T: al.pieces[p.id] })) : [];
+    const A = WB.analyzeSession(ch.map(r => ({ id: r.id, img: r.img, exposure: r.exposure, cs: r.cs })), mk && { id: mk.id, img: (mk.raw || mk).img, T: al ? { a: al.a, tx: al.tx, ty: al.ty } : null, pieces: mPcs },
       { ladderId: blot.ladderAuto ? null : blot.ladderId, prefLadder: App.prefLadder });
     A.chemiIds = ch.map(r => r.id);
     A.H = ch[0].img.h;
@@ -701,6 +968,8 @@
     thumbCache.set(key, out);
     return out;
   };
+  // pictures changed (aligned again): everything computed from their pixels
+  App.clearCaches = () => { expoCache.clear(); rasterCache.clear(); thumbCache.clear(); };
 
   /* ---------- adding, moving and stitching rows ---------- */
   App.pieceAt = function (b, x, y, pad) {
@@ -840,15 +1109,19 @@
     if (from === to) return;
     if (from) { from.images = from.images.filter(i => i !== imgId); if (from.marker === imgId) from.marker = null; }
     to.images.push(imgId);
-    [from, to].forEach(b => { if (b) App.reanalyze(b); });
+    // put onto the other membrane's grid (it may lie elsewhere in the picture), then analysed again
+    if (S.align[imgId] && S.align[imgId].how === 'manual') delete S.align[imgId];
+    [from, to].forEach(b => { if (b && b.images.length) alignAndAnalyze(b, null, true); });
     if (from && !from.images.length) { S.blots = S.blots.filter(b => b !== from); S.rows = S.rows.filter(r => r.blot !== from.id); }
   };
   App.setKind = function (imgId, kind) {
     const rec = App.images.get(imgId);
     if (!rec || rec.kind === kind) return;
+    // as taken again: the alignment was for the other kind of picture
+    delete App.S.align[imgId]; App.applyAlign(rec); rec._reg = null;
     rec.kind = kind; prepare(rec);
     const b = App.S.blots.find(b => b.images.includes(imgId));
-    if (b) { if (kind === 'marker' && !b.marker) b.marker = imgId; App.reanalyze(b); }
+    if (b) { if (kind === 'marker' && !b.marker) b.marker = imgId; alignAndAnalyze(b, null, true); }
   };
   App.setExposure = function (imgId, sec) {
     const rec = App.images.get(imgId); if (!rec) return;
@@ -860,12 +1133,12 @@
   App.removeImage = function (imgId) {
     const S = App.S, b = S.blots.find(b => b.images.includes(imgId));
     App.images.delete(imgId);
-    delete S.levels[imgId];
+    delete S.levels[imgId]; delete S.align[imgId];
     if (!b) return;
     b.images = b.images.filter(i => i !== imgId);
     if (b.marker === imgId) b.marker = null;
     if (!b.images.length) { S.blots = S.blots.filter(x => x !== b); S.rows = S.rows.filter(r => r.blot !== b.id); }
-    else App.reanalyze(b);
+    else alignAndAnalyze(b, null, true);
   };
 
   /* ---------- checks shown as warnings / legend text ---------- */
