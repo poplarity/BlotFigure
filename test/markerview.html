@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>markerview</title>
+<style>body{margin:0;background:#fff}canvas{display:block}</style></head>
+<body><canvas id="c"></canvas>
+<script src="../js/tiff.js"></script>
+<script>
+// Draws a crop of one image with a y ruler (full-res px) so ladder bands can be read off a screenshot.
+// ?src=...&x0=&x1=&y0=&y1=&s=scale&ys=comma-separated y marks
+(async () => {
+  const q = new URLSearchParams(location.search);
+  const d = await TIFF.decode(await (await fetch(q.get('src'))).arrayBuffer());
+  const x0 = +(q.get('x0') || 0), x1 = +(q.get('x1') || d.width), y0 = +(q.get('y0') || 0), y1 = +(q.get('y1') || d.height), s = +(q.get('s') || 0.5);
+  const W = Math.round((x1 - x0) * s), H = Math.round((y1 - y0) * s), pad = 60;
+  const cv = document.getElementById('c'); cv.width = W + pad; cv.height = H;
+  const ctx = cv.getContext('2d'), im = ctx.createImageData(W, H);
+  const spp = d.spp || 1;
+  // contrast stretch on the crop
+  let lo = 1, hi = 0;
+  for (let y = y0; y < y1; y += 4) for (let x = x0; x < x1; x += 4) { const v = d.data[(y * d.width + x)]; lo = Math.min(lo, v); hi = Math.max(hi, v); }
+  for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+    const x = Math.min(d.width - 1, Math.round(x0 + i / s)), y = Math.min(d.height - 1, Math.round(y0 + j / s));
+    const v = Math.round(255 * (d.data[y * d.width + x] - lo) / Math.max(1e-6, hi - lo)), k = (j * W + i) * 4;
+    im.data[k] = im.data[k + 1] = im.data[k + 2] = v; im.data[k + 3] = 255;
+  }
+  ctx.putImageData(im, pad, 0);
+  ctx.fillStyle = '#c00'; ctx.font = '12px sans-serif'; ctx.strokeStyle = '#c00';
+  for (let y = Math.ceil(y0 / 50) * 50; y < y1; y += 50) { const yy = (y - y0) * s; ctx.fillRect(pad - (y % 100 ? 6 : 14), yy, y % 100 ? 6 : 14, 1); if (!(y % 100)) ctx.fillText(y, 2, yy + 4); }
+  (q.get('ys') || '').split(',').filter(Boolean).map(Number).forEach(y => { const yy = (y - y0) * s; ctx.beginPath(); ctx.moveTo(pad, yy); ctx.lineTo(pad + 18, yy); ctx.stroke(); });
+  document.title = 'DONE';
+})();
+</script></body></html>

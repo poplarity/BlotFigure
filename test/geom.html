@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>geom</title></head>
+<body><pre id="out">running</pre>
+<script src="../js/tiff.js"></script>
+<script src="../js/engine.js"></script>
+<script src="../js/wbladders.js"></script>
+<script src="../js/wbengine.js"></script>
+<script>
+(async () => {
+  const R = { files: [] }, q = new URLSearchParams(location.search);
+  const dir = q.get('dir'), names = q.get('names').split(',');
+  const thumbs = [];
+  try {
+    for (let k = 0; k < names.length; k++) {
+      const d = await TIFF.decode(await (await fetch(dir + '/' + names[k])).arrayBuffer());
+      const img = { w: d.width, h: d.height, data: d.data };
+      const f = 8, sm = WB.down(img, f), n = sm.w * sm.h;
+      let bright = 0; for (let i = 0; i < n; i++) if (sm.data[i] > 0.5) bright++;
+      const fracBright = bright / n;
+      // membrane mask: for dark-background images = brighter than otsu; record bbox
+      const thr = WB.otsu(sm.data, 1);
+      let x0 = 1e9, x1 = -1, y0 = 1e9, y1 = -1, cnt = 0;
+      for (let y = 0; y < sm.h; y++) for (let x = 0; x < sm.w; x++) {
+        const v = sm.data[y * sm.w + x], on = fracBright < 0.85 ? v > thr : v < thr;
+        if (on) { cnt++; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+      }
+      // signal thumb for chemi-like (inverted -> 1-v), tophat sqrt
+      const sig = new Float32Array(n); for (let i = 0; i < n; i++) sig[i] = fracBright > 0.85 ? 1 - sm.data[i] : sm.data[i];
+      const th = WB.tophat(sig, sm.w, sm.h, 6);
+      let mx = 0, sx = 0, sy = 0, sw = 0;
+      for (let y = 0; y < sm.h; y++) for (let x = 0; x < sm.w; x++) { const v = th[y * sm.w + x]; if (v > 0.15) { sw += v; sx += v * x; sy += v * y; } mx = Math.max(mx, v); }
+      thumbs.push({ th, w: sm.w, h: sm.h, fracBright });
+      R.files.push({ k: k + 1, fracBright: +fracBright.toFixed(3), otsu: +thr.toFixed(3), maskFrac: +(cnt / n).toFixed(3), bbox: [x0 * f, y0 * f, x1 * f, y1 * f], sigCentroid: sw ? [Math.round(sx / sw * f), Math.round(sy / sw * f)] : null });
+    }
+    // pairwise NCC of tophat thumbs, and best shift (±60 px at f=8 -> ±8 ds px)
+    const nccShift = (a, b) => {
+      let best = -1, bs = [0, 0];
+      for (let dy = -10; dy <= 10; dy++) for (let dx = -14; dx <= 14; dx++) {
+        let ma = 0, mb = 0, c = 0;
+        const W = a.w, H = a.h;
+        for (let y = 12; y < H - 12; y += 2) for (let x = 16; x < W - 16; x += 2) { ma += a.th[y * W + x]; mb += b.th[(y + dy) * W + x + dx]; c++; }
+        ma /= c; mb /= c;
+        let ab = 0, aa = 0, bb = 0;
+        for (let y = 12; y < H - 12; y += 2) for (let x = 16; x < W - 16; x += 2) { const p = a.th[y * W + x] - ma, r = b.th[(y + dy) * W + x + dx] - mb; ab += p * r; aa += p * p; bb += r * r; }
+        const v = ab / Math.sqrt(aa * bb + 1e-12);
+        if (v > best) { best = v; bs = [dx * 8, dy * 8]; }
+      }
+      return { ncc: +best.toFixed(2), shift: bs };
+    };
+    R.pairs = [];
+    for (let i = 0; i < thumbs.length; i++) for (let j = i + 1; j < thumbs.length; j++) {
+      const r = nccShift(thumbs[i], thumbs[j]);
+      if (r.ncc > 0.35) R.pairs.push(`${i + 1}-${j + 1}: ${r.ncc} @${r.shift}`);
+    }
+  } catch (e) { R.error = e.stack || String(e); }
+  document.getElementById('out').textContent = JSON.stringify(R);
+})();
+</script></body></html>

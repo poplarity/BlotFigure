@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>wb engine test</title></head>
+<body><pre id="out">running</pre>
+<script src="../js/tiff.js"></script>
+<script src="../js/engine.js"></script>
+<script src="../js/wbladders.js"></script>
+<script src="../js/wbengine.js"></script>
+<script src="../js/wbdemo.js"></script>
+<script>
+(async () => {
+  const R = {}, WB = window.WB;
+  const T = () => performance.now();
+  try {
+    for (const [key, make, noMarker] of [['cut', WBDemo.cutSession], ['scatter', WBDemo.scatterSession], ['cut_nomarker', WBDemo.cutSession, true], ['scatter_nomarker', WBDemo.scatterSession, true]]) {
+      let t = T();
+      const ses = make();
+      const gen = Math.round(T() - t);
+      // decode via the TIFF path to test the real pipeline
+      const imgs = [];
+      for (const im of ses.images) {
+        const d = await TIFF.decode(WBDemo.encodeTiff16(im));
+        imgs.push({ name: im.name, img: { w: d.width, h: d.height, data: d.data }, spp: d.spp });
+      }
+      const kinds = imgs.map(i => WB.classify(i.img, { name: 'x.tif', spp: i.spp }));   // name-blind classification
+      t = T();
+      const chemis = imgs.filter((i, k) => kinds[k] === 'chemi').map((i, k) => ({ id: i.name, img: i.img, exposure: WB.exposureFromName(i.name) }));
+      const marker = noMarker ? null : imgs.find((i, k) => kinds[k] === 'marker');
+      const A = WB.analyzeSession(chemis, marker && { id: marker.name, img: marker.img }, {});
+      const ms = Math.round(T() - t);
+      const truth = ses.truth;
+      const rows = A.rows.map(r => ({ strip: r.strip, ang: r.angle, oy: Math.round(r.oy), kda: r.kda && +r.kda.toFixed(1), ks: r.ks.join(','), lanes: r.ks.length,
+        choice: chemis[r.choice] && chemis[r.choice].exposure, sat: r.expo.map(e => e.sat).join('/'), snr: r.expo.map(e => e.snr.toFixed(0)).join('/') }));
+      // match rows to truth by y
+      const match = truth.map(tr => {
+        const r = A.rows.slice().sort((a, b) => Math.abs(a.oy - tr.cy) - Math.abs(b.oy - tr.cy))[0];
+        return { name: tr.name, kda: tr.kda, gotKda: r && r.kda && +r.kda.toFixed(1), dy: r && Math.round(r.oy - tr.cy), best: tr.bestExposure, got: r && chemis[r.choice].exposure,
+          lanes: r && r.ks.length, ang: tr.angle, gotAng: r && r.angle };
+      });
+      R[key] = { gen, ms, kinds: kinds.join(','), strips: A.strips.map(s => `${Math.round(s.cx)},${Math.round(s.cy)} ${s.angle}° ${Math.round(s.w)}x${Math.round(s.h)}`),
+        pitch: +A.pitch.toFixed(1), truthPitch: ses.opts.pitch, factors: A.factors.map(x => +x.toFixed(3)), ladder: A.ladderId, ladderRank: A.ladderRank.slice(0, 3).map(x => x.id + ':' + x.q.toFixed(3)),
+        rms: A.calib && +A.calib.rmsLn.toFixed(3), ladderBands: A.ladderStrips.map(l => l && l.bands.length), notes: A.notes, rows, match };
+    }
+  } catch (e) { R.error = e.stack || String(e); }
+  document.getElementById('out').textContent = JSON.stringify(R, null, 1);
+})();
+</script></body></html>

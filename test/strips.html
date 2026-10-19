@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>strips</title></head>
+<body><pre id="out">running</pre>
+<script src="../js/tiff.js"></script>
+<script src="../js/engine.js"></script>
+<script src="../js/wbladders.js"></script>
+<script src="../js/wbengine.js"></script>
+<script>
+(async () => {
+  const q = new URLSearchParams(location.search), R = {};
+  try {
+    const d = await TIFF.decode(await (await fetch(q.get('src'))).arrayBuffer());
+    const img = { w: d.width, h: d.height, data: d.data };
+    WB.findStrips.debug = {};
+    const strips = WB.findStrips(img, 1);
+    const D = WB.findStrips.debug;
+    R.strips = strips.map(s => `${Math.round(s.cx)},${Math.round(s.cy)} ${s.angle}° ${Math.round(s.w)}x${Math.round(s.h)}`);
+    R.thr = [D.thr, D.thr2, D.pm].map(v => +v.toFixed(3));
+    R.cutPx = D.cut.reduce((a, b) => a + b, 0);
+    const c = document.createElement('canvas'); c.width = D.w; c.height = D.h;
+    const id = c.getContext('2d').createImageData(D.w, D.h);
+    const pal = [[230, 57, 70], [42, 157, 143], [233, 196, 106], [69, 123, 157], [244, 162, 97], [131, 56, 236], [6, 214, 160]];
+    for (let i = 0; i < D.w * D.h; i++) {
+      let col = [0, 0, 0];
+      if (D.lab[i]) { const p = pal[D.lab[i] % pal.length]; col = p.map(v => v * 0.75); }
+      else if (D.mask0[i]) col = [120, 120, 120];
+      if (D.cut[i]) col = [255, 255, 255];
+      id.data[i * 4] = col[0]; id.data[i * 4 + 1] = col[1]; id.data[i * 4 + 2] = col[2]; id.data[i * 4 + 3] = 255;
+    }
+    c.getContext('2d').putImageData(id, 0, 0);
+    const pre = document.createElement('pre'); pre.id = 'img'; pre.textContent = c.toDataURL('image/png'); document.body.appendChild(pre);
+  } catch (e) { R.error = e.stack || String(e); }
+  document.getElementById('out').textContent = JSON.stringify(R);
+})();
+</script></body></html>

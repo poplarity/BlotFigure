@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>ladder</title></head>
+<body><pre id="out">running</pre>
+<script src="../js/tiff.js"></script>
+<script src="../js/engine.js"></script>
+<script src="../js/wbladders.js"></script>
+<script src="../js/wbengine.js"></script>
+<script src="../js/wbdemo.js"></script>
+<script>
+(async () => {
+  const q = new URLSearchParams(location.search), R = {};
+  try {
+    let img;
+    if (q.get('demo')) {     // ?demo=scatter|cut: the synthetic marker photo
+      const ses = WBDemo[q.get('demo') + 'Session'](), m = ses.images.find(i => /Marker/.test(i.name));
+      img = { w: m.width, h: m.height, data: m.data }; R.truth = ses.ladderTruth.map(t => `${t.kda}@${t.xy.map(Math.round)}`);
+    } else {
+      const d = await TIFF.decode(await (await fetch(q.get('src'))).arrayBuffer());
+      img = { w: d.width, h: d.height, data: d.data };
+    }
+    const strips = WB.findStrips(img, 1), pitch = +(q.get('pitch') || 140);
+    const LL = WB.findLadders(img, strips, pitch);
+    R.debug = WB.findLadders.debug;
+    R.strips = strips.map((s, si) => {
+      const L = LL[si];
+      return { s: `${Math.round(s.cx)},${Math.round(s.cy)} ${Math.round(s.w)}x${Math.round(s.h)}`, merged: L.bands.map(v => Math.round(v + s.cy)).join(','), lanes: (L.lanes || []).map(l => `x=${Math.round(l.u + s.cx)} bandsY=[${l.bands.map(v => Math.round(v + s.cy)).join(',')}]`) };
+    });
+  } catch (e) { R.error = e.stack || String(e); }
+  document.getElementById('out').textContent = JSON.stringify(R);
+})();
+</script></body></html>

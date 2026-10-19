@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>inspect</title></head>
+<body><pre id="out">running</pre>
+<script src="../js/tiff.js"></script>
+<script src="../js/engine.js"></script>
+<script src="../js/wbladders.js"></script>
+<script src="../js/wbengine.js"></script>
+<script>
+(async () => {
+  const R = { files: [] };
+  const dir = new URLSearchParams(location.search).get('dir');
+  const n = +new URLSearchParams(location.search).get('n');
+  const names = new URLSearchParams(location.search).get('names').split(',');
+  // contact sheet: 4 columns
+  const TW = 360, TH = Math.round(360 * 1889 / 2362), cols = 4, rows = Math.ceil(n / cols);
+  const sheet = document.createElement('canvas'); sheet.width = TW * cols; sheet.height = (TH + 24) * rows;
+  const sc = sheet.getContext('2d'); sc.fillStyle = '#fff'; sc.fillRect(0, 0, sheet.width, sheet.height);
+  try {
+    for (let k = 0; k < n; k++) {
+      const buf = await (await fetch(dir + '/' + names[k])).arrayBuffer();
+      // raw tags
+      const dv = new DataView(buf), off = dv.getUint32(4, true), nt = dv.getUint16(off, true), tags = {};
+      for (let i = 0; i < nt; i++) {
+        const e = off + 2 + i * 12, tag = dv.getUint16(e, true), type = dv.getUint16(e + 2, true), cnt = dv.getUint32(e + 4, true), val = dv.getUint32(e + 8, true);
+        if (type === 2) { let s = ''; const o = cnt <= 4 ? e + 8 : val; for (let j = 0; j < cnt - 1; j++) s += String.fromCharCode(dv.getUint8(o + j)); tags[tag] = s; }
+        else tags[tag] = cnt === 1 ? (type === 3 ? dv.getUint16(e + 8, true) : val) : `[${cnt}]`;
+      }
+      // RGB channel stats from the raw strip (uncompressed, chunky)
+      const so = tags[273], w = tags[256], h = tags[257], px = new Uint8Array(buf, so, w * h * 3);
+      let diff = 0, sR = 0, sG = 0, sB = 0, mx = 0, n255 = 0;
+      for (let i = 0; i < w * h; i += 7) { const r = px[i * 3], g = px[i * 3 + 1], b = px[i * 3 + 2]; diff += Math.abs(r - g) + Math.abs(g - b); sR += r; sG += g; sB += b; const m = Math.max(r, g, b); if (m > mx) mx = m; if (m === 255) n255++; }
+      const m = (w * h) / 7;
+      const d = await TIFF.decode(buf);
+      const img = { w: d.width, h: d.height, data: d.data };
+      const [p1, p50, p99, p999] = Engine.percentiles(img.data, [1, 50, 99, 99.9], 5);
+      const kind = WB.classify(img, { name: 'x.tif', spp: 1 });
+      R.files.push({ k: k + 1, tags: JSON.stringify(tags), colorDiff: +(diff / m).toFixed(2), meanRGB: [sR / m, sG / m, sB / m].map(v => Math.round(v)), max: mx, sat255: n255, pct: [p1, p50, p99, p999].map(v => +v.toFixed(3)), kind });
+      // thumbnail (true colour)
+      const tc = document.createElement('canvas'); tc.width = w; tc.height = h;
+      const id = tc.getContext('2d').createImageData(w, h);
+      for (let i = 0; i < w * h; i++) { id.data[i * 4] = px[i * 3]; id.data[i * 4 + 1] = px[i * 3 + 1]; id.data[i * 4 + 2] = px[i * 3 + 2]; id.data[i * 4 + 3] = 255; }
+      tc.getContext('2d').putImageData(id, 0, 0);
+      const cx = (k % cols) * TW, cy = Math.floor(k / cols) * (TH + 24);
+      sc.drawImage(tc, cx, cy + 24, TW, TH);
+      sc.fillStyle = '#000'; sc.font = 'bold 18px Arial'; sc.fillText(`#${k + 1} ${kind}`, cx + 6, cy + 18);
+    }
+  } catch (e) { R.error = e.stack || String(e); }
+  const pre = document.createElement('pre'); pre.id = 'sheet'; pre.textContent = sheet.toDataURL('image/png'); document.body.appendChild(pre);
+  document.getElementById('out').textContent = JSON.stringify(R);
+})();
+</script></body></html>

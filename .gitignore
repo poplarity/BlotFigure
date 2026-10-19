@@ -1,0 +1,11 @@
+node_modules/
+dist/
+test-results/
+*.log
+.DS_Store
+Thumbs.db
+# never commit blot images or exports by accident
+*.tif
+*.tiff
+*.png
+*.csv

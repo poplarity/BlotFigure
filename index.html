@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BlotFigure · Western blot 作图</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">BlotFigure</div>
+  <label class="chip" title="添加更多图片（同一次实验的其他膜或曝光）"><span class="chip-dot"></span><span id="imgCount">添加图片</span>
+    <input type="file" id="fileInput" multiple accept=".tif,.tiff,.png,.jpg,.jpeg,.bmp" hidden></label>
+  <div class="coach" id="coach"><span class="coach-dot"></span><span id="coachText">把一次实验的全部图片拖进窗口：各个曝光 + Marker 白光图</span></div>
+  <div class="topbar-right">
+    <button class="icon-btn" id="btnUndo" title="撤销 (Ctrl+Z)">↺</button>
+    <button class="icon-btn" id="btnRedo" title="重做 (Ctrl+Shift+Z)">↻</button>
+    <button class="icon-btn" id="btnHelp" title="使用说明">?</button>
+    <span class="divider"></span>
+    <select id="dpiTop" title="导出分辨率"><option value="300">300 dpi</option><option value="600" selected>600 dpi</option><option value="1200">1200 dpi</option></select>
+    <div class="menu-wrap">
+      <div class="split"><button class="btn primary" id="btnPNG">导出 PNG</button><button class="btn primary caret" id="btnExportMenu">▾</button></div>
+      <div class="menu hidden right" id="exportMenu">
+        <button id="btnSVG">SVG（矢量，可在 AI 中编辑）</button>
+        <button id="btnRaw">未裁切原图（补充材料）<small>每张用到的曝光图 + Marker 图，标出裁切框、泳道与蛋白</small></button>
+        <button id="btnQuant">灰度定量 CSV<small>按所选曝光积分，归一化到同膜内参</small></button>
+        <button id="btnLegend">复制图注文字</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div id="app">
+  <aside id="panel">
+    <div class="empty" id="emptyState">
+      <div class="empty-icon">▤</div>
+      <h2>把一次实验的图片全部拖进来</h2>
+      <p>每张膜的多个曝光（短 / 中 / 长）和 Marker 白光图一起拖入即可。<br>工具会自动：<br>· 把图片归到各自的膜<br>· 找出每个蛋白的条带行<br>· 每行挑最长且不过曝的曝光<br>· 识别 Ladder 并标 kDa<br>· 按泳道对齐拼成一张图</p>
+      <label class="btn primary big">选择图片（可多选）<input type="file" id="fileInput2" multiple accept=".tif,.tiff,.png,.jpg,.jpeg,.bmp" hidden></label>
+      <button class="btn big" id="btnDemo">看看示例（3 次曝光的切膜 + 另一张斜放的膜）</button>
+      <p class="privacy">图片只在本机浏览器处理，不会上传。</p>
+    </div>
+
+    <div id="sections" class="hidden">
+      <section class="sec">
+        <div class="sec-head"><span class="sec-n">1</span>图片与膜<span class="sec-status" id="stBlots"></span></div>
+        <div id="blotList"></div>
+        <p class="hint">分错了膜：在图片的 ⋯ 菜单里"移到"另一张膜。曝光时间从文件名读取（如 <code>_30s</code>），读不到时可点时间修改。</p>
+      </section>
+
+      <section class="sec">
+        <div class="sec-head"><span class="sec-n">2</span>图中的行<span class="sec-status" id="stRows"></span></div>
+        <p class="lead">每行 = 一个蛋白的条带。点名称输入；点曝光按钮可换图（<span class="dot-sat"></span> = 有过曝）。</p>
+        <div id="rowList"></div>
+        <div class="field inline">
+          <button class="btn sm" id="btnAddRow">+ 在膜图上点选添加</button>
+          <span class="inline-label">或按分子量 <input type="number" id="addKda" class="num" placeholder="kDa"> <button class="btn sm ghost" id="btnAddKda">添加</button></span>
+        </div>
+        <p class="hint">没曝出来的蛋白：按分子量添加一行，放在它应在的位置，换长曝光看看。</p>
+      </section>
+
+      <section class="sec">
+        <div class="sec-head"><span class="sec-n">3</span>泳道<span class="sec-status" id="stLanes"></span></div>
+        <div class="field inline range-row">泳道 <select id="rangeA"></select> – <select id="rangeB"></select> <button class="btn sm ghost" id="btnRangeAuto">自动</button></div>
+        <p class="lead">在右侧成图上<b>点灰色泳道号</b>输入名称，回车跳下一条；或在这里一次粘贴整行：</p>
+        <textarea id="laneBulk" rows="2" placeholder="Ctrl, siA#1, siA#2 …（逗号、Tab、换行均可）"></textarea>
+        <div id="shiftBox"></div>
+        <details class="adv"><summary>逐条泳道：剪除</summary><div id="laneList" class="list"></div>
+          <p class="hint">取消"显示" = 从成图剪除该泳道，所有行同步剪除并留白间隔（图注需说明）。</p></details>
+      </section>
+
+      <section class="sec">
+        <div class="sec-head"><span class="sec-n">4</span>标注 <span class="h3-note">可选</span></div>
+        <div class="tools">
+          <button class="tool" id="btnAddCond"><span class="ti">±</span>条件行<small>+ / − 矩阵</small></button>
+          <button class="tool" id="btnAddGroup"><span class="ti">⎴</span>分组横线<small>在成图上拖过泳道名</small></button>
+        </div>
+        <div id="annoList" class="list"></div>
+      </section>
+
+      <section class="sec">
+        <details class="adv flush">
+          <summary class="sec-head as-summary"><span class="sec-n">5</span>版式 <span class="h3-note" id="stLayout"></span></summary>
+          <div class="field inline">
+            <label class="inline-label">每泳道 <input type="number" id="mmPerLane" min="2" max="15" step="0.5" class="num"> mm</label>
+            <label class="inline-label">字号 <input type="number" id="fontPt" min="4" max="14" step="0.5" class="num"> pt</label>
+          </div>
+          <div class="field inline">
+            <label class="inline-label">泳道名角度</label>
+            <select id="labelAngle" style="width:auto"><option value="auto">自动</option><option value="0">0°</option><option value="45">45°</option><option value="90">90°</option></select>
+            <label class="inline-label">行距 <input type="number" id="rowGap" min="0" max="10" step="0.5" class="num"> pt</label>
+          </div>
+          <div class="field inline wrap">
+            <label class="switch"><input type="checkbox" id="invert"><span>白底黑带</span></label>
+            <label class="switch"><input type="checkbox" id="showMW"><span>分子量刻度</span></label>
+            <label class="switch"><input type="checkbox" id="unitHeader"><span>kDa 标题</span></label>
+            <label class="inline-label">面板字母 <input type="text" id="panelLetter" maxlength="2" class="num" placeholder="a"></label>
+          </div>
+        </details>
+      </section>
+      <div id="legendHints" class="legend"></div>
+    </div>
+  </aside>
+
+  <main id="stage">
+    <section class="pane-col" id="rawCol">
+      <div class="col-head">
+        <select id="viewBlot" class="hidden"></select>
+        <div class="seg" id="imgTabs"></div>
+        <span class="flex"></span>
+        <button class="btn sm ghost" id="fitFull">全图</button>
+        <span class="zoomlabel" id="zoomLabel"></span>
+      </div>
+      <div id="levelBar" class="levelbar hidden">
+        <span class="inline-label" id="levelName"></span>
+        <span class="inline-label">暗部</span><input type="range" id="lvBlack" min="0" max="1000">
+        <span class="inline-label">亮部</span><input type="range" id="lvWhite" min="0" max="1000">
+        <button class="btn sm ghost" id="btnLvAuto">自动</button>
+        <label class="switch"><input type="checkbox" id="showSat"><span>标红过曝</span></label>
+      </div>
+      <div id="editorBox" tabindex="0">
+        <canvas id="editor"></canvas>
+        <div id="dropHint"><div class="dh-icon">▤</div><div class="dh-text">把图片拖到这里</div><div class="dh-sub">多张一起拖：各曝光 + Marker 白光图</div></div>
+      </div>
+    </section>
+    <section class="pane-col" id="figCol">
+      <div class="col-head"><span class="col-title">成图</span><span class="col-sub">点文字直接编辑 · 点条带选中该行</span><span class="flex"></span><span class="zoomlabel" id="figSize"></span></div>
+      <div id="previewBox"><div id="preview"></div>
+        <div id="modeBanner" class="mode-banner hidden"><span id="modeText"></span><button id="modeCancel">取消 (Esc)</button></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="popover" class="popover hidden"></div>
+<input id="floatEd" class="float-ed hidden" type="text" autocomplete="off" spellcheck="false" list="protList">
+<datalist id="protList"></datalist>
+<div id="warnings"></div>
+<div id="toasts"></div>
+
+<div id="helpDlg" class="dlg hidden"><div class="dlg-body">
+  <button class="dlg-x" id="btnHelpClose">×</button>
+  <h3>最快的出图方式</h3>
+  <ol>
+    <li>把这次实验<b>所有图片一次拖进来</b>：每张膜的各个曝光 + Marker 白光图（iBright 的 Chemi 与 Marker 通道）。</li>
+    <li>工具自动归膜、找出条带行、每行选最长且不过曝的曝光、识别 Ladder 并标 kDa、按泳道对齐。</li>
+    <li>在右侧成图上<b>点灰色的"蛋白名"</b>和<b>泳道号</b>输入名称（回车跳下一个）。</li>
+    <li>右上角导出 PNG；"未裁切原图"放补充材料。</li>
+  </ol>
+  <h3>常见情况</h3>
+  <ul>
+    <li><b>某个蛋白在这张曝光里太亮 / 太暗</b>：点该行的曝光按钮换图，红点 = 有过曝。每张图只做整图线性调整，同一张图的所有行一起变。</li>
+    <li><b>某个蛋白没曝出来，没被识别</b>："按分子量添加"一行，或点"在膜图上点选添加"，再换长曝光。</li>
+    <li><b>行的上下范围不合适</b>：在中间膜图上拖蓝框上下边；拖框内部整体上下移动；选中后 ←→ 微调泳道对齐。</li>
+    <li><b>不同膜的泳道没对上</b>（如 Ladder 位置不同）：在"泳道"里调该膜的"泳道错位"。</li>
+    <li><b>只出部分泳道 / 剪掉中间一条</b>：在"泳道"里选范围，或在逐条泳道里取消"显示"（自动留白分隔）。</li>
+  </ul>
+  <h3>规范（期刊图像要求）</h3>
+  <ul>
+    <li>只做整图线性调整；一行只来自一张图，不在一行内拼接不同曝光或不同膜。</li>
+    <li>内参应与目标蛋白在同一张膜上，工具会检查并提示。</li>
+    <li>过曝条带不可定量；导出未裁切原图作为补充材料，图注提示会自动生成。</li>
+  </ul>
+  <p class="muted small">快捷键：Ctrl+Z 撤销 · 空格+拖动 平移 · 滚轮 缩放 · 选中行后 ↑↓ 移动、←→ 对齐泳道、Delete 删除 · Esc 取消</p>
+</div></div>
+
+<div id="busy" class="hidden"><div class="spinner"></div><div class="busy-text" id="busyText">处理中…</div></div>
+
+<script src="js/tiff.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/export.js"></script>
+<script src="js/wbladders.js"></script>
+<script src="js/wbengine.js"></script>
+<script src="js/wbdemo.js"></script>
+<script src="js/wbapp.js"></script>
+<script src="js/wbrender.js"></script>
+<script src="js/wbview.js"></script>
+<script src="js/wbui.js"></script>
+</body>
+</html>

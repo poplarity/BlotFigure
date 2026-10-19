@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>view</title></head>
+<body><pre id="out">running</pre>
+<script src="../js/tiff.js"></script>
+<script>
+// renders a region of one image (optionally contrast-stretched) to a data URL
+(async () => {
+  const q = new URLSearchParams(location.search);
+  const d = await TIFF.decode(await (await fetch(q.get('src'))).arrayBuffer());
+  const [x0, y0, w, h] = (q.get('rect') || `0,0,${d.width},${d.height}`).split(',').map(Number);
+  const s = +(q.get('scale') || 1), lo = +(q.get('lo') || 0), hi = +(q.get('hi') || 1);
+  const W = Math.round(w * s), H = Math.round(h * s), c = document.createElement('canvas'); c.width = W; c.height = H;
+  const id = c.getContext('2d').createImageData(W, H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const v = d.data[(y0 + Math.floor(y / s)) * d.width + x0 + Math.floor(x / s)];
+    const g = Math.max(0, Math.min(255, (v - lo) / (hi - lo) * 255)), i = (y * W + x) * 4;
+    id.data[i] = id.data[i + 1] = id.data[i + 2] = g; id.data[i + 3] = 255;
+  }
+  c.getContext('2d').putImageData(id, 0, 0);
+  document.getElementById('out').textContent = c.toDataURL('image/png');
+})();
+</script></body></html>

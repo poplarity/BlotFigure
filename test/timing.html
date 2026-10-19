@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>timing</title></head>
+<body><pre id="out">running</pre>
+<script src="../js/tiff.js"></script>
+<script src="../js/engine.js"></script>
+<script src="../js/wbladders.js"></script>
+<script src="../js/wbengine.js"></script>
+<script>
+// Times each stage of the real-data pipeline; partial results are written to the title as they come
+(async () => {
+  const q = new URLSearchParams(location.search), R = { t: {} }, T = () => performance.now();
+  const say = () => { document.title = 'T ' + JSON.stringify(R); document.getElementById('out').textContent = JSON.stringify(R); };
+  try {
+    const dir = q.get('dir'), names = q.get('names').split(',');
+    let t = T();
+    const imgs = [];
+    for (const n of names) { const d = await TIFF.decode(await (await fetch(dir + '/' + n)).arrayBuffer()); imgs.push({ name: n, img: { w: d.width, h: d.height, data: d.data } }); }
+    R.t.decode = Math.round(T() - t); say();
+    t = T(); const kinds = imgs.map(i => WB.classify(i.img, { name: 'x.tif' })); R.kinds = kinds.join(''); R.t.classify = Math.round(T() - t); say();
+    const chemis = imgs.filter((i, k) => kinds[k] === 'chemi').map(i => ({ id: i.name, img: i.img, exposure: null }));
+    const marker = imgs.find((i, k) => kinds[k] === 'marker');
+    t = T(); const strips = WB.findStrips(marker.img, 1); R.t.strips = Math.round(T() - t); R.nStrips = strips.length; say();
+    t = T(); const L = WB.findLadders(marker.img, strips, 140); R.t.ladders = Math.round(T() - t); R.ladderCols = WB.findLadders.debug.cols; say();
+    t = T(); const A = WB.analyzeSession(chemis, { id: marker.name, img: marker.img }, q.get('ladder') ? { ladderId: q.get('ladder') } : {}); R.t.analyze = Math.round(T() - t);
+    R.ladder = A.ladderId; R.rank = A.ladderRank.slice(0, 4).map(r => `${r.id}:${r.q.toFixed(3)}/m${r.miss}`); R.global = A.calib && A.calib.global; R.notes = A.notes;
+    R.rows = A.rows.map(r => `kda=${r.kda ? r.kda.toFixed(0) : '-'} oy=${Math.round(r.oy)} ks=${r.ks.join(',')} choice=${chemis[r.choice].id.slice(0, 2)}`);
+    R.factors = chemis.map((c, k) => `${c.id.slice(0, 2)}:${A.factors[k].toFixed(3)}`);
+    R.expo = A.rows.map(r => r.expo.map((e, k) => `${chemis[k].id.slice(0, 2)} sat${(e.satFrac * 100).toFixed(1)}% snr${e.snr.toFixed(0)} pk${e.peak.toFixed(2)} bg${e.bgMed.toFixed(2)} s${WB.exposureScore(e).toFixed(3)}`).join(' | '));
+    R.clip = A.factors.map((x, k) => `${chemis[k].id.slice(0, 2)}:${WB.chemiSignal(chemis[k].img).clip}`);
+    R.ladderKs = A.ladderKs; R.pitch = Math.round(A.pitch);
+    R.calBands = A.calib && A.calib.strips.map((s, i) => s && s.bands.map(b => `${Math.round(b.v + A.strips[i].cy)}:${b.kda}`).join(' '));
+  } catch (e) { R.error = e.stack || String(e); }
+  say();
+})();
+</script></body></html>
