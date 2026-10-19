@@ -128,7 +128,7 @@
       </div>
     </section>
     <section class="pane-col" id="figCol">
-      <div class="col-head"><span class="col-title">成图</span><span class="col-sub">点文字直接编辑 · 点条带选中该行</span><span class="flex"></span><span class="zoomlabel" id="figSize"></span></div>
+      <div class="col-head"><span class="col-title">成图</span><span class="col-sub">点文字直接编辑 · 点条带选中该行 · 上下拖条带排顺序、左右拖对齐泳道</span><span class="flex"></span><span class="zoomlabel" id="figSize"></span></div>
       <div id="previewBox"><div id="preview"></div>
         <div id="modeBanner" class="mode-banner hidden"><span id="modeText"></span><button id="modeCancel">取消 (Esc)</button></div>
       </div>
@@ -157,7 +157,9 @@
     <li><b>某个蛋白漏了，或没曝出来</b>：点"在膜图上框选添加"，在膜图上拖一个框把它框住（只按框里的条带识别泳道）；没曝出来的就"按分子量添加"一行，再换长曝光。</li>
     <li><b>框的范围不合适</b>：在中间膜图上点框选中这一行，拖框的边或四角自由缩放，框里的泳道跟着增减；拖框内部移动整个框（按住 Shift 同时上下移动这一行在各条膜条上的框）。</li>
     <li><b>泳道没对上</b>：泳道只在每个框里识别，框里的竖线就是泳道，上方数字是它在成图里的列（M = Marker 道，× = 不用，点数字切换）。多认了：点那根竖线后按 Delete；漏了：双击框内加一道，或把框边拖过去；位置偏了：拖动竖线，或选中框后 ←→ 平移、Alt+←→ 调间距；整个框都不对：在左侧"泳道"里点"框内重新识别"或"均分 N 道"；列号错位：点 ‹ ›。</li>
-    <li><b>同一个蛋白在两条膜条上</b>（膜从中间竖着剪开）：在左侧选中这一行，点"＋ 拼接另一条膜条"，再在膜图上点它在另一条膜条上的位置；两个框按左右顺序接成连续的列。"拆开"可以撤回。</li>
+    <li><b>调整成图里各行的上下顺序</b>：在右侧成图上按住一行的条带上下拖到想要的位置（也可以拖成图左边的膜条标签，或左侧列表里每行前面的标签）；选中一行后 Alt+↑↓ 一次挪一位。</li>
+    <li><b>左右对齐泳道</b>（剪过的膜，比如膜条 A 的第 4–6 道要对准膜条 B 的第 1–3 道）：在成图上把一行的条带左右拖，按列吸附；这条膜条上的各行一起动（它们共用同一套泳道），按住 Alt 只挪这一个框。拖过第 1 列时左边自动补列，泳道名跟着挪。</li>
+    <li><b>同一个蛋白在两条膜条上</b>（膜从中间竖着剪开）：通常会自动并成一行；没有的话，在成图上把一行拖到另一行上松开，两个框按左右顺序接成连续的列。"拆开"可以撤回。</li>
     <li><b>Marker 没识别出来或认错了</b>：点膜图上方的"标 Marker"，在白光图上点 Marker 条带，选它的分子量；拖动可微调，点数字可修改或删除。标了 2 条以上就能估算各行分子量；成图左侧只画手动标的刻度。</li>
     <li><b>只出部分泳道 / 剪掉中间一列</b>：在"泳道"里选范围，或在逐列剪除里取消"显示"（自动留白分隔）。</li>
     <li><b>条带要加边框</b>：在"版式"里勾选"条带加边框"。</li>
@@ -168,7 +170,7 @@
     <li>内参应与目标蛋白在同一张膜上，工具会检查并提示。</li>
     <li>过曝条带不可定量；导出未裁切原图作为补充材料，图注提示会自动生成。</li>
   </ul>
-  <p class="muted small">快捷键：Ctrl+Z 撤销 · 空格+拖动 平移 · 滚轮 缩放 · 选中行后 ↑↓ 移动、←→ 平移泳道、Alt+←→ 调间距、Delete 删除整行 · 选中竖线后 ←→ 微调、Delete 删掉这一道 · 双击框内 加一道 · Esc 取消</p>
+  <p class="muted small">快捷键：Ctrl+Z 撤销 · 空格+拖动 平移 · 滚轮 缩放 · 选中行后 ↑↓ 移动框、Alt+↑↓ 调整在成图里的上下顺序、←→ 平移泳道、Alt+←→ 调间距、Delete 删除整行 · 选中竖线后 ←→ 微调、Delete 删掉这一道 · 双击框内 加一道 · Esc 取消</p>
 </div></div>
 
 <div id="busy" class="hidden"><div class="spinner"></div><div class="busy-text" id="busyText">处理中…</div></div>

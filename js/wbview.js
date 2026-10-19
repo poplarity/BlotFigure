@@ -4,9 +4,8 @@
  * handles: drag an edge or a corner to resize a box — its lanes stay where they are and new room gets lanes
  * at the same spacing; drag inside to move it (Shift: all the row's boxes up/down); drag a lane line to move
  * that lane; double-click inside to add a lane; click a label to switch sample / left out / marker.
- * Modes: 'addrow' click adds a row at that height, or drag out a box: a row from that box alone;
- * 'addseg' click stitches the clicked piece into the selected row; 'marks' click on a piece adds a marker
- * band, drag moves one, click its size to change or delete it. */
+ * Modes: 'addrow' click adds a row at that height, or drag out a box: a row from that box alone; 'marks'
+ * click on a piece adds a marker band, drag moves one, click its size to change or delete it. */
 (function (G) {
   'use strict';
   const App = G.BApp, WB = G.WB;
@@ -194,7 +193,7 @@
       const pts = [[ua, va], [ub, va], [ub, vb], [ua, vb]].map(([u, v]) => WB.toImg(drag.F, u, v));
       ctx.fillStyle = 'rgba(47,111,235,.08)'; line(pts, true); ctx.fill();
       ctx.strokeStyle = '#2f6feb'; ctx.lineWidth = 1.6; ctx.setLineDash([5, 4]); line(pts, true); ctx.stroke(); ctx.setLineDash([]);
-    } else if ((App.mode === 'addrow' || App.mode === 'addseg' || marking) && hover && hover.p) {
+    } else if ((App.mode === 'addrow' || marking) && hover && hover.p) {
       ctx.strokeStyle = marking ? '#e0a800' : '#2f6feb'; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.5;
       const hit = App.pieceAt(b, hover.p.x, hover.p.y, 0);
       if (hit) {
@@ -286,15 +285,6 @@
       if (!hit) { G.UI.toast('点在膜条上：蛋白所在的高度，或拖出一个框'); return; }
       drag = { h: { type: 'newbox', pc: hit.pc }, sx, sy, p0: p, moved: false, F: pFrame(hit.pc), a: [hit.u, hit.v] };
       e.preventDefault();
-      return;
-    }
-    if (App.mode === 'addseg') {
-      const row = App.row(App.selRow);
-      const res = row ? App.addSeg(row, p.x, p.y) : 'none';
-      if (res === 'none') { G.UI.toast('点到膜条上：这个蛋白在另一条膜条上的位置'); return; }
-      if (res === 'stacked') { G.UI.toast('这条膜条和这一行所在的膜条上下叠放、泳道相同，是另一组蛋白，不能拼成一行', 3600); return; }
-      App.setMode(null); App.commit();
-      G.UI.toast(res === 'joined' ? '已把两行拼成一行（两个框按左右顺序接成连续的列）' : res === 'moved' ? '已移动这一行在该膜条上的位置' : '已拼接：这一行现在跨两条膜条');
       return;
     }
     const h = hitTest(sx, sy);
@@ -433,6 +423,7 @@
     if (e.target !== box || !App.S) return;
     const row = App.selRow && App.row(App.selRow), sg = App.curSeg(row), st = e.shiftKey ? 5 : 1;
     if (!row || !sg) return;
+    if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) return;     // Alt+↑↓ reorders the figure (wbui)
     const sideways = e.key === 'ArrowLeft' || e.key === 'ArrowRight', d = e.key === 'ArrowLeft' ? -1 : 1;
     if (App.selLane != null && sg.lanes[App.selLane]) {
       if (sideways) { const i = App.selLane; App.editLanes(row, sg, () => App.moveLane(sg, i, sg.lanes[i].u + d * st)); App.commit(); e.preventDefault(); return; }

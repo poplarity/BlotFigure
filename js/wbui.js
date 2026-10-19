@@ -8,6 +8,11 @@
   const composing = e => e.isComposing || e.keyCode === 229;
   const live = fn => e => { if (!S()) return; fn(e); App.refresh(); };
   const done = fn => e => { if (!S()) return; if (fn) fn(e); App.commit(); };
+  // the pieces (modules) a row comes from: "B", "A+B"; with several membranes "2·B"
+  const modLabel = row => {
+    const L = App.rowPieces(row).map(pc => pc.letter || '?').join('+') || '—';
+    return S().blots.length > 1 ? `${S().blots.indexOf(App.blot(row.blot)) + 1}·${L}` : L;
+  };
 
   /* ---------- feedback ---------- */
   function toast(msg, ms) {
@@ -30,12 +35,11 @@
     if (App.mode === 'marks' && m !== 'marks') closePop();
     App.mode = m;
     // the figure's banner for figure modes, the membrane view's banner for clicks on the membrane
-    const onView = m === 'addrow' || m === 'addseg' || m === 'marks';
+    const onView = m === 'addrow' || m === 'marks';
     $('modeBanner').classList.toggle('hidden', !m || onView);
     $('viewBanner').classList.toggle('hidden', !onView);
     $('modeText').textContent = m === 'group' ? '在成图上从第一个泳道名拖到最后一个' : '';
     $('viewModeText').textContent = m === 'addrow' ? '拖出一个框（只按框里的条带识别泳道），或点蛋白所在的高度'
-      : m === 'addseg' ? '点这个蛋白在另一条膜条上的位置（点在已有的行上 = 两行拼成一行）'
       : m === 'marks' ? '点 Marker 带添加刻度；拖动微调，点数字修改或删除' : '';
     $('viewModeCancel').textContent = m === 'marks' ? '完成' : '取消 (Esc)';
     $('btnAddRow').classList.toggle('primary', m === 'addrow');
@@ -88,6 +92,11 @@
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? App.redo() : App.undo(); }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); App.redo(); }
     if (e.key === 'Escape') { $('helpDlg').classList.add('hidden'); closePop(); if (App.mode) App.setMode(null); }
+    // Alt+↑↓: the selected row one place up / down in the figure
+    if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && S() && App.selRow) {
+      e.preventDefault();
+      if (App.moveRowBy(App.selRow, e.key === 'ArrowUp' ? -1 : 1)) App.commit();
+    }
   });
   $('dpiTop').addEventListener('change', done(e => { S().style.dpi = +e.target.value; }));
   const baseName = () => 'blot_figure';
@@ -231,12 +240,13 @@
       const cur = App.images.get(row.img), curE = ex.find(x => x.id === row.img), isBest = row.img === best;
       const el = document.createElement('div');
       el.className = 'row-item' + (sel ? ' sel' : '') + (row.hidden ? ' off' : '');
+      el.dataset.id = row.id;
       const sugg = G.ProteinLadders.suggest(kda);
-      // compact chip: the exposure in use, starred when it is the recommended one
-      el.innerHTML = `<span class="swatch" style="background:${App.rowColor(row)}"></span>
+      // the tag: the row's colour on the membrane and the pieces it comes from; dragged = order in the figure
+      el.innerHTML = `<span class="grip" style="--c:${App.rowColor(row)}" title="来自膜条 ${esc(modLabel(row))}。上下拖动调整这一行在成图里的位置（或选中后 Alt+↑↓）">${esc(modLabel(row))}</span>
         <input type="text" value="${esc(row.name)}" placeholder="${esc(sugg[0] ? sugg[0] + '？' : '蛋白名')}" list="protList">
         <span class="kda">${kda ? '≈' + Math.round(kda) + ' kDa' : ''}</span>
-        <button class="expo-chip${isBest ? ' best' : ' other'}${App.expoVerdict(curE) === 'sat' ? ' sat' : ''}" data-act="expo" title="${isBest ? '正在用推荐的曝光' : '正在用的不是推荐曝光'}｜点开对比全部曝光">${isBest ? '★ ' : ''}${cur ? esc(App.expoLabel(cur)) : '—'}</button>
+        <button class="expo-chip${isBest ? ' best' : ' other'}${App.expoVerdict(curE) === 'sat' ? ' sat' : ''}" data-act="expo" title="${cur ? esc(App.expoLabel(cur)) + '：' : ''}${isBest ? '正在用推荐的曝光' : '正在用的不是推荐曝光'}｜点开对比全部曝光">${isBest ? '★ ' : ''}${cur ? esc(App.expoLabel(cur)) : '—'}</button>
         <button class="x" data-act="hide" title="${row.hidden ? '显示' : '隐藏'}这一行">${row.hidden ? '◌' : '●'}</button>
         <button class="x" data-act="del" title="删除这一行">×</button>`;
       const inp = el.querySelector('input');
@@ -252,11 +262,11 @@
       el.querySelector('[data-act="expo"]').onclick = () => selectRow(sel ? null : row.id, !sel);
       el.querySelector('[data-act="hide"]').onclick = done(() => { row.hidden = !row.hidden; });
       el.querySelector('[data-act="del"]').onclick = done(() => { st.rows = st.rows.filter(r => r !== row); if (App.selRow === row.id) App.selRow = null; toast('已删除该行（Ctrl+Z 可撤销）'); });
-      el.onclick = e => { if (e.target === el || e.target.classList.contains('kda') || e.target.classList.contains('swatch')) selectRow(row.id, true); };
+      el.onclick = e => { if (e.target === el || e.target.classList.contains('kda') || e.target.classList.contains('grip')) selectRow(row.id, true); };
       box.appendChild(el);
       if (sel && ex.length) box.appendChild(expoCompare(row, ex, best));
     });
-    if (!st.rows.length) box.innerHTML = '<p class="hint">没有识别出条带。用下面的按钮按分子量或在膜图上点选添加。</p>';
+    if (!st.rows.length) box.innerHTML = '<p class="hint">没有识别出条带。用下面的按钮按分子量添加，或在膜图上框选添加。</p>';
     const named = st.rows.filter(r => r.name && !r.hidden).length, vis = st.rows.filter(r => !r.hidden).length;
     $('stRows').textContent = `${named}/${vis} 已命名`;
   }
@@ -268,14 +278,10 @@
     const why = vb === 'ok' ? '★ 推荐：条带清晰、没有过曝，背景干净'
       : vb === 'sat' ? '★ 推荐：每张曝光里这条带都有过曝像素，★ 是过曝最少又清楚的一张；这一行不要拿来定量'
       : '★ 推荐：信号都偏弱，★ 是相对最清楚的一张；可以考虑补拍更长曝光';
-    const b = App.blot(row.blot), pcs = App.rowPieces(row);
-    // the pieces this row runs across, and stitching / splitting
-    const segLine = `<div class="seg-line">在膜条 <b>${pcs.map(pc => esc(pc.letter || '?')).join(' + ') || '—'}</b>
-      <button class="link" data-act="stitch" title="这个蛋白在另一条膜条上也有：在膜图上点它的位置，拼成一行">＋ 拼接另一条膜条</button>
-      ${row.segs.length > 1 ? '<button class="link" data-act="split" title="每条膜条各成一行">拆开</button>' : ''}</div>`;
+    const b = App.blot(row.blot);
+    // the pieces this row runs across side by side (one protein on a membrane cut through), and splitting them
+    const segLine = row.segs.length > 1 ? `<div class="seg-line">并排来自膜条 <b>${esc(modLabel(row))}</b>（膜在这里竖着剪开过）<button class="link" data-act="split" title="每条膜条各成一行">拆开</button></div>` : '';
     wrap.innerHTML = `${(b.pieces || []).length > 1 ? segLine : ''}<div class="why">${why}${row.img !== best ? ' <button class="link" data-act="usebest">改用推荐</button>' : ''}</div><div class="tiles"></div>`;
-    const stitch = wrap.querySelector('[data-act="stitch"]');
-    if (stitch) stitch.onclick = () => { App.selRow = row.id; App.viewBlot = row.blot; App.emit('select'); App.setMode('addseg'); };
     const split = wrap.querySelector('[data-act="split"]');
     if (split) split.onclick = done(() => { App.splitRow(row); toast('已拆开：每条膜条各成一行'); });
     const tiles = wrap.querySelector('.tiles');
@@ -309,7 +315,7 @@
   function addKda() {
     const k = +$('addKda').value; if (!(k > 0)) { toast('先填分子量（kDa）'); return; }
     const row = App.addRowAtKda(k, App.viewBlot);
-    if (!row) { toast('没有哪张膜带 Marker 能覆盖这个分子量；可以用"在膜图上点选添加"'); return; }
+    if (!row) { toast('没有哪张膜带 Marker 能覆盖这个分子量；可以用"在膜图上框选添加"'); return; }
     // a newly added, possibly invisible protein: prefer the longest exposure
     const ch = App.chemiOf(App.blot(row.blot)); row.img = ch[ch.length - 1].id; row.auto = false;
     App.selRow = row.id; App.viewBlot = row.blot; App.viewImg = row.img;
@@ -453,6 +459,8 @@
     const k = Math.max(0.5, Math.min((bx.width - 48) / f.w, (bx.height - 48) / f.h, 4));
     svg.removeAttribute('width'); svg.removeAttribute('height');
     svg.style.width = (f.w * k) + 'px'; svg.style.height = (f.h * k) + 'px';
+    prevScale = k;
+    drawRowTags(f);
     $('figSize').textContent = `${(f.w / App.MM).toFixed(1)} × ${(f.h / App.MM).toFixed(1)} mm`;
     const ck = App.checks();
     showWarnings(f.warnings.concat(ck.warn));
@@ -524,7 +532,7 @@
     } else if (!p.moved) openEd('lane', p.j);
   });
   prev.addEventListener('click', e => {
-    if (!S()) return;
+    if (!S() || swallowClick) return;
     const img = e.target.closest('image[data-row]');
     if (img) { selectRow(img.dataset.row, true); return; }
     const g = e.target.closest('[data-edit]'); if (!g) return;
@@ -540,6 +548,143 @@
     }
   });
 
+  /* ---------- arranging the figure ----------
+   * Every row comes from one or more pieces of membrane (modules: own angle, lanes, marker). In the figure a
+   * row is dragged up / down to its place, onto another row to stand side by side with it (one protein on a
+   * membrane cut through), or left / right to line its piece's lanes up with the other rows — every row on
+   * that piece moves along (they share its lanes); Alt: only that box. Tags left of the rows name the pieces
+   * and drag rows too; in the list, the ⋮⋮ grip drags rows. */
+  let prevScale = 1, pdrag = null, ldrag = null, swallowClick = false;
+  // rows of the figure on screen, relative to #preview (top / bottom, left / right of the lanes)
+  function rowRects(f) {
+    const svg = prev.querySelector('svg'), m = svg && svg.getScreenCTM && svg.getScreenCTM();
+    if (!m || !f || !f.rowBoxes) return [];
+    const pr = prev.getBoundingClientRect(), p = svg.createSVGPoint();
+    const at = (x, y) => { p.x = x; p.y = y; const q = p.matrixTransform(m); return { x: q.x - pr.left, y: q.y - pr.top }; };
+    return f.rowBoxes.map(rb => { const a = at(0, rb.y), b = at(f.figW, rb.y + rb.h); return { id: rb.id, x0: a.x, x1: b.x, top: a.y, bot: b.y }; });
+  }
+  function drawRowTags(f) {
+    const svg = prev.querySelector('svg'); if (!svg) return;
+    const ov = document.createElement('div'); ov.className = 'prev-ov'; prev.appendChild(ov);
+    const left = svg.getBoundingClientRect().left - prev.getBoundingClientRect().left;
+    rowRects(f).forEach(r => {
+      const row = App.row(r.id); if (!row) return;
+      const t = document.createElement('div');
+      t.className = 'rowtag' + (row.id === App.selRow ? ' sel' : ''); t.dataset.row = r.id; t.textContent = modLabel(row);
+      t.title = `来自膜条 ${modLabel(row)}。上下拖动调整顺序，拖到另一行上并排成一行；在成图上左右拖动条带对齐泳道`;
+      t.style.left = (left - 5) + 'px'; t.style.top = ((r.top + r.bot) / 2) + 'px';
+      ov.appendChild(t);
+    });
+    ov.insertAdjacentHTML('beforeend', '<div class="dropline hidden"></div><div class="dropbox hidden"></div><div class="droptip hidden"></div>');
+  }
+  // the dragged images follow the pointer (svg units)
+  function ghost(sel, dx, dy) {
+    prev.querySelectorAll('image[data-row], rect[data-row]').forEach(el => { el.removeAttribute('transform'); el.removeAttribute('opacity'); });
+    if (sel) prev.querySelectorAll(sel).forEach(el => { if (el.tagName === 'image' || el.tagName === 'rect') { el.setAttribute('transform', `translate(${dx},${dy})`); el.setAttribute('opacity', '0.78'); } });
+  }
+  function tipAt(ov, x, y, text) {
+    const tip = ov.querySelector('.droptip');
+    tip.textContent = text; tip.style.left = x + 'px'; tip.style.top = y + 'px'; tip.classList.toggle('hidden', !text);
+  }
+  prev.addEventListener('mousedown', e => {
+    if (e.button !== 0 || !S()) return;
+    const tag = e.target.closest('.rowtag'), img = !tag && e.target.closest('image[data-row]');
+    if (!tag && !img) return;
+    pdrag = { id: (tag || img).dataset.row, piece: img ? img.dataset.piece : null, x0: e.clientX, y0: e.clientY, mode: null, onlyOrder: !!tag, k: 0, drop: null, alt: false };
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', e => {
+    if (!pdrag || !lastFig) return;
+    const dx = e.clientX - pdrag.x0, dy = e.clientY - pdrag.y0, ov = prev.querySelector('.prev-ov');
+    if (!pdrag.mode) {
+      if (Math.hypot(dx, dy) < 6) return;
+      pdrag.mode = pdrag.onlyOrder || Math.abs(dy) >= Math.abs(dx) ? 'order' : 'align';
+      prev.classList.add('arranging');
+    }
+    if (!ov) return;
+    const pr = prev.getBoundingClientRect(), mx = e.clientX - pr.left, my = e.clientY - pr.top;
+    const line = ov.querySelector('.dropline'), boxEl = ov.querySelector('.dropbox');
+    if (pdrag.mode === 'order') {
+      ghost(`[data-row="${pdrag.id}"]`, 0, dy / prevScale);
+      const rs = rowRects(lastFig), me = rs.findIndex(r => r.id === pdrag.id);
+      // on the middle of another row: side by side with it; else between the rows nearest the pointer
+      let drop = null;
+      for (let i = 0; i < rs.length && !drop; i++) {
+        const r = rs[i], hh = r.bot - r.top;
+        if (i !== me && my > r.top + hh * 0.3 && my < r.bot - hh * 0.3) drop = { onto: r.id, r };
+        else if (my < (r.top + r.bot) / 2) drop = { at: i };
+      }
+      if (!drop) drop = { at: rs.length };
+      pdrag.drop = drop;
+      line.classList.toggle('hidden', !!drop.onto); boxEl.classList.toggle('hidden', !drop.onto);
+      if (drop.onto) {
+        Object.assign(boxEl.style, { left: drop.r.x0 - 3 + 'px', top: drop.r.top - 3 + 'px', width: drop.r.x1 - drop.r.x0 + 6 + 'px', height: drop.r.bot - drop.r.top + 6 + 'px' });
+        tipAt(ov, mx + 14, my + 10, '松开：并排成一行（同一个蛋白，膜竖着剪开过）');
+      } else {
+        const a = rs[drop.at - 1], b = rs[drop.at], y = !rs.length ? 0 : !a ? b.top - 3 : !b ? a.bot + 3 : (a.bot + b.top) / 2, ref = rs[0] || { x0: 0, x1: 100 };
+        Object.assign(line.style, { left: ref.x0 - 8 + 'px', top: y + 'px', width: ref.x1 - ref.x0 + 16 + 'px' });
+        tipAt(ov, mx + 14, my + 10, '');
+      }
+    } else {
+      const k = Math.round(dx / prevScale / lastFig.laneW), row = App.row(pdrag.id), pc = row && App.findPiece(pdrag.piece);
+      pdrag.k = k; pdrag.alt = e.altKey;
+      ghost(e.altKey ? `[data-row="${pdrag.id}"][data-piece="${pdrag.piece}"]` : `[data-piece="${pdrag.piece}"]`, k * lastFig.laneW, 0);
+      const who = pc ? `膜条 ${pc.pc.letter}` : '这一行';
+      tipAt(ov, mx + 14, my + 10, k ? `${who}${e.altKey ? '（只这个框）' : '（这条膜条上的行一起）'}往${k > 0 ? '右' : '左'}挪 ${Math.abs(k)} 列` : '左右拖：对齐泳道（按住 Alt 只挪这个框）');
+    }
+  });
+  window.addEventListener('mouseup', () => {
+    if (!pdrag) return;
+    const d = pdrag; pdrag = null;
+    prev.classList.remove('arranging');
+    if (!d.mode) return;                // a click: selects the row (click handler)
+    swallowClick = true; setTimeout(() => { swallowClick = false; }, 0);
+    const row = App.row(d.id);
+    if (!row) { updatePreview(); return; }
+    if (d.mode === 'order' && d.drop && d.drop.onto) {
+      const res = App.mergeRows(App.row(d.drop.onto), row);
+      if (res === 'joined') { App.selRow = d.drop.onto; App.commit(); toast('已并排成一行：两个框按左右接成连续的列；"拆开"可撤回'); return; }
+      toast(res === 'blot' ? '这两行来自不同的膜（不同的图片），不能并成一行' : res === 'same' ? '这两行在同一条膜条上，是两个不同的蛋白，不能并成一行'
+        : res === 'stacked' ? '这两条膜条上下叠放、泳道相同，是不同的蛋白，不能并成一行' : '没有改动', 3400);
+      updatePreview();
+    } else if (d.mode === 'order' && d.drop) {
+      const rs = (lastFig.rowBoxes || []).map(b => b.id), rows = S().rows;
+      const to = d.drop.at < rs.length ? rows.findIndex(r => r.id === rs[d.drop.at]) : rows.findIndex(r => r.id === rs[rs.length - 1]) + 1;
+      if (App.moveRow(d.id, to)) { App.commit(); toast('已调整行的上下顺序'); } else updatePreview();
+    } else if (d.mode === 'align' && d.k) {
+      const sg = row.segs.find(s => s.piece === d.piece);
+      if (!sg) { updatePreview(); return; }
+      const n = App.shiftAlign(row, sg, d.k, d.alt);
+      App.commit();
+      toast(`${d.alt || n < 2 ? '这个框' : `膜条 ${(App.findPiece(d.piece) || { pc: {} }).pc.letter} 上的 ${n} 个框`}往${d.k > 0 ? '右' : '左'}挪了 ${Math.abs(d.k)} 列`);
+    } else updatePreview();
+  });
+  // the list: drag rows by their grip
+  $('rowList').addEventListener('mousedown', e => {
+    const g = e.target.closest('.grip'); if (!g || e.button !== 0) return;
+    ldrag = { id: g.closest('.row-item').dataset.id, y0: e.clientY, moved: false, to: null };
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', e => {
+    if (!ldrag) return;
+    if (Math.abs(e.clientY - ldrag.y0) > 4) ldrag.moved = true;
+    if (!ldrag.moved) return;
+    const items = [...$('rowList').querySelectorAll('.row-item')];
+    let t = items.findIndex(it => { const r = it.getBoundingClientRect(); return e.clientY < r.top + r.height / 2; });
+    if (t < 0) t = items.length;
+    ldrag.to = t;
+    items.forEach((it, i) => { it.classList.toggle('drop-before', i === t); it.classList.toggle('drop-after', t === items.length && i === items.length - 1); it.classList.toggle('dragging', it.dataset.id === ldrag.id); });
+  });
+  window.addEventListener('mouseup', () => {
+    if (!ldrag) return;
+    const d = ldrag; ldrag = null;
+    const items = [...$('rowList').querySelectorAll('.row-item')];
+    items.forEach(it => it.classList.remove('drop-before', 'drop-after', 'dragging'));
+    if (!d.moved || d.to == null) return;
+    const to = d.to < items.length ? S().rows.findIndex(r => r.id === items[d.to].dataset.id) : S().rows.length;
+    if (App.moveRow(d.id, to)) { App.commit(); toast('已调整行的顺序'); }
+  });
+
   /* ---------- coach ---------- */
   function updateCoach() {
     const st = S(), vis = st.rows.filter(r => !r.hidden), fl = App.figLanes();
@@ -547,7 +692,7 @@
     const sat = vis.filter(r => { const e = App.rowExpo(r).find(x => x.id === r.img); return e && e.satFrac > 0.002; });
     const noMW = st.style.showMW ? st.blots.filter(b => vis.some(r => r.blot === b.id) && !vis.some(r => r.blot === b.id && App.rowPieces(r).some(pc => App.pieceCal(b, pc)))) : [];
     let msg, ok = false;
-    if (!vis.length) msg = '没有识别出条带行：用左侧"按分子量添加"或"在膜图上点选添加"';
+    if (!vis.length) msg = '没有识别出条带行：用左侧"按分子量添加"或"在膜图上框选添加"';
     else if (unnamedRows) msg = `下一步：在成图右侧<b>点灰色的"蛋白名"</b>输入，回车跳下一行（还差 ${unnamedRows} 行）`;
     else if (unnamedLanes) msg = `下一步：在成图上<b>点灰色泳道号</b>输入样品名，回车跳下一条（还差 ${unnamedLanes} 条）`;
     else if (sat.length) msg = `「${sat[0].name}」所选曝光有过曝：在左侧该行<b>点更短的曝光</b>`;
@@ -654,7 +799,7 @@
       for (const n of list) files.push({ name: n, buffer: await (await fetch(qs.get('srcdir') + '/' + n)).arrayBuffer() });
       await addFiles(files);
     } else await loadDemo();
-    const st = S();
+    let st = S();
     if (qs.get('ladder')) { st.blots.forEach(b => { b.ladderId = qs.get('ladder'); b.ladderAuto = false; }); App.commit(); }
     if (qs.get('sel')) { const vis = st.rows.filter(r => !r.hidden), r = vis[+qs.get('sel')]; if (r) { App.selRow = r.id; App.viewBlot = r.blot; App.viewImg = r.img; App.emit('select'); } }
     if (qs.get('border') === '1') { st.style.border = true; App.commit(); }
@@ -669,13 +814,64 @@
     const letter = id => (App.findPiece(id) || { pc: {} }).pc.letter;
     const segStr = r => r.segs.map(s => `${letter(s.piece)}:${s.c0}:${s.lanes.map(l => l.r).join('')}`).join('+');
     const snap = tag => log.push(`${tag} | ` + S().rows.map(r => `${segStr(r)}[${App.figLanes().filter(j => App.colSource(r, j)).join(',')}]${r.hidden ? 'h' : ''}~${Math.round(App.rowKda(r) || 0)}`).join(' '));
+    // mouse events on the figure preview
+    const pv = $('preview'), vis = () => S().rows.filter(r => !r.hidden);
+    const imgOf = (id, piece) => pv.querySelector(`image[data-row="${id}"]${piece ? `[data-piece="${piece}"]` : ''}`);
+    const ctr = el => { const r = el.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
+    const fire = (type, [x, y], target, opt) => (target || window).dispatchEvent(new MouseEvent(type, Object.assign({ clientX: x, clientY: y, bubbles: true }, opt)));
+    const hold = (el, to, opt) => { const a = ctr(el); fire('mousedown', a, el, opt); fire('mousemove', [(a[0] + to[0]) / 2, (a[1] + to[1]) / 2], null, opt); fire('mousemove', to, null, opt); };
+    const pull = (el, to, opt) => { hold(el, to, opt); fire('mouseup', to, null, opt); fire('click', to, el, opt); };
+    const onPiece = l => vis().find(r => r.segs.some(s => letter(s.piece) === l));
+    const L = () => lastFig.laneW * prevScale;
     if (scen === 'stitch') {
       snap('start');
-      const top = S().rows[0]; App.splitRow(top); App.commit(); snap('split');
-      const r2 = S().rows[1], [x, y] = App.rowXY(r2); snap('join:' + App.addSeg(S().rows[0], x, y)); App.commit(); snap('joined');
-      // a click on a piece below (same lanes) must not renumber it
-      const c = S().blots[0].pieces.find(p => p.letter === 'C'), [cx, cy] = WB.toImg(WB.frame(c.cx, c.cy, c.angle), 0, 0);
-      snap('stray:' + App.addSeg(S().rows[0], cx, cy)); App.commit(); snap('after stray');
+      App.splitRow(S().rows[0]); App.commit(); snap('split');
+      snap('join:' + App.mergeRows(S().rows[0], S().rows[1])); App.commit(); snap('joined');
+      // never one row: the piece below on the same lanes (C), two bands of one piece (C + C)
+      const onC = S().rows.filter(r => r.segs.some(s => letter(s.piece) === 'C'));
+      snap('onto C:' + App.mergeRows(S().rows[0], onC[0]));
+      snap('C+C:' + App.mergeRows(onC[0], onC[1])); App.commit(); snap('after refusals');
+    }
+    if (scen === 'arrange') {
+      // the figure arranged by mouse: rows dragged up / down, onto each other, by their tags and the list grip;
+      // a piece's lanes dragged left / right (with Alt one box), past column 1
+      const said = () => { const t = $('toasts').lastElementChild; return t ? t.textContent.slice(0, 16) : ''; };
+      const order = tag => log.push(`${tag} | ` + vis().map(r => `${segStr(r)}~${Math.round(App.rowKda(r) || 0)}`).join(' ') + ` | lanes=${S().lanes.length} range=${S().range.join('-')} | ${said()}`);
+      order('start');
+      const top = imgOf(vis()[0].id).getBoundingClientRect(), low = vis()[vis().length - 1];
+      pull(imgOf(low.id), [ctr(imgOf(low.id))[0], top.top - 4]); order('last to top');
+      // piece C a column right — both of its rows follow (one is hidden) — and back; with Alt only one box
+      const cr = onPiece('C'), cp = cr.segs[0].piece;
+      let el = imgOf(cr.id, cp), a = ctr(el); pull(el, [a[0] + 1.3 * L(), a[1]]); snap('C +1');
+      el = imgOf(cr.id, cp); a = ctr(el); pull(el, [a[0] - 1.3 * L(), a[1]]); snap('C -1');
+      el = imgOf(cr.id, cp); a = ctr(el); pull(el, [a[0] + 2.3 * L(), a[1]], { altKey: true }); snap('C box +2 (Alt)');
+      App.undo(); snap('undo');
+      // D two columns past column 1: room is made on the left, lane names move along
+      S().lanes[0].name = 'L1'; App.commit();
+      const dr = onPiece('D'), dp = dr.segs[0].piece;
+      el = imgOf(dr.id, dp); a = ctr(el); pull(el, [a[0] - 2.3 * L(), a[1]]); order('D -2'); log.push('names ' + S().lanes.map(l => l.name || '.').join(','));
+      App.undo(); App.undo(); order('undo x2');
+      // C's row dropped on D's: refused (stacked); the first row to the bottom by its tag
+      el = imgOf(onPiece('C').id); const dRect = imgOf(onPiece('D').id).getBoundingClientRect();
+      pull(el, [ctr(el)[0], dRect.top + dRect.height / 2]); order('C onto D');
+      const tag = pv.querySelector(`.prev-ov .rowtag[data-row="${vis()[0].id}"]`), bot = imgOf(vis()[vis().length - 1].id).getBoundingClientRect();
+      pull(tag, [ctr(tag)[0], bot.bottom + 8]); order('first to bottom by tag');
+      // A+B split, then B's row dropped onto A's: side by side again
+      App.splitRow(vis().find(r => r.segs.length > 1)); App.commit(); order('split A+B');
+      const aRect = imgOf(onPiece('A').id).getBoundingClientRect();
+      el = imgOf(onPiece('B').id); pull(el, [ctr(el)[0], aRect.top + aRect.height / 2]); order('B onto A');
+      // the list grip: the second shown row to the top, the first to the end
+      const shown = () => [...$('rowList').querySelectorAll('.row-item')].filter(it => !App.row(it.dataset.id).hidden);
+      let it = shown(), grip = it[1].querySelector('.grip'), g = ctr(grip), y0 = it[0].getBoundingClientRect().top + 2;
+      fire('mousedown', g, grip); fire('mousemove', [g[0], y0]); fire('mouseup', [g[0], y0]); order('list: 2nd to top');
+      const all = [...$('rowList').querySelectorAll('.row-item')], yEnd = all[all.length - 1].getBoundingClientRect().bottom + 6;
+      it = shown(); grip = it[0].querySelector('.grip'); g = ctr(grip);
+      fire('mousedown', g, grip); fire('mousemove', [g[0], yEnd]); fire('mouseup', [g[0], yEnd]); order('list: 1st to end');
+      // Alt+↑ / Alt+↓ on the selected row
+      App.selRow = vis()[1].id; App.emit('select');
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', altKey: true, bubbles: true })); order('Alt+Up on 2nd');
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true })); order('Alt+Down x2');
     }
     if (scen === 'lanes') {
       // lane edits of one box (the lowest visible row): resize, re-detect, even spacing, add / switch / remove
@@ -776,7 +972,21 @@
       markPicker(b, pc, mk, 640, 420, true);
       snap('picker open');
     }
+    // &pose=merge|align|order: a drag on the figure held half-way (screenshots)
+    const pose = qs.get('pose');
+    if (pose === 'merge') {
+      App.splitRow(vis().find(r => r.segs.length > 1)); App.commit();
+      const a = imgOf(onPiece('A').id).getBoundingClientRect(), el = imgOf(onPiece('B').id);
+      hold(el, [ctr(el)[0], a.top + a.height / 2]);
+    } else if (pose === 'align') {
+      const r = onPiece('C'), el = imgOf(r.id, r.segs[0].piece), a = ctr(el);
+      hold(el, [a[0] + 1.3 * L(), a[1]]);
+    } else if (pose === 'order') {
+      const el = imgOf(vis()[vis().length - 1].id), r1 = imgOf(vis()[1].id).getBoundingClientRect();
+      hold(el, [ctr(el)[0], r1.top - 3]);
+    }
     if (log.length) window.__scen = log;
+    st = S();                         // undo in a scenario replaces the state object
     if (qs.get('annot') === '1') {
       const names = { 110: 'mTOR', 50: 'p-ERK1/2', 30: 'GAPDH', 75: 'Target-X', 28: 'β-actin' };
       const noKda = ['Target-X', 'β-actin'];     // the scatter demo membrane cannot be sized: name its rows top-down

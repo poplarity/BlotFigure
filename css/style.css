@@ -91,7 +91,7 @@ body.dragging #dropHint, #editorBox.drag #dropHint { border-color: var(--accent)
 body.dragging #dropHint.hidden { display: flex !important; z-index: 5; }
 
 #previewBox { flex: 1; position: relative; overflow: auto; display: flex; }
-#preview { margin: auto; padding: 24px; }
+#preview { margin: auto; padding: 24px; position: relative; }
 #preview svg { display: block; background: #fff; box-shadow: 0 2px 16px rgba(16,24,40,.13); }
 #preview .ed { cursor: text; }
 #preview .ed:hover { filter: drop-shadow(0 0 0.6px #2f6feb) drop-shadow(0 0 0.6px #2f6feb); }
@@ -238,17 +238,16 @@ body.dragging #dropHint.hidden { display: flex !important; z-index: 5; }
 .thumb .uses i { width: 7px; height: 7px; border-radius: 50%; display: block; }
 .thumb .kind { position: absolute; left: 2px; top: 2px; font-size: 9.5px; background: #fff3c4; color: #7a5a00; border-radius: 3px; padding: 0 3px; }
 .ladder-sel { margin-top: 6px; font-size: 12px; }
-.row-item { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: var(--r-sm); border: 1px solid transparent; }
+.row-item { display: flex; align-items: center; gap: 5px; padding: 4px 6px; border-radius: var(--r-sm); border: 1px solid transparent; }
 .row-item:hover { background: #f6f8fb; }
 .row-item.sel { background: var(--accent-bg); border-color: #c9dafc; }
 .row-item.off { opacity: .45; }
-.row-item .swatch { width: 6px; align-self: stretch; border-radius: 3px; flex: none; }
 .row-item input[type=text] { flex: 1; min-width: 0; border-color: transparent; background: transparent; padding: 3px 6px; }
 .row-item input[type=text]:hover { background: #fff; border-color: #e0e4e9; }
 .row-item .kda { font-size: 11px; color: var(--faint); width: 52px; flex: none; text-align: right; font-variant-numeric: tabular-nums; }
 .row-item .x { border: none; background: none; color: var(--faint); cursor: pointer; font-size: 15px; padding: 0 3px; border-radius: 4px; }
 .row-item .x:hover { color: var(--danger); background: #fdecee; }
-.expo-chip { flex: none; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid #d3d8de; background: #fff; border-radius: 999px; font-size: 11px; padding: 1px 8px; cursor: pointer; color: var(--muted); position: relative; }
+.expo-chip { flex: none; max-width: 78px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid #d3d8de; background: #fff; border-radius: 999px; font-size: 11px; padding: 1px 8px; cursor: pointer; color: var(--muted); position: relative; }
 .expo-chip.best { border-color: #f0c36d; background: #fff8e6; color: #8a5a00; }
 .expo-chip.other { border-style: dashed; }
 .expo-chip.sat::after { content: ""; position: absolute; top: -2px; right: -2px; width: 7px; height: 7px; border-radius: 50%; background: #e5484d; border: 1.5px solid #fff; }
@@ -311,4 +310,22 @@ body.dragging #dropHint.hidden { display: flex !important; z-index: 5; }
 #imgTabs button .tag-m { font-size: 10px; color: #7a5a00; background: #fff3c4; border-radius: 3px; padding: 0 3px; margin-left: 3px; }
 #viewBlot { width: auto; margin-right: 6px; }
 #preview g[data-edit="rowname"] { cursor: text; }
-#preview image[data-row] { cursor: pointer; }
+#preview image[data-row] { cursor: grab; }
+#preview.arranging, #preview.arranging * { cursor: grabbing !important; user-select: none; }
+/* arranging the figure: piece tags left of the rows, where a dragged row goes */
+.prev-ov { position: absolute; inset: 0; pointer-events: none; }
+.rowtag { position: absolute; transform: translate(-100%, -50%); pointer-events: auto; cursor: grab; font-size: 10.5px; font-weight: 700; color: #6b7685;
+  background: #eef1f5; border: 1px solid #dde2e8; border-radius: 5px; padding: 1px 5px; white-space: nowrap; user-select: none; }
+.rowtag:hover { color: var(--accent); border-color: #9db8ef; background: #fff; }
+.rowtag.sel { color: #fff; background: var(--accent); border-color: var(--accent); }
+.dropline { position: absolute; height: 0; border-top: 2.5px solid var(--accent); border-radius: 2px; box-shadow: 0 0 0 2px rgba(47,111,235,.18); }
+.dropbox { position: absolute; border: 2px dashed var(--accent); border-radius: 4px; background: rgba(47,111,235,.07); }
+.droptip { position: absolute; background: #16202c; color: #fff; font-size: 11.5px; padding: 3px 8px; border-radius: 6px; white-space: nowrap; }
+/* the row's tag in the list: its colour on the membrane, the pieces it comes from; the handle for reordering */
+.row-item .grip { flex: none; align-self: stretch; display: flex; align-items: center; justify-content: center; min-width: 20px; padding: 0 4px;
+  border-left: 4px solid var(--c); border-radius: 3px; background: color-mix(in srgb, var(--c) 14%, #fff); color: #36404d;
+  font-size: 10px; font-weight: 700; white-space: nowrap; cursor: grab; user-select: none; }
+.row-item .grip:hover { background: color-mix(in srgb, var(--c) 26%, #fff); }
+.row-item.dragging { opacity: .5; }
+.row-item.drop-before { box-shadow: inset 0 2.5px 0 var(--accent); }
+.row-item.drop-after { box-shadow: inset 0 -2.5px 0 var(--accent); }

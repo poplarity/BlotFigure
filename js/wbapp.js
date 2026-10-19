@@ -426,9 +426,55 @@
   // figure columns of a segment (and the segments after it in the row) moved by d
   App.shiftCols = function (row, sg, d) {
     const i = row.segs.indexOf(sg);
-    if (i < 0 || sg.c0 + d < 1) return false;
-    row.segs.slice(i).forEach(t => { t.c0 = Math.max(1, t.c0 + d); });
+    if (i < 0) return false;
+    row.segs.slice(i).forEach(t => { t.c0 += d; });
+    roomLeft();
     return true;
+  };
+
+  /* ---------- arranging the figure: the order of the rows, the lanes lined up across pieces ----------
+   * Every piece is a module of its own (its own angle, lanes, marker); the figure stacks rows in any order
+   * and lines up each piece's lanes with the others' as needed (e.g. lanes 4-6 of one piece over lanes 1-3
+   * of another, when the membrane was cut). */
+  // room on the left: every column moves right by s, the lane names, conditions and groups with it
+  App.makeRoom = function (s) {
+    if (!(s > 0)) return;
+    const S = App.S;
+    S.rows.forEach(r => r.segs.forEach(sg => { sg.c0 += s; }));
+    for (let k = 0; k < s; k++) S.lanes.unshift({ name: '', hidden: false });
+    S.conditions.forEach(c => { for (let k = 0; k < s; k++) c.values.unshift(''); });
+    S.groups.forEach(g => { g.from += s; g.to += s; });
+    S.range = [S.range[0] <= 1 ? 1 : S.range[0] + s, S.range[1] + s];
+    S.hiCol += s;
+  };
+  function roomLeft() {
+    const lo = Math.min(...App.S.rows.flatMap(r => r.segs.map(s => s.c0)));
+    if (lo < 1) App.makeRoom(1 - lo);
+  }
+  // the figure columns of everything on the piece of box sg moved by d (a piece's rows share its lanes), or
+  // with onlyBox just that box; left of column 1 makes room on the left. Returns the number of boxes moved.
+  App.shiftAlign = function (row, sg, d, onlyBox) {
+    const segs = onlyBox ? [sg] : App.S.rows.flatMap(r => r.segs.filter(s => s.piece === sg.piece));
+    segs.forEach(s => { s.c0 += d; });
+    roomLeft();
+    return segs.length;
+  };
+  // a row put before the row now at index `to` of S.rows (S.rows.length: at the end); the figure stacks rows
+  // in this order. Returns whether anything moved.
+  App.moveRow = function (id, to) {
+    const rows = App.S.rows, i = rows.findIndex(r => r.id === id);
+    if (i < 0) return false;
+    const [r] = rows.splice(i, 1);
+    const at = Math.max(0, Math.min(rows.length, to > i ? to - 1 : to));
+    rows.splice(at, 0, r);
+    return at !== i;
+  };
+  // one place up (-1) or down (+1) among the rows the figure shows (a hidden row: among all rows)
+  App.moveRowBy = function (id, d) {
+    const row = App.row(id); if (!row) return false;
+    const list = row.hidden ? App.S.rows : App.S.rows.filter(r => !r.hidden), i = list.indexOf(row), j = i + d;
+    if (i < 0 || j < 0 || j >= list.length) return false;
+    return App.moveRow(id, App.S.rows.indexOf(list[j]) + (d > 0 ? 1 : 0));
   };
   /* figure columns of a segment from where its lanes lie: as another row's lanes at the same place on the
    * same piece, else as the piece's lattice from the analysis; unchanged when nothing lines up */
@@ -492,7 +538,13 @@
     if (!hiVis) hiVis = hi;
     if (!(lo <= hiVis)) lo = 1;
     while (S.lanes.length < hi) S.lanes.push({ name: '', hidden: false });
-    S.conditions.forEach(c => { while (c.values.length < S.lanes.length) c.values.push(''); });
+    // columns past the last row (a piece dragged right and back again): gone when nothing was set for them
+    const blank = n => { const l = S.lanes[n - 1]; return !l.name && !l.hidden && S.conditions.every(c => !c.values[n - 1]) && S.groups.every(g => Math.max(g.from, g.to) < n); };
+    while (S.lanes.length > hi && blank(S.lanes.length)) S.lanes.pop();
+    S.conditions.forEach(c => {
+      while (c.values.length < S.lanes.length) c.values.push('');
+      while (c.values.length > S.lanes.length && !c.values[c.values.length - 1]) c.values.pop();
+    });
     if (resetRange || !S.range || S.range[0] > hiVis) S.range = [lo, hiVis];
     else if (S.hiCol && S.range[1] === S.hiCol && hiVis !== S.hiCol) S.range[1] = hiVis;   // the range ran to the last column: keep it so
     S.hiCol = hiVis;
@@ -741,23 +793,16 @@
     if (App.selRow === other.id) App.selRow = row.id;
     placeNew(row, added);
   };
-  // stitch: the protein of `row` continues on the piece clicked at (x, y)
-  App.addSeg = function (row, x, y) {
-    const b = App.blot(row.blot), hit = App.pieceAt(b, x, y, 20);
-    if (!hit) return 'none';
-    const { pc, v } = hit, mine = row.segs.find(s => s.piece === pc.id);
-    if (mine) { mine.vc = v; return 'moved'; }
-    if (App.stacked(row, pc)) return 'stacked';
-    // clicked on another row on that piece: take its band
-    const other = App.S.rows.find(r => r !== row && r.blot === row.blot && r.segs.some(s => s.piece === pc.id && v >= s.vc - r.above && v <= s.vc + r.below));
-    if (other) { if (App.rowPieces(other).some(q => App.stacked(row, q))) return 'stacked'; App.joinRows(row, other); return 'joined'; }
-    const ref = row.segs[0], L = App.pieceLanes(b, pc, v);
-    const sg = { piece: pc.id, vc: v, b0: ref ? ref.b0 : -8, b1: ref ? ref.b1 : 8, lanes: L.lanes, c0: L.c0, p: L.p, x0: -pc.w / 2, x1: pc.w / 2 };
-    if (!sg.lanes.length) App.redetectBox(row, sg);
-    App.snapBox(sg);
-    row.segs.push(sg);
-    placeNew(row, [sg]);
-    return 'added';
+  /* one protein on a membrane cut through: the boxes of `other` join `row`, side by side (row keeps its place
+   * and name). Refused when that would put two proteins in one row: other membranes (other pictures), two
+   * bands of one piece, or pieces one above the other on the same lanes. */
+  App.mergeRows = function (row, other) {
+    if (!row || !other || row === other) return 'none';
+    if (row.blot !== other.blot) return 'blot';
+    if (other.segs.some(s => row.segs.some(t => t.piece === s.piece))) return 'same';
+    if (App.rowPieces(other).some(q => App.stacked(row, q))) return 'stacked';
+    App.joinRows(row, other);
+    return 'joined';
   };
   App.splitRow = function (row) {
     if (row.segs.length < 2) return;

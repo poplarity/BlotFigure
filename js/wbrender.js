@@ -50,8 +50,9 @@
           if (!cur) return;
           const ras = App.runRaster(row, cur.sg, cur.pc, cur.i0, cur.i1, step);
           const x0 = X.get(cur.j0) - laneW / 2, w = (cur.i1 - cur.i0 + 1) * laneW;
-          els.push(`<image ${P ? `data-row="${row.id}" ` : ''}x="${f(x0)}" y="${f(y)}" width="${f(w)}" height="${f(h)}" preserveAspectRatio="none" href="${ras.href}" xlink:href="${ras.href}"/>`);
-          if (st.border) els.push(`<rect x="${f(x0)}" y="${f(y)}" width="${f(w)}" height="${f(h)}" fill="none" stroke="#000" stroke-width="${f(lw)}" pointer-events="none"/>`);
+          const tag = P ? `data-row="${row.id}" data-piece="${cur.sg.piece}" ` : '';
+          els.push(`<image ${tag}x="${f(x0)}" y="${f(y)}" width="${f(w)}" height="${f(h)}" preserveAspectRatio="none" href="${ras.href}" xlink:href="${ras.href}"/>`);
+          if (st.border) els.push(`<rect ${tag}x="${f(x0)}" y="${f(y)}" width="${f(w)}" height="${f(h)}" fill="none" stroke="#000" stroke-width="${f(lw)}" pointer-events="none"/>`);
           cur = null;
         };
         run.forEach(j => {
@@ -158,7 +159,7 @@
     const m = 2, vx = box.x0 - m, vy = box.y0 - m, vw = box.x1 - box.x0 + 2 * m, vh = box.y1 - box.y0 + 2 * m;
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${f(vw / MM)}mm" height="${f(vh / MM)}mm" viewBox="${f(vx)} ${f(vy)} ${f(vw)} ${f(vh)}" font-family="Arial, Helvetica, sans-serif" fill="#000">` +
       `<rect x="${f(vx)}" y="${f(vy)}" width="${f(vw)}" height="${f(vh)}" fill="#fff"/>` + els.join('') + '</svg>';
-    return { svg, w: vw, h: vh, warnings, angle, rowBoxes, laneX: X, laneW };
+    return { svg, w: vw, h: vh, warnings, angle, rowBoxes, laneX: X, laneW, figW: W };
   }
 
   G.BRender = { build, measure };
