@@ -24,9 +24,14 @@ cd BlotFigure
 | `&sel=0` | 选中第 n 个可见行，展开它的曝光对比 |
 | `&annot=1` | 填入示例蛋白名、泳道名和分组 |
 | `&png=600` | 按 600 dpi 渲染成图，base64 放在隐藏的 `<pre id="figpng">` 里 |
-| `&exports=1` | 跑一遍"未裁切原图"和"定量 CSV"导出并记录文件大小 |
+| `&exports=1` | 跑一遍"未裁切原图"和"定量 CSV"导出并记录文件大小；未裁切原图的 PNG 放在 `<pre id="rawpng">` 里 |
+| `&border=1` | 打开"条带加边框" |
+| `&selpiece=B` | 选中字母为 B 的膜条 |
+| `&mode=marks` / `&mode=addseg` | 进入"标 Marker" / 拼接模式（拼接需同时用 `&sel=`） |
+| `&scrollto=pieceBox` | 把左侧面板滚到某个元素（截图用） |
+| `&scenario=stitch` / `lanes` / `marks` | 脚本化地跑一遍拆开与拼接、泳道编辑、手动 Marker，每步状态记在标题 JSON 的 `scen` 里。`stitch` 和 `lanes` 需要真实样例（膜条 A–E），`marks` 用示例（`demo=1`） |
 
-载入完成后页面标题变成 `READY {...}`，里面是膜、行、曝光、警告等状态的 JSON，方便脚本检查。
+载入完成后页面标题变成 `READY {...}`，里面是膜、膜条泳道（`pieces`）、行（`rowsGeo`：所在膜条、成图列）、曝光、显示范围（`levels`）、警告等状态的 JSON，方便脚本检查。
 
 ## 测试页（test/）
 
@@ -47,10 +52,18 @@ msedge --headless=new --disable-gpu --user-data-dir=$env:TEMP\wb_dbg --allow-fil
 
 注意：无界面模式下 `alert()` 会卡住；`File.arrayBuffer()` 也会卡，所以调试入口都用 `{name, buffer}` 载入。
 
+## 数据模型（泳道按膜条）
+
+- 膜（blot）里有若干膜条（`blot.pieces`），每条膜条有自己的坐标系（以膜条中心为原点，u 沿泳道方向，v 向下）和自己的泳道：第 m 道在 `u0 + m*pitch`，角色 `roles[m]` 为 `sample` / `ladder` / `skip`。样品道依次放进成图的 `col0, col0+1, …` 列（`App.slots`）。
+- 行（一个蛋白）在它跨过的每条膜条上有一段 `segs[{piece, vc, b0, b1, ms}]`：条带中心 vc、条带上下沿 b0..b1；裁切是每段的 `vc-above … vc+below`。
+- 成图的列、每行每列的来源、留白位置都由 `App.columns()` 算出；`wbrender.js` 把同一条膜条上相邻的几道画成一张图。
+- `pc.marks`（手动 Marker 刻度 `{u, v, kda}`）存在时替代这条膜条的自动 Ladder 标定（`App.pieceCal`）。
+- 默认列号由 `WB.assignColumns` 给出（原位对齐 → 并排续接 → 从第 1 列开始）。
+
 ## 代码地图
 
-- `js/wbengine.js`（`G.WB`）：分类、归膜、膜条分割（`findStrips`）、Ladder 识别（`findLadders`）与标定（`calibrate` / `fitSeries`）、条带行（`detectRows`）、整体分析（`analyzeSession`）、曝光评分（`exposureScore`）
-- `js/wbapp.js`（`G.BApp`）：状态、撤销、行/泳道/曝光逻辑（`bestExpo`、`rowThumb`）、规范检查
+- `js/wbengine.js`（`G.WB`）：分类、归膜、膜条分割（`findStrips`）、Ladder 识别（`findLadders`）与标定（`calibrate` / `fitSeries`）、条带行（`detectRows`）、每条膜条的泳道（`pieceLattice` / `jointPitch`）、默认列号（`assignColumns`）、整体分析（`analyzeSession`）、曝光评分（`exposureScore`）
+- `js/wbapp.js`（`G.BApp`）：状态、撤销、膜条泳道编辑、行的拼接与拆开、手动 Marker、曝光与显示范围、规范检查
 - `js/wbrender.js`：排版成 SVG；`js/wbview.js`：中间膜图；`js/wbui.js`：面板、编辑、导出、调试参数
 - `js/tiff.js` `engine.js` `export.js`：与 GelFigure 共用，改动时注意两边同步
 
@@ -58,4 +71,6 @@ msedge --headless=new --disable-gpu --user-data-dir=$env:TEMP\wb_dbg --allow-fil
 
 - 自动挑 Ladder 时，Bio-Rad 1610374 和天根三色预染在样例上得分几乎相同，需要手动选一次。
 - iBright 文件名里没有曝光时间，图注里的曝光时间要手填。
-- 最上面那行（约 286 kDa）在 250 kDa 条带之外，靠外推估算。
+- 最上面那行（约 290 kDa）在 250 kDa 条带之外，靠外推估算。
+- 竖着剪开、又上下错位摆放的两半膜：同一个蛋白不会自动拼成一行（高度差太大），需要手动"拼接"。
+- 不同膜（不同次拍摄）之间不能拼进同一行（期刊不允许一行混用不同图）。

@@ -64,9 +64,11 @@
         <div class="field inline range-row">泳道 <select id="rangeA"></select> – <select id="rangeB"></select> <button class="btn sm ghost" id="btnRangeAuto">自动</button></div>
         <p class="lead">在右侧成图上<b>点灰色泳道号</b>输入名称，回车跳下一条；或在这里一次粘贴整行：</p>
         <textarea id="laneBulk" rows="2" placeholder="Ctrl, siA#1, siA#2 …（逗号、Tab、换行均可）"></textarea>
-        <div id="shiftBox"></div>
-        <details class="adv"><summary>逐条泳道：剪除</summary><div id="laneList" class="list"></div>
-          <p class="hint">取消"显示" = 从成图剪除该泳道，所有行同步剪除并留白间隔（图注需说明）。</p></details>
+        <div class="sub-head">各膜条的泳道 <span class="h3-note">每条膜条单独识别</span></div>
+        <p class="hint" style="margin-top:2px">数字 = 这一道放在成图第几列，M = Marker 道，× = 不用。点一道切换；‹ › 整条膜条前后挪一列；+ 在一端加一道。中间膜图上也可以直接点泳道号。</p>
+        <div id="pieceBox"></div>
+        <details class="adv"><summary>逐列剪除</summary><div id="laneList" class="list"></div>
+          <p class="hint">取消"显示" = 从成图剪除这一列，所有行同步剪除并留白间隔（图注需说明）。</p></details>
       </section>
 
       <section class="sec">
@@ -94,6 +96,7 @@
             <label class="switch"><input type="checkbox" id="invert"><span>白底黑带</span></label>
             <label class="switch"><input type="checkbox" id="showMW"><span>分子量刻度</span></label>
             <label class="switch"><input type="checkbox" id="unitHeader"><span>kDa 标题</span></label>
+            <label class="switch"><input type="checkbox" id="border"><span>条带加边框</span></label>
             <label class="inline-label">面板字母 <input type="text" id="panelLetter" maxlength="2" class="num" placeholder="a"></label>
           </div>
         </details>
@@ -108,6 +111,7 @@
         <select id="viewBlot" class="hidden"></select>
         <div class="seg" id="imgTabs"></div>
         <span class="flex"></span>
+        <button class="btn sm ghost" id="btnMarks" title="Marker 没识别出来或识别错了：在图上手动点出 Marker 条带并标分子量">标 Marker</button>
         <button class="btn sm ghost" id="fitFull">全图</button>
         <span class="zoomlabel" id="zoomLabel"></span>
       </div>
@@ -120,6 +124,7 @@
       </div>
       <div id="editorBox" tabindex="0">
         <canvas id="editor"></canvas>
+        <div id="viewBanner" class="mode-banner hidden"><span id="viewModeText"></span><button id="viewModeCancel">取消 (Esc)</button></div>
         <div id="dropHint"><div class="dh-icon">▤</div><div class="dh-text">把图片拖到这里</div><div class="dh-sub">多张一起拖：各曝光 + Marker 白光图</div></div>
       </div>
     </section>
@@ -143,7 +148,7 @@
   <h3>最快的出图方式</h3>
   <ol>
     <li>把这次实验<b>所有图片一次拖进来</b>：每张膜的各个曝光 + Marker 白光图（iBright 的 Chemi 与 Marker 通道）。</li>
-    <li>工具自动归膜、找出条带行、每行选最长且不过曝的曝光、识别 Ladder 并标 kDa、按泳道对齐。</li>
+    <li>工具自动归膜、分出各条膜条、每条膜条单独识别泳道、找出条带行、每行挑最清楚又不过曝的曝光（★）、识别 Ladder 并标 kDa。</li>
     <li>在右侧成图上<b>点灰色的"蛋白名"</b>和<b>泳道号</b>输入名称（回车跳下一个）。</li>
     <li>右上角导出 PNG；"未裁切原图"放补充材料。</li>
   </ol>
@@ -151,9 +156,12 @@
   <ul>
     <li><b>某个蛋白在这张曝光里太亮 / 太暗</b>：点该行的曝光按钮换图，红点 = 有过曝。每张图只做整图线性调整，同一张图的所有行一起变。</li>
     <li><b>某个蛋白没曝出来，没被识别</b>："按分子量添加"一行，或点"在膜图上点选添加"，再换长曝光。</li>
-    <li><b>行的上下范围不合适</b>：在中间膜图上拖蓝框上下边；拖框内部整体上下移动；选中后 ←→ 微调泳道对齐。</li>
-    <li><b>不同膜的泳道没对上</b>（如 Ladder 位置不同）：在"泳道"里调该膜的"泳道错位"。</li>
-    <li><b>只出部分泳道 / 剪掉中间一条</b>：在"泳道"里选范围，或在逐条泳道里取消"显示"（自动留白分隔）。</li>
+    <li><b>行的上下范围不合适</b>：在中间膜图上拖框的上下边；拖框内部上下移动（按住 Shift 同时移动这一行在各条膜条上的框）。</li>
+    <li><b>泳道没对上</b>：每条膜条的泳道单独识别，膜图上每道标着它在成图里的列号。某条膜条整体错位：在"泳道"里点它的 ‹ ›；多认或漏认了一道：点那一道切换"用 / 不用 / Marker"，或点 + 加一道；泳道位置偏了：点膜条左上角的字母选中它，←→ 微调，Alt+←→ 调间距。</li>
+    <li><b>同一个蛋白在两条膜条上</b>（膜从中间竖着剪开）：在左侧选中这一行，点"＋ 拼接另一条膜条"，再在膜图上点它在另一条膜条上的位置；两条膜条按左右顺序接成连续的列。"拆开"可以撤回。</li>
+    <li><b>Marker 没识别出来或认错了</b>：点膜图上方的"标 Marker"，在白光图上点 Marker 条带，选它的分子量；拖动可微调，点数字可修改或删除。标了 2 条以上就能估算各行分子量；成图左侧只画手动标的刻度。</li>
+    <li><b>只出部分泳道 / 剪掉中间一列</b>：在"泳道"里选范围，或在逐列剪除里取消"显示"（自动留白分隔）。</li>
+    <li><b>条带要加边框</b>：在"版式"里勾选"条带加边框"。</li>
   </ul>
   <h3>规范（期刊图像要求）</h3>
   <ul>
@@ -161,7 +169,7 @@
     <li>内参应与目标蛋白在同一张膜上，工具会检查并提示。</li>
     <li>过曝条带不可定量；导出未裁切原图作为补充材料，图注提示会自动生成。</li>
   </ul>
-  <p class="muted small">快捷键：Ctrl+Z 撤销 · 空格+拖动 平移 · 滚轮 缩放 · 选中行后 ↑↓ 移动、←→ 对齐泳道、Delete 删除 · Esc 取消</p>
+  <p class="muted small">快捷键：Ctrl+Z 撤销 · 空格+拖动 平移 · 滚轮 缩放 · 选中行后 ↑↓ 移动、Delete 删除 · 选中膜条后 ←→ 微调泳道、Alt+←→ 调间距 · Esc 取消</p>
 </div></div>
 
 <div id="busy" class="hidden"><div class="spinner"></div><div class="busy-text" id="busyText">处理中…</div></div>

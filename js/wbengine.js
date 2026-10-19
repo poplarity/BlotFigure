@@ -2,10 +2,10 @@
  *
  * Pipeline for one membrane ("session" = its chemiluminescence exposures + white-light marker photo):
  *   classify images -> signal & clip level per exposure -> relative exposure factors
- *   -> strips (membrane pieces) from the marker photo -> band blobs on an HDR composite
- *   -> band rows (one per protein) in each strip's frame -> lane lattice anchored on the ladder lane
- *   -> ladder calibration shared across strips -> best exposure per row -> display levels per image.
- * Coordinates: rows live in a rotated frame: origin (ox, oy), u along the strip, v across it (down).
+ *   -> strips (membrane pieces) from the marker photo -> band rows (one per protein) in each piece's frame
+ *   -> lanes of each piece on their own (pieces are often not put back in place) -> ladder calibration
+ *   -> rows joined across pieces side by side -> first guess of figure columns -> best exposure per row.
+ * Coordinates: a piece has a rotated frame centred on it: u along the piece (lanes), v across it (down).
  */
 (function (G) {
   'use strict';
@@ -419,6 +419,138 @@
     return ph;
   }
 
+  /* Lanes of one piece on its own (pieces are not assumed to sit where they were on the membrane):
+   * slot m = 0..n-1 at u = u0 + m*pitch in the piece frame (working units), from the lane peaks of the
+   * piece's rows and its ladder lanes. roles[m]: 'sample' | 'ladder' | 'skip' (an empty slot between lanes). */
+  // lane candidates of one piece: lane peaks of its rows clustered (a lane needs a band in two rows, or
+  // one clear band), plus its ladder lanes (weighted more: they are exact)
+  function pieceAnchors(rows, ladUs, P) {
+    const pts = [];
+    rows.forEach((r, k) => r.peaks.forEach((u, i) => pts.push({ u, w: r.peakMass[i], row: k })));
+    pts.sort((a, b) => a.u - b.u);
+    const cl = [];
+    pts.forEach(p => {
+      const c = cl[cl.length - 1];
+      if (c && p.u - c.u < P * 0.35) { c.items.push(p); c.w += p.w; c.u = c.items.reduce((s, q2) => s + q2.u * q2.w, 0) / c.w; }
+      else cl.push({ u: p.u, w: p.w, items: [p] });
+    });
+    const wmax = Math.max(1e-9, ...cl.map(c => c.w));
+    const lanes = cl.filter(c => new Set(c.items.map(q2 => q2.row)).size >= 2 || c.w > wmax * 0.15).map(c => ({ u: c.u, w: 0.5 + c.w / wmax }));
+    return { lanes, anchors: lanes.concat(ladUs.map(u => ({ u, w: 2 }))) };
+  }
+  /* One lane spacing for all pieces of one picture (same membrane, same scale): the spacing near the
+   * estimate P at which every piece's lane candidates sit best on a lattice of their own phase. */
+  function jointPitch(sets, P) {
+    let best = P, bs = -1;
+    for (let p = P * 0.88; p <= P * 1.14; p += P * 0.002) {
+      let s = 0;
+      sets.forEach(A => {
+        let x = 0, y = 0;
+        A.forEach(a => { const t = 2 * Math.PI * a.u / p; x += a.w * Math.cos(t); y += a.w * Math.sin(t); });
+        s += Math.hypot(x, y);
+      });
+      if (s > bs) { bs = s; best = p; }
+    }
+    return best;
+  }
+  function pieceLattice(rg, cand, ladUs, p) {
+    const { lanes, anchors } = cand;
+    if (!anchors.length) return null;
+    let a = latticeOrigin(anchors.map(x => x.u), p, anchors.map(x => x.w));
+    // a piece spanning many lanes may differ slightly (gel smile, uneven wells): least squares u = a + p*m
+    const ms0 = anchors.map(x => Math.round((x.u - a) / p)), span = Math.max(...ms0) - Math.min(...ms0);
+    if (new Set(ms0).size >= 4 && span >= 4) {
+      let sw = 0, sm = 0, su = 0;
+      anchors.forEach((x, i) => { sw += x.w; sm += x.w * ms0[i]; su += x.w * x.u; });
+      const mm = sm / sw, um = su / sw;
+      let num = 0, den = 0;
+      anchors.forEach((x, i) => { num += x.w * (ms0[i] - mm) * (x.u - um); den += x.w * (ms0[i] - mm) ** 2; });
+      const b = den ? num / den : p;
+      if (Math.abs(b / p - 1) < 0.03) { p = b; a = um - b * mm; }
+    }
+    const mOf = u => Math.round((u - a) / p);
+    let lo = Infinity, hi = -Infinity;
+    anchors.forEach(x => { const m = mOf(x.u); lo = Math.min(lo, m); hi = Math.max(hi, m); });
+    const roles = [];
+    for (let m = lo; m <= hi; m++) roles.push('skip');
+    lanes.forEach(x => { roles[mOf(x.u) - lo] = 'sample'; });
+    ladUs.forEach(u => { roles[mOf(u) - lo] = 'ladder'; });       // a ladder lane stays a ladder lane
+    let u0 = a + lo * p;
+    // a lane cut through at the end of the piece is not a lane of the figure (ladders stay, for the marker)
+    const partial = m => Math.abs(u0 + m * p) > rg.w / 2 - p * 0.3;
+    while (roles.length && (roles[0] === 'skip' || (roles[0] === 'sample' && partial(0)))) { roles.shift(); u0 += p; }
+    while (roles.length && (roles[roles.length - 1] === 'skip' || (roles[roles.length - 1] === 'sample' && partial(roles.length - 1)))) roles.pop();
+    // an empty slot between lanes is a sample with no band in any of this piece's rows (wells are
+    // contiguous): leaving it out would shift every later lane by one column
+    for (let m = 0; m < roles.length; m++) if (roles[m] === 'skip') roles[m] = 'sample';
+    return roles.length ? { u0, pitch: p, roles } : null;
+  }
+
+  const pieceBox = s => { const a = Math.abs(s.angle) * Math.PI / 180, hw = (s.w * Math.cos(a) + s.h * Math.sin(a)) / 2, hh = (s.h * Math.cos(a) + s.w * Math.sin(a)) / 2; return [s.cx - hw, s.cy - hh, s.cx + hw, s.cy + hh]; };
+  const boxesNear = (p, q, tol) => Math.max(p[0] - q[2], q[0] - p[2], p[1] - q[3], q[1] - p[3]) < tol;
+
+  /* First guess of the figure column of every piece's lanes (pieces full resolution, rows with segs).
+   * 1. Pieces that touch, share the lane spacing, sit on one lane grid and have ladder lanes where the
+   *    others have them were put back in place: their lanes line up by position.
+   * 2. Other pieces that carry the same protein band side by side continue the columns of their neighbour.
+   * 3. Anything else starts at column 1 (a strip cut across the membrane holds every lane).
+   * Sets pc.col0 (figure column of the first sample slot); empty slots of in-place pieces that line up with
+   * a lane of another piece become sample slots. The user corrects the rest piece by piece. */
+  function assignColumns(pieces, rows) {
+    const nS = pc => pc.roles.filter(r => r === 'sample').length;
+    const firstS = pc => pc.roles.indexOf('sample');
+    const slotX = (pc, m) => toImg(frame(pc.cx, pc.cy, pc.angle), pc.u0 + m * pc.pitch, 0)[0];
+    pieces.forEach(pc => { pc.col0 = 1; });
+    const order = pieces.map((pc, i) => i).filter(i => nS(pieces[i])).sort((a, b) => nS(pieces[b]) - nS(pieces[a]) || pieces[b].w - pieces[a].w);
+    if (!order.length) return;
+    const R = pieces[order[0]], pxR = R.pitch * Math.cos(R.angle * Math.PI / 180), x0 = slotX(R, 0);
+    const grid = new Map([[order[0], R.roles.map((_, m) => m)]]);
+    const occ = new Map();                      // grid index -> 'L' (ladder) | 'S' (lane) | 'E' (empty)
+    const mark = (role, g) => { const o = occ.get(g), k = role === 'ladder' ? 'L' : role === 'sample' ? 'S' : 'E'; if (!o || o === 'E') occ.set(g, k); };
+    R.roles.forEach((r, m) => mark(r, m));
+    order.slice(1).forEach(i => {
+      const pc = pieces[i], px = pc.pitch * Math.cos(pc.angle * Math.PI / 180);
+      if (Math.abs(px / pxR - 1) > 0.06) return;
+      const t = pc.roles.map((_, m) => (slotX(pc, m) - x0) / pxR);
+      const res = t.map(x => Math.abs(x - Math.round(x))).sort((a, b) => a - b);
+      if (res[res.length >> 1] > 0.2) return;
+      const g = t.map(Math.round);
+      if (pc.roles.some((r, m) => { const o = occ.get(g[m]); return (o === 'L' && r === 'sample') || (o === 'S' && r === 'ladder'); })) return;
+      if (![...grid.keys()].some(k => boxesNear(pieceBox(pieces[k]), pieceBox(pc), 40))) return;
+      // as many lanes as the reference but offset by whole lanes: moved, not put back
+      if (nS(pc) >= nS(R) && g[firstS(pc)] !== firstS(R)) return;
+      grid.set(i, g);
+      pc.roles.forEach((r, m) => mark(r, g[m]));
+    });
+    const lanesG = [...occ.keys()].filter(k => occ.get(k) === 'S').sort((a, b) => a - b), colOfG = new Map(lanesG.map((k, c) => [k, c + 1]));
+    grid.forEach((g, i) => {
+      const pc = pieces[i];
+      pc.roles = pc.roles.map((r, m) => (r === 'skip' ? (occ.get(g[m]) === 'S' ? 'sample' : occ.get(g[m]) === 'L' ? 'ladder' : r) : r));
+      pc.col0 = colOfG.get(g[firstS(pc)]) || 1;
+    });
+    const done = new Set(grid.keys());
+    const shares = (i, k) => rows.some(r => r.segs.some(s => s.region === i) && r.segs.some(s => s.region === k));
+    order.filter(i => !done.has(i)).sort((a, b) => pieces[a].cx - pieces[b].cx).forEach(i => {
+      const pc = pieces[i], mate = [...done].filter(k => shares(i, k)).sort((a, b) => Math.abs(pieces[a].cx - pc.cx) - Math.abs(pieces[b].cx - pc.cx))[0];
+      if (mate != null) { const q2 = pieces[mate]; pc.col0 = q2.cx < pc.cx ? q2.col0 + nS(q2) : Math.max(1, q2.col0 - nS(pc)); }
+      done.add(i);
+    });
+    // an end lane can be empty in every row of a piece (no protein shows a band there): extend a piece over
+    // lattice slots lying fully on it when other pieces have lanes in those columns
+    const cols = new Set();
+    pieces.forEach(pc => { let c = pc.col0; pc.roles.forEach(r => { if (r === 'sample') cols.add(c++); }); });
+    pieces.forEach((pc, i) => {
+      if (!nS(pc)) return;
+      const inside = m => Math.abs(pc.u0 + m * pc.pitch) <= pc.w / 2 - pc.pitch * 0.45;
+      let last = pc.col0 + nS(pc) - 1;
+      while (cols.has(last + 1) && inside(pc.roles.length)) { pc.roles.push('sample'); last++; }
+      while (pc.col0 > 1 && cols.has(pc.col0 - 1) && inside(-1)) {
+        pc.roles.unshift('sample'); pc.u0 -= pc.pitch; pc.col0--;
+        rows.forEach(r => r.segs.forEach(sg => { if (sg.region === i) sg.ms = sg.ms.map(m => m + 1); }));
+      }
+    });
+  }
+
   /* ---------- ladder calibration shared by all strips ----------
    * stripBands: [[v positions of ladder bands in that strip's frame, ascending]] (some may be empty)
    * Each strip s: v = a_s + c * ln(kDa), one slope c < 0 for the whole membrane. Search c on a grid;
@@ -554,8 +686,7 @@
    * bands with their sizes) so sizes are interpolated between real ladder bands. */
   function piecesInPlace(strips) {
     if (strips.length < 2) return true;
-    const box = s => { const a = Math.abs(s.angle) * Math.PI / 180, hw = (s.w * Math.cos(a) + s.h * Math.sin(a)) / 2, hh = (s.h * Math.cos(a) + s.w * Math.sin(a)) / 2; return [s.cx - hw, s.cy - hh, s.cx + hw, s.cy + hh]; };
-    const boxes = strips.map(box), near = (p, q) => Math.max(p[0] - q[2], q[0] - p[2], p[1] - q[3], q[1] - p[3]) < 40;
+    const boxes = strips.map(pieceBox), near = (p, q) => boxesNear(p, q, 40);
     const reach = new Set([0]);
     for (let grow = true; grow;) { grow = false; boxes.forEach((b, i) => { if (!reach.has(i) && [...reach].some(j => near(b, boxes[j]))) { reach.add(i); grow = true; } }); }
     return reach.size === strips.length;
@@ -617,27 +748,40 @@
     cal.pinned = cal.npts >= 3 && stripBands.some(b => b.length >= 3);
     return cal;
   }
-  // size <-> position: interpolated between knots, extended with the fitted slope beyond them
-  function kdaAt(cal, s, v) {
-    const cs = cal && cal.strips[s]; if (!cs) return null;
-    const K = cs.knots || [];
-    if (K.length < 2) return Math.exp((v - cs.a) / cal.c);
-    if (v <= K[0].v) return Math.exp(K[0].lk + (v - K[0].v) / cal.c);
-    if (v >= K[K.length - 1].v) return Math.exp(K[K.length - 1].lk + (v - K[K.length - 1].v) / cal.c);
-    let i = 0; while (v > K[i + 1].v) i++;
+  /* size <-> position on one piece. pc = {knots: [{v, lk}] ascending v, c: slope (v per ln kDa, < 0) or null,
+   * a: intercept when there are no knots}: interpolated between knots (real ladder bands), extended with the
+   * slope beyond them (without a slope, with the slope of the nearest two knots). */
+  function kdaAtK(pc, v) {
+    if (!pc) return null;
+    const K = pc.knots || [], c = pc.c < 0 ? pc.c : null;
+    if (K.length < 2) {
+      if (K.length === 1) return c ? Math.exp(K[0].lk + (v - K[0].v) / c) : null;
+      return c && pc.a != null ? Math.exp((v - pc.a) / c) : null;
+    }
+    const z = K.length - 1, sl = (i, j) => (K[j].v - K[i].v) / (K[j].lk - K[i].lk || 1e-9);
+    if (v <= K[0].v) return Math.exp(K[0].lk + (v - K[0].v) / (c || sl(0, 1)));
+    if (v >= K[z].v) return Math.exp(K[z].lk + (v - K[z].v) / (c || sl(z - 1, z)));
+    let i = 0; while (i < z - 1 && v > K[i + 1].v) i++;
     const t = (v - K[i].v) / Math.max(1e-9, K[i + 1].v - K[i].v);
     return Math.exp(K[i].lk + t * (K[i + 1].lk - K[i].lk));
   }
-  function vAt(cal, s, kda) {
-    const cs = cal && cal.strips[s]; if (!cs) return null;
-    const K = cs.knots || [], lk = Math.log(kda);
-    if (K.length < 2) return cs.a + cal.c * lk;
-    if (lk >= K[0].lk) return K[0].v + (lk - K[0].lk) * cal.c;
-    const z = K[K.length - 1]; if (lk <= z.lk) return z.v + (lk - z.lk) * cal.c;
-    let i = 0; while (lk < K[i + 1].lk) i++;
+  function vAtK(pc, kda) {
+    if (!pc) return null;
+    const K = pc.knots || [], c = pc.c < 0 ? pc.c : null, lk = Math.log(kda);
+    if (K.length < 2) {
+      if (K.length === 1) return c ? K[0].v + (lk - K[0].lk) * c : (Math.abs(lk - K[0].lk) < 1e-3 ? K[0].v : null);
+      return c && pc.a != null ? pc.a + c * lk : null;
+    }
+    const z = K.length - 1, sl = (i, j) => (K[j].v - K[i].v) / (K[j].lk - K[i].lk || 1e-9);
+    if (lk >= K[0].lk) return K[0].v + (lk - K[0].lk) * (c || sl(0, 1));
+    if (lk <= K[z].lk) return K[z].v + (lk - K[z].lk) * (c || sl(z - 1, z));
+    let i = 0; while (i < z - 1 && lk < K[i + 1].lk) i++;
     const t = (K[i].lk - lk) / Math.max(1e-9, K[i].lk - K[i + 1].lk);
     return K[i].v + t * (K[i + 1].v - K[i].v);
   }
+  const stripPC = (cal, s) => { const cs = cal && cal.strips[s]; return cs ? { c: cal.c, a: cs.a, knots: cs.knots || [] } : null; };
+  const kdaAt = (cal, s, v) => kdaAtK(stripPC(cal, s), v);
+  const vAt = (cal, s, kda) => vAtK(stripPC(cal, s), kda);
 
   /* ---------- the full session analysis ---------- */
   // chemis: [{id, img, exposure(s|null)}], marker: {id, img} | null
@@ -724,67 +868,42 @@
       else if (top && top.cal.npts >= 3) notes.push('各条膜上可见的 Ladder 条带都不足 3 条，且膜条不在原位，分子量无法可靠确定，请手动标注');
       else if (top) notes.push('Marker 图中可用的 Ladder 条带太少（少于 3 条），无法标注分子量');
     }
-    /* --- lane lattice: one per region (all its rows share it), aligned across regions.
-     * Region lanes sit at u = phase + m*pitch (local m); global lane k = m + offset.
-     * Pieces put back in place are aligned by image position; moved pieces by their ladder lanes. */
+    /* --- lanes, piece by piece. Pieces are often not put back where they were on the membrane, so each
+     * piece (region) gets its own lattice from its own rows and ladder lanes; columns are assigned later. */
     const ladderU = regions.map(rg => {
       const l = rg.strip >= 0 ? ladderStrips[rg.strip] : null;
       return l && l.lanes ? l.lanes.map(L => L.u / f) : [];
     });
-    const regionItems = regions.map((rg, ri) => {
-      const us = [], ws = [];
-      rowsRaw.filter(r => r.region === ri).forEach(r => r.peaks.forEach((u, i) => { us.push(u); ws.push(r.peakMass[i]); }));
-      const wmax = Math.max(1e-9, ...ws);
-      ladderU[ri].forEach(u => { us.push(u); ws.push(wmax); });   // ladder lanes are exact lattice points
-      return { us, ws };
-    });
-    const phase = regionItems.map(it => (it.us.length ? latticeOrigin(it.us, pitchDs, it.ws) : 0));
-    const localM = (ri, u) => Math.round((u - phase[ri]) / pitchDs);
-    const ref = regionItems.reduce((bi, it, i) => (it.us.length > regionItems[bi].us.length ? i : bi), 0);
-    const offset = regions.map(() => 0);
-    const refLadderK = new Set(ladderU[ref].map(u => localM(ref, u)));
-    const Fds = rg => frame(rg.cx, rg.cy, rg.angle);
-    regions.forEach((rg, ri) => {
-      if (ri === ref || !regionItems[ri].us.length) return;
-      // in-place estimate: where this region's lattice point m=0 falls in the reference lattice
-      const [x, y] = toImg(Fds(rg), phase[ri], 0), [uRef] = toFrame(Fds(regions[ref]), x, y);
-      const kReal = (uRef - phase[ref]) / pitchDs, o0 = Math.round(kReal), resid = Math.abs(kReal - o0);
-      const myLadder = ladderU[ri].map(u => localM(ri, u));
-      let best = o0, bs = -Infinity;
-      for (let o = o0 - 3; o <= o0 + 3; o++) {
-        const hits = myLadder.filter(m => refLadderK.has(m + o)).length;
-        const s = hits * 2 - Math.abs(o - o0) * (resid < 0.3 ? 0.9 : 0.2);
-        if (s > bs) { bs = s; best = o; }
-      }
-      offset[ri] = best;
-    });
-    const ladderKs = new Set();
-    regions.forEach((rg, ri) => ladderU[ri].forEach(u => ladderKs.add(localM(ri, u) + offset[ri])));
-    // --- row records (full-resolution units; frame = region frame shifted to the row centre)
+    const cands = regions.map((rg, ri) => pieceAnchors(rowsRaw.filter(r => r.region === ri), ladderU[ri], pitchDs));
+    const pJoint = jointPitch(cands.map(c => c.anchors), pitchDs);
+    const lat = regions.map((rg, ri) => pieceLattice(rg, cands[ri], ladderU[ri], pJoint));
+    const slotOf = (ri, u) => { const L = lat[ri]; if (!L) return -1; const m = Math.round((u - L.u0) / L.pitch); return m >= 0 && m < L.roles.length && L.roles[m] === 'sample' ? m : -1; };
+    // --- row records: one segment each (piece, band centre vc, band extent b0..b1 around it; full resolution)
     let out = rowsRaw.map(r => {
-      const rg = r.rg, ang = rg.angle, ri = r.region;
-      const Ffull = frame(rg.cx * f, rg.cy * f, ang);
-      const [ox, oy] = toImg(Ffull, 0, r.vc * f);
-      const ks = [...new Set(r.peaks.map(u => localM(ri, u) + offset[ri]))].filter(k => !ladderKs.has(k)).sort((a, b) => a - b);
-      const uOrigin = (phase[ri] - offset[ri] * pitchDs) * f;     // lane k sits at uOrigin + k*pitch
-      const vBand0 = (r.v0 - r.vc) * f, vBand1 = (r.v1 - r.vc) * f, bandH = Math.max(4, vBand1 - vBand0);
-      return { region: ri, strip: rg.strip, angle: Math.round(ang * 100) / 100, ox, oy, uOrigin, pitch, ks, bandH, vBand0, vBand1,
-        stripV: r.vc * f, strength: r.strength, halfH: rg.h * f / 2 };
-    }).filter(r => r.ks.length);
+      const ri = r.region, rg = r.rg;
+      const ms = [...new Set(r.peaks.map(u => slotOf(ri, u)).filter(m => m >= 0))].sort((a, b) => a - b);
+      if (!ms.length) return null;
+      const [ox, oy] = toImg(frame(rg.cx * f, rg.cy * f, rg.angle), 0, r.vc * f);
+      const b0 = (r.v0 - r.vc) * f, b1 = (r.v1 - r.vc) * f;
+      return { region: ri, segs: [{ region: ri, vc: r.vc * f, b0, b1, ms }], ox, oy, angle: Math.round(rg.angle * 100) / 100, bandH: Math.max(4, b1 - b0), strength: r.strength };
+    }).filter(Boolean);
     // band contrast of a row in each picture (raw signal, its own lanes and band height)
     const rowContrast = r => {
       if (r._contrast) return r._contrast;
-      const rg = regions[r.region], F = frame(rg.cx, rg.cy, rg.angle);
       const q2 = (a, p) => { if (!a.length) return 0; a.sort((x, y) => x - y); return a[Math.min(a.length - 1, Math.round(p * (a.length - 1)))]; };
       const per = [];
       sigs.forEach(s => {
-        const band = [], bgv = [];
-        r.ks.forEach(k => {
-          const uc = (r.uOrigin + k * pitch) / f, hw = pitchDs * 0.3;
-          for (let u = uc - hw; u <= uc + hw; u += 1) {
-            for (let v = (r.stripV + r.vBand0) / f; v <= (r.stripV + r.vBand1) / f; v += 1) { const [x, y] = toImg(F, u, v); const val = bilinear({ w: s.w, h: s.h, data: s.raw }, x, y); if (!isNaN(val)) band.push(val); }
-            for (const dv of [-6, -4, 4, 6]) { const v = (dv < 0 ? (r.stripV + r.vBand0) / f : (r.stripV + r.vBand1) / f) + dv; const [x, y] = toImg(F, u, v); const val = bilinear({ w: s.w, h: s.h, data: s.raw }, x, y); if (!isNaN(val)) bgv.push(val); }
-          }
+        const band = [], bgv = [], im = { w: s.w, h: s.h, data: s.raw };
+        r.segs.forEach(sg => {
+          const rg = regions[sg.region], F = frame(rg.cx, rg.cy, rg.angle), L = lat[sg.region];
+          const v0 = (sg.vc + sg.b0) / f, v1 = (sg.vc + sg.b1) / f;
+          sg.ms.forEach(m => {
+            const uc = L.u0 + m * L.pitch, hw = L.pitch * 0.3;
+            for (let u = uc - hw; u <= uc + hw; u += 1) {
+              for (let v = v0; v <= v1; v += 1) { const [x, y] = toImg(F, u, v); const val = bilinear(im, x, y); if (!isNaN(val)) band.push(val); }
+              for (const dv of [-6, -4, 4, 6]) { const [x, y] = toImg(F, u, (dv < 0 ? v0 : v1) + dv); const val = bilinear(im, x, y); if (!isNaN(val)) bgv.push(val); }
+            }
+          });
         });
         const hi = q2(band, 0.9), clipped = hi >= 0.98 * Math.min(1, s.clipDs);
         per.push({ c: hi - q2(bgv, 0.5), clipped });
@@ -816,61 +935,84 @@
       return (r._rank = rank);
     };
     // --- one protein running across pieces placed side by side = one figure row
-    out.sort((a, b) => b.ks.length - a.ks.length);
+    const xExt = ri => { const b = pieceBox(regions[ri]); return [b[0], b[2]]; };
+    const sideBySide = (ra, rb) => { const A = xExt(ra), B = xExt(rb), ov = Math.min(A[1], B[1]) - Math.max(A[0], B[0]); return ov < 0.25 * Math.min(A[1] - A[0], B[1] - B[0]); };
+    out.sort((a, b) => b.segs[0].ms.length - a.segs[0].ms.length);
     const merged = [];
     out.forEach(r => {
       // same height is not enough: a neighbouring piece probed with another antibody can have faint bands
       // at that height. Require comparable band contrast (in the same pictures), and unless the contrast is
       // clearly alike, a comparable rank on the own piece (main band vs main band, not main vs secondary).
-      const host = merged.find(m => m.region !== r.region && !m.regions.has(r.region) &&
-        Math.abs(m.oy - r.oy) < Math.max(m.bandH, r.bandH) * 0.9 + 6 && !r.ks.some(k => m.ks.includes(k)) && Math.abs(m.angle - r.angle) < 3 &&
+      const host = merged.find(m => !m.regions.has(r.region) && [...m.regions].every(ri => sideBySide(ri, r.region)) &&
+        Math.abs(m.oy - r.oy) < Math.max(m.bandH, r.bandH) * 0.9 + 6 && Math.abs(m.angle - r.angle) < 3 &&
         sameStrength(m, r) > 0.3 && (sameStrength(m, r) > 0.6 || Math.min(pieceRank(m), pieceRank(r)) / Math.max(pieceRank(m), pieceRank(r)) > 0.35));
-      if (host) {
-        host.ks = [...new Set(host.ks.concat(r.ks))].sort((a, b) => a - b);
-        host.regions.add(r.region); host.strength += r.strength;
-        host.vBand0 = Math.min(host.vBand0, r.vBand0); host.vBand1 = Math.max(host.vBand1, r.vBand1); host.bandH = host.vBand1 - host.vBand0;
-      } else merged.push(Object.assign(r, { regions: new Set([r.region]) }));
+      if (host) { host.segs.push(r.segs[0]); host.regions.add(r.region); host.strength += r.strength; host.bandH = Math.max(host.bandH, r.bandH); }
+      else merged.push(Object.assign(r, { regions: new Set([r.region]) }));
     });
     // two detections of one heavy band (core + smear edge) on the same piece: same lanes, close in height
     for (let i = 0; i < merged.length; i++) for (let j = merged.length - 1; j > i; j--) {
       const a = merged[i], b = merged[j];
-      if (a.region !== b.region) continue;
-      const common = a.ks.filter(k => b.ks.includes(k)).length;
-      if (common < Math.min(a.ks.length, b.ks.length) * 0.6) continue;
-      if (Math.abs(a.stripV - b.stripV) > 30 + 0.5 * (a.bandH + b.bandH) / 2) continue;
+      const sa = a.segs.find(s => b.segs.some(t => t.region === s.region)); if (!sa) continue;
+      const sb = b.segs.find(t => t.region === sa.region);
+      if (sa.ms.filter(m => sb.ms.includes(m)).length < Math.min(sa.ms.length, sb.ms.length) * 0.6) continue;
+      if (Math.abs(sa.vc - sb.vc) > 30 + 0.5 * ((sa.b1 - sa.b0) + (sb.b1 - sb.b0)) / 2) continue;
       const keep = a.strength >= b.strength ? a : b, drop = keep === a ? b : a;
-      const top = Math.min(a.stripV + a.vBand0, b.stripV + b.vBand0), bot = Math.max(a.stripV + a.vBand1, b.stripV + b.vBand1);
-      keep.vBand0 = top - keep.stripV; keep.vBand1 = bot - keep.stripV; keep.bandH = keep.vBand1 - keep.vBand0;
-      keep.ks = [...new Set(keep.ks.concat(drop.ks))].sort((x, y) => x - y); keep.strength += drop.strength;
+      drop.segs.forEach(d => {
+        const k = keep.segs.find(s => s.region === d.region);
+        if (!k) { keep.segs.push(d); keep.regions.add(d.region); return; }
+        const top = Math.min(k.vc + k.b0, d.vc + d.b0), bot = Math.max(k.vc + k.b1, d.vc + d.b1);
+        k.b0 = top - k.vc; k.b1 = bot - k.vc; k.ms = [...new Set(k.ms.concat(d.ms))].sort((x, y) => x - y);
+      });
+      keep.bandH = Math.max(...keep.segs.map(s => s.b1 - s.b0)); keep.strength += drop.strength;
       merged[i] = keep; merged.splice(j, 1);
     }
     // faint rows confined to one or two lanes are usually nonspecific bands or dust
-    const smax = Math.max(1e-9, ...merged.map(r => r.strength)), maxLanes = Math.max(0, ...merged.map(r => r.ks.length));
-    out = merged.filter(r => (r.ks.length >= 3 || r.strength > smax * 0.06) && !(r.ks.length <= 2 && maxLanes >= 4 && r.strength < smax * 0.15));
+    const nLanes = r => r.segs.reduce((s, sg) => s + sg.ms.length, 0);
+    const smax = Math.max(1e-9, ...merged.map(r => r.strength)), maxLanes = Math.max(0, ...merged.map(nLanes));
+    out = merged.filter(r => (nLanes(r) >= 3 || r.strength > smax * 0.06) && !(nLanes(r) <= 2 && maxLanes >= 4 && r.strength < smax * 0.15));
     out.forEach(r => {
-      let kda = null;
-      if (calib && r.strip >= 0 && calib.strips[r.strip]) kda = kdaAt(calib, r.strip, r.stripV + (r.vBand0 + r.vBand1) / 2);
-      // crop: about 2.5 band heights of background, clipped to the piece, reaching a marker band if one is near
+      r.segs.sort((a, b) => regions[a.region].cx - regions[b.region].cx);        // left to right
+      const half = sg => regions[sg.region].h * f / 2;
+      // crop: about 2.5 band heights of background above and below the band centre, inside the pieces,
+      // reaching a marker band if one is just outside
       const margin = clamp(r.bandH * 2.5, 16, 100);
-      let vTop = r.vBand0 - margin, vBot = r.vBand1 + margin;
-      vTop = Math.max(vTop, -r.halfH - r.stripV + 2); vBot = Math.min(vBot, r.halfH - r.stripV - 2);
-      if (calib && r.strip >= 0 && calib.strips[r.strip]) {
-        const ticks = calib.strips[r.strip].bands.map(b => b.v - r.stripV);
-        if (!ticks.some(t => t > vTop + 3 && t < vBot - 3)) {
-          const near = ticks.map(t => ({ t, d: t < vTop ? vTop - t : t - vBot })).filter(o => o.d < margin * 1.8).sort((a, b) => a.d - b.d)[0];
-          if (near) { if (near.t < vTop) vTop = Math.max(near.t - 8, -r.halfH - r.stripV + 1); else vBot = Math.min(near.t + 8, r.halfH - r.stripV - 1); }
+      let above = Math.max(...r.segs.map(sg => -sg.b0)) + margin, below = Math.max(...r.segs.map(sg => sg.b1)) + margin;
+      above = Math.min(above, ...r.segs.map(sg => sg.vc + half(sg) - 2)); below = Math.min(below, ...r.segs.map(sg => half(sg) - sg.vc - 2));
+      const s0 = r.segs[0], strip = regions[s0.region].strip;
+      let kda = null;
+      if (calib && strip >= 0 && calib.strips[strip]) {
+        kda = kdaAt(calib, strip, s0.vc + (s0.b0 + s0.b1) / 2);
+        const ticks = calib.strips[strip].bands.map(b => b.v - s0.vc);
+        if (!ticks.some(t => t > -above + 3 && t < below - 3)) {
+          const near = ticks.map(t => ({ t, d: t < -above ? -above - t : t - below })).filter(o => o.d >= 0 && o.d < margin * 1.8).sort((a, b) => a.d - b.d)[0];
+          if (near) { if (near.t < -above) above = Math.min(-near.t + 8, s0.vc + half(s0) - 1); else below = Math.min(near.t + 8, half(s0) - s0.vc - 1); }
         }
       }
-      Object.assign(r, { kda, vTop, vBot, laneUs: r.ks.map(k => r.uOrigin + k * pitch) });
+      Object.assign(r, { kda, above, below, strip });
       r.regions = [...r.regions];
-      // the pieces this row lives on (full-res rectangles): the figure shows nothing from other pieces
-      r.pieces = r.regions.map(ri => { const rg = regions[ri]; return { cx: rg.cx * f, cy: rg.cy * f, angle: rg.angle, w: rg.w * f, h: rg.h * f }; });
     });
-    // --- exposure choice per row
-    out.forEach(r => { r.expo = chemis.map((c, k) => evalExposure(c.img, sigs[k].cs, r, factors[k])); r.choice = chooseExposure(r.expo); });
-    out.sort((a, b) => (a.region - b.region) || (a.stripV - b.stripV));
-    const allK = out.flatMap(r => r.ks).concat([...ladderKs]);
-    return { strips, regions, rows: out, pitch, factors, calib, ladderId, ladderKs: [...ladderKs], minK: allK.length ? Math.min(...allK) : 1, ladderRank: ladderRank.map(x => ({ id: x.id, q: x.q, rms: x.cal.rmsLn, miss: x.miss })), ladderStrips, notes, f };
+    // --- pieces (full resolution) and the first guess of their figure columns
+    const pieces = regions.map((rg, ri) => {
+      const L = lat[ri];
+      return { strip: rg.strip, cx: rg.cx * f, cy: rg.cy * f, angle: Math.round(rg.angle * 100) / 100, w: rg.w * f, h: rg.h * f,
+        u0: L ? L.u0 * f : 0, pitch: L ? L.pitch * f : pitch, roles: L ? L.roles.slice() : [], col0: 1 };
+    });
+    assignColumns(pieces, out);
+    const colOf = (pc, m) => { if (pc.roles[m] !== 'sample') return null; let c = pc.col0; for (let k = 0; k < m; k++) if (pc.roles[k] === 'sample') c++; return c; };
+    // --- exposure choice per row (over all the lanes of its pieces)
+    out.forEach(r => {
+      const parts = r.segs.map(sg => {
+        const pc = pieces[sg.region], sl = pc.roles.map((x, m) => m).filter(m => pc.roles[m] === 'sample');
+        return { F: frame(pc.cx, pc.cy, pc.angle), u0: pc.u0 + (sl[0] - 0.5) * pc.pitch, u1: pc.u0 + (sl[sl.length - 1] + 0.5) * pc.pitch,
+          vTop: sg.vc - r.above, vBot: sg.vc + r.below, b0: sg.vc + sg.b0, b1: sg.vc + sg.b1 };
+      });
+      r.expo = chemis.map((c, k) => evalExposure(c.img, sigs[k].cs, parts, factors[k]));
+      r.choice = chooseExposure(r.expo);
+      // figure columns the row has bands in (tests and default lane range)
+      r.ks = [...new Set(r.segs.flatMap(sg => sg.ms.map(m => colOf(pieces[sg.region], m)).filter(c => c != null)))].sort((a, b) => a - b);
+    });
+    out.sort((a, b) => a.oy - b.oy);
+    return { strips, regions, pieces, rows: out, pitch, factors, calib, ladderId, ladderRank: ladderRank.map(x => ({ id: x.id, q: x.q, rms: x.cal.rmsLn, miss: x.miss })), ladderStrips, notes, f };
   }
 
   /* rows (one per protein) in a straightened region window, plus lane peaks along each row.
@@ -1011,7 +1153,7 @@
         const mine = c.items.filter(b => b.si === si);
         const u = toFrame(F, c.x, s.cy)[0];
         if (Math.abs(u) > s.w / 2 + pitch * 0.2) return null;     // this column does not cross the piece
-        return { u, bands: mine.map(b => toFrame(F, b.x, b.y)[1]).sort((a, b) => a - b) };
+        return { u, own: mine.length, bands: mine.map(b => toFrame(F, b.x, b.y)[1]).sort((a, b) => a - b) };
       }).filter(Boolean);
       // a piece moved away from the others (scattered, tilted) has its ladder elsewhere in image x:
       // fall back to its own column of marks, in piece coordinates, if it is clearly a ladder: 3+ marks,
@@ -1026,7 +1168,7 @@
         let best = own.filter(c => c.vs.length >= 3).sort((a, b) => b.vs.length - a.vs.length)[0];
         if (!best && two.length === 1 && Math.abs(two[0].u) > s.w / 2 - pitch * 1.5) best = two[0];
         findLadders.debug.own.push(`${si}:${own.map(c => Math.round(c.u) + '/' + c.vs.length).join(' ')}`);
-        if (best) lanes = [{ u: best.u, bands: best.vs.sort((a, b) => a - b) }];
+        if (best) lanes = [{ u: best.u, own: best.vs.length, bands: best.vs.sort((a, b) => a - b) }];
       }
       // faint or broad ladder bands (e.g. the pink reference bands of two-colour ladders photograph
       // pale in grey) fail the blob test: read a darkness profile down each ladder lane as well
@@ -1044,12 +1186,14 @@
         if (prof.length < 5) return;
         const ps = gaussSmooth(Float32Array.from(prof), 1.5);
         const strong = l.bands.map(bv => ps[clamp(Math.round((bv - vA) / f), 0, ps.length - 1)]);
-        const ref = strong.length ? Math.max(...strong) : Math.max(...ps);
-        const pk = findPeaks(ps, Math.max(3, 18 / f), Math.max(thr * 0.35, ref * 0.18));
+        // with marks of its own the lane is a ladder lane: fainter bands relative to them count; a column
+        // seen only on other pieces needs clear bands here (pieces are often not put back in place)
+        const pk = findPeaks(ps, Math.max(3, 18 / f), strong.length ? Math.max(thr * 0.35, Math.max(...strong) * 0.18) : thr * 0.8);
         const add = pk.map(q2 => vA + q2.i * f).filter(v => l.bands.every(b => Math.abs(b - v) > 10));
-        findLadders.debug.prof = (findLadders.debug.prof || []).concat(`${si}@${Math.round(l.u)}: ${pk.map(q2 => Math.round(vA + q2.i * f + s.cy) + '/' + q2.prom.toFixed(3)).join(' ')} ref=${ref.toFixed(3)}`);
+        findLadders.debug.prof = (findLadders.debug.prof || []).concat(`${si}@${Math.round(l.u)}: ${pk.map(q2 => Math.round(vA + q2.i * f + s.cy) + '/' + q2.prom.toFixed(3)).join(' ')} own=${l.own}`);
         l.bands = l.bands.concat(add).sort((a, b) => a - b);
       });
+      lanes = lanes.filter(l => l.own > 0 || l.bands.length >= 2);
       // all ladder lanes in a piece show the same ladder: merge their bands for calibration
       const vs = [];
       lanes.flatMap(l => l.bands).sort((a, b) => a - b).forEach(v => { if (!vs.length || v - vs[vs.length - 1] > 10) vs.push(v); else vs[vs.length - 1] = (vs[vs.length - 1] + v) / 2; });
@@ -1110,33 +1254,49 @@
     return { uStrip: best.u, bands: best.bands, lanes };
   }
 
-  /* exposure quality inside a row's band region (full resolution) */
-  function evalExposure(img, cs, r, factor) {
-    const F = frame(r.ox, r.oy, r.angle);
-    const u0 = Math.min(...r.laneUs) - r.pitch * 0.5, u1 = Math.max(...r.laneUs) + r.pitch * 0.5;
-    const band = [], bg = [];
+  /* exposure quality of a row in one picture (full resolution). parts: one per piece the row lies on,
+   * {F: piece frame, u0, u1: lanes, vTop, vBot: crop, b0, b1: band} */
+  function evalExposure(img, cs, parts, factor) {
+    const band = [], bg = [], diffs = [];
     let sat = 0;
     const satAt = (x, y) => { const xi = Math.round(x), yi = Math.round(y); if (xi < 1 || yi < 1 || xi >= img.w - 1 || yi >= img.h - 1) return false; return cs.sig[yi * img.w + xi] >= cs.clip - 1e-6; };
-    for (let v = r.vTop; v <= r.vBot; v += 1) for (let u = u0; u <= u1; u += 1) {
-      const [x, y] = toImg(F, u, v);
-      const xi = Math.round(x), yi = Math.round(y);
-      if (xi < 0 || yi < 0 || xi >= img.w || yi >= img.h) continue;
-      const val = cs.sig[yi * img.w + xi];
-      const inBand = v >= r.vBand0 - 2 && v <= r.vBand1 + 2;
-      if (inBand) {
-        band.push(val);
-        // clipped pixel with clipped neighbours (single hot pixels are ignored)
-        if (cs.clip !== Infinity && val >= cs.clip - 1e-6) {
-          let nb = 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (satAt(x + dx, y + dy)) nb++;
-          if (nb >= 2) sat++;
+    parts.forEach(p => {
+      for (let v = p.vTop; v <= p.vBot; v += 1) {
+        let prev = NaN, prev2 = NaN;
+        for (let u = p.u0; u <= p.u1; u += 1) {
+          const [x, y] = toImg(p.F, u, v);
+          const xi = Math.round(x), yi = Math.round(y);
+          if (xi < 0 || yi < 0 || xi >= img.w || yi >= img.h) { prev = prev2 = NaN; continue; }
+          const val = cs.sig[yi * img.w + xi];
+          if (v >= p.b0 - 2 && v <= p.b1 + 2) {
+            band.push(val);
+            // clipped pixel with clipped neighbours (single hot pixels are ignored)
+            if (cs.clip !== Infinity && val >= cs.clip - 1e-6) {
+              let nb = 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (satAt(x + dx, y + dy)) nb++;
+              if (nb >= 2) sat++;
+            }
+            prev = prev2 = NaN;
+          } else {
+            bg.push(val);
+            // pixel noise from differences 2 px apart: smooth smears and gradients do not count as noise
+            if (!isNaN(prev2)) diffs.push(Math.abs(val - prev2));
+            prev2 = prev; prev = val;
+          }
         }
-      } else bg.push(val);
-    }
+      }
+    });
     bg.sort((a, b) => a - b); band.sort((a, b) => a - b);
     const q = (a, p) => (a.length ? a[clamp(Math.round(p * (a.length - 1)), 0, a.length - 1)] : 0);
     const bgMed = q(bg, 0.5), bgSig = Math.max(1e-5, (q(bg, 0.84) - q(bg, 0.16)) / 2);
     const peak = q(band, 0.995);
-    return { sat, satFrac: band.length ? sat / band.length : 0, snr: (peak - bgMed) / bgSig, peak, bgMed, bgSig, factor };
+    // pixel noise: mean |difference| of the lower 90 % (dust and edges left out), as a Gaussian sigma;
+    // a mean rather than a median, which is 0 on the quantized background of 8-bit exports
+    diffs.sort((a, b) => a - b);
+    const nd = Math.max(1, Math.floor(diffs.length * 0.9));
+    let sd = 0; for (let i = 0; i < nd && i < diffs.length; i++) sd += diffs[i];
+    // (E|d| = 2σ/√π for the difference of two samples; the 90 % trimmed mean is 0.823 of the full mean)
+    const noise = diffs.length ? Math.max(1e-5, (sd / nd) / 0.823 * Math.sqrt(Math.PI) / 2) : bgSig;
+    return { sat, satFrac: band.length ? sat / band.length : 0, snr: (peak - bgMed) / bgSig, peak, bgMed, bgSig, noise, factor };
   }
   /* Pick the picture that shows a row best, judged on that row alone (pieces of one membrane are often
    * developed or imaged at different times, so a global short->long order does not hold).
@@ -1170,17 +1330,18 @@
     return { black, white };
   }
 
-  /* densitometry: lane volume above local background, in the chosen image */
-  function densitometry(img, cs, r, uCenters) {
-    const F = frame(r.ox, r.oy, r.angle), hw = r.pitch * 0.33;
-    return uCenters.map(uc => {
+  /* densitometry: lane volume above local background, in the chosen image.
+   * lanes: [{F, uc, hw, vTop, vBot, b0, b1} | null] (null = no lane in that column) */
+  function densitometry(img, cs, lanes) {
+    return lanes.map(L => {
+      if (!L) return null;
       const vals = [], bgs = []; let sat = 0;
-      for (let v = r.vTop; v <= r.vBot; v += 1) for (let u = uc - hw; u <= uc + hw; u += 1) {
-        const [x, y] = toImg(F, u, v);
+      for (let v = L.vTop; v <= L.vBot; v += 1) for (let u = L.uc - L.hw; u <= L.uc + L.hw; u += 1) {
+        const [x, y] = toImg(L.F, u, v);
         const xi = Math.round(x), yi = Math.round(y);
         if (xi < 0 || yi < 0 || xi >= img.w || yi >= img.h) continue;
         const val = cs.sig[yi * img.w + xi];
-        if (v >= r.vBand0 - 2 && v <= r.vBand1 + 2) { vals.push(val); if (val >= cs.clip - 1e-6) sat++; } else bgs.push(val);
+        if (v >= L.b0 - 2 && v <= L.b1 + 2) { vals.push(val); if (val >= cs.clip - 1e-6) sat++; } else bgs.push(val);
       }
       bgs.sort((a, b) => a - b);
       const bg = bgs.length ? bgs[bgs.length >> 1] : 0;
@@ -1189,13 +1350,11 @@
     });
   }
 
-  // a sampled, display-ready crop of a row
-  function rowCrop(img, r, u0, u1, step) { return sampleWindow(img, frame(r.ox, r.oy, r.angle), u0, u1, r.vTop, r.vBot, step || 1); }
-
   G.WB = {
     down, tophat, blur2d, median3, components, otsu, mad, bilinear, frame, toImg, toFrame, sampleWindow,
     exposureFromName, classify, chemiSignal, groupSessions, stem, findStrips, stripFrame, inStrip,
-    pitchFromGaps, latticeOrigin, calibrateLadder, calibrate, fitSeries, piecesInPlace, kdaAt, vAt, analyzeSession, detectRows, regionsFromSignal, findLadderInStrip, findLadders,
-    evalExposure, chooseExposure, exposureScore, isCleanExposure, autoLevels, densitometry, rowCrop
+    pitchFromGaps, latticeOrigin, pieceLattice, assignColumns, calibrateLadder, calibrate, fitSeries, piecesInPlace, kdaAt, vAt, kdaAtK, vAtK,
+    analyzeSession, detectRows, regionsFromSignal, findLadderInStrip, findLadders,
+    evalExposure, chooseExposure, exposureScore, isCleanExposure, autoLevels, densitometry
   };
 })(window);

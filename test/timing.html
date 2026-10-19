@@ -27,7 +27,9 @@
     R.factors = chemis.map((c, k) => `${c.id.slice(0, 2)}:${A.factors[k].toFixed(3)}`);
     R.expo = A.rows.map(r => r.expo.map((e, k) => `${chemis[k].id.slice(0, 2)} sat${(e.satFrac * 100).toFixed(1)}% snr${e.snr.toFixed(0)} pk${e.peak.toFixed(2)} bg${e.bgMed.toFixed(2)} s${WB.exposureScore(e).toFixed(3)}`).join(' | '));
     R.clip = A.factors.map((x, k) => `${chemis[k].id.slice(0, 2)}:${WB.chemiSignal(chemis[k].img).clip}`);
-    R.ladderKs = A.ladderKs; R.pitch = Math.round(A.pitch);
+    R.pieces = A.pieces.map((p, i) => `${i}@${Math.round(p.cx)},${Math.round(p.cy)} ${Math.round(p.w)}x${Math.round(p.h)} p=${p.pitch.toFixed(1)} col0=${p.col0} ${p.roles.map(r => r[0]).join('')}`);
+    R.segs = A.rows.map(r => r.segs.map(s => `${s.region}:${Math.round(s.vc)}[${s.ms}]`).join(' + ') + ` above=${Math.round(r.above)} below=${Math.round(r.below)}`);
+    R.pitch = Math.round(A.pitch);
     R.calBands = A.calib && A.calib.strips.map((s, i) => s && s.bands.map(b => `${Math.round(b.v + A.strips[i].cy)}:${b.kda}`).join(' '));
   } catch (e) { R.error = e.stack || String(e); }
   say();

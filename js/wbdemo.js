@@ -108,6 +108,24 @@
       ]
     });
   }
+  // a membrane cut across into three strips, put back with arbitrary sideways offsets; the top strip is
+  // also cut down the middle and its two pieces lie side by side
+  function movedSession() {
+    return makeSession({
+      prefix: 'Blot3', seed: 5,
+      strips: [
+        { x: 230, y: 70, w: 385, h: 300, dx: 0, dy: -8, angle: 0.4 },
+        { x: 621, y: 70, w: 609, h: 300, dx: 3, dy: -8, angle: 0.4 },
+        { x: 230, y: 370, w: 1000, h: 250, dx: 130, dy: 10, angle: -0.5 },
+        { x: 230, y: 620, w: 1000, h: 420, dx: -75, dy: 30, angle: 0.3 }
+      ],
+      proteins: [
+        { name: 'mTOR-like', kda: 110, thick: 11, amounts: amt(9, [1, 1.1, 0.9, 0.4, 0.3, 1, 1.2, 0.5, 0.35]) },
+        { name: 'p-ERK1/2', kda: 50, thick: 9, doublet: true, amounts: amt(1.6, [0.15, 1, 1.6, 0.2, 0.1, 1.1, 1.8, 0.25, 0.1]) },
+        { name: 'GAPDH', kda: 30, thick: 12, amounts: amt(42, [1, 1, 0.95, 1.05, 1, 1, 0.98, 1.02, 1]) }
+      ]
+    });
+  }
   function scatterSession() {
     return makeSession({
       prefix: 'Blot2', seed: 9, exposures: [20], W: 1500, H: 1150,
@@ -138,5 +156,5 @@
   }
   function files(session) { return session.images.map(im => ({ name: im.name, buffer: encodeTiff16(im) })); }
 
-  G.WBDemo = { cutSession, scatterSession, encodeTiff16, files, LADDER };
+  G.WBDemo = { cutSession, scatterSession, movedSession, encodeTiff16, files, LADDER };
 })(window);

@@ -1,6 +1,7 @@
-/* Figure layout: state -> SVG (pt units). Lanes on a common grid across rows; each row is a
- * straightened crop scaled so its lane pitch matches the grid. kDa ticks on the left, protein
- * names on the right, lane labels / conditions / groups on top. */
+/* Figure layout: state -> SVG (pt units). Figure columns on a common grid across rows, white gaps where
+ * neighbouring columns are not neighbouring lanes on a piece; each row is drawn from its pieces as
+ * straightened crops scaled so the lane pitch matches the grid. kDa ticks on the left, protein names on
+ * the right, lane labels / conditions / groups on top. */
 (function (G) {
   'use strict';
   const App = G.BApp, WB = G.WB, MM = 72 / 25.4;
@@ -20,7 +21,7 @@
     const S = App.S, st = S.style, pt = st.fontPt, lw = st.lineWidthPt, P = !!preview;
     const ph = ' fill="#aab3be"';
     const ed = (attrs, inner) => (P ? `<g ${attrs} class="ed">${inner}</g>` : inner);
-    const segs = App.segments(), lanes = segs.flat();
+    const C = App.columns(), segs = C.segs, lanes = segs.flat();
     const laneW = st.mmPerLane * MM, gap = 1.6;
     // x of each figure lane centre
     const X = new Map(); let x = 0;
@@ -32,20 +33,33 @@
     if (!lanes.length) return { svg: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>', w: 10, h: 10, warnings, angle: 0 };
 
     /* ---- rows ---- */
-    const rows = S.rows.filter(r => !r.hidden && App.blot(r.blot));
+    const rows = C.rows;
     let y = 0, prevBlot = null, maxLeft = 0, maxRight = 0;
     const rowBoxes = [], placedTicks = [{ y: -pt * 0.6 }];   // the kDa header sits just above the first row
-    rows.forEach(row => {
+    rows.forEach((row, ri) => {
       if (prevBlot !== null) y += row.blot === prevBlot ? st.rowGapPt : st.blotGapPt;
       prevBlot = row.blot;
-      const g = row.geo, sc = laneW / g.pitch;       // pt per image px
-      const h = (g.vBot - g.vTop) * sc;
-      const step = Math.max(0.35, Math.min(2, g.pitch / 60));   // ~60 px per lane in the raster
-      segs.forEach(sg => {
-        const j0 = sg[0], j1 = sg[sg.length - 1];
-        const ras = App.rowRaster(row, j0, j1, step);
-        const x0 = X.get(j0) - laneW / 2, w = (j1 - j0 + 1) * laneW;
-        els.push(`<image ${P ? `data-row="${row.id}" ` : ''}x="${f(x0)}" y="${f(y)}" width="${f(w)}" height="${f(h)}" preserveAspectRatio="none" href="${ras.href}" xlink:href="${ras.href}"/>`);
+      const pitch = App.rowPitch(row), sc = laneW / pitch;       // pt per image px
+      const h = (row.above + row.below) * sc;
+      const step = Math.max(0.35, Math.min(2, pitch / 60));      // ~60 px per lane in the raster
+      const srcOf = new Map(C.vis.map((j, k) => [j, C.src[ri][k]]));
+      // one image per run of columns that are neighbouring lanes of one piece; no lane = background
+      segs.forEach(run => {
+        let cur = null;
+        const flush = () => {
+          if (!cur) return;
+          const ras = App.runRaster(row, cur.sg, cur.pc, cur.m0, cur.m1, step);
+          const x0 = X.get(cur.j0) - laneW / 2, w = (cur.m1 - cur.m0 + 1) * laneW;
+          els.push(`<image ${P ? `data-row="${row.id}" ` : ''}x="${f(x0)}" y="${f(y)}" width="${f(w)}" height="${f(h)}" preserveAspectRatio="none" href="${ras.href}" xlink:href="${ras.href}"/>`);
+          if (st.border) els.push(`<rect x="${f(x0)}" y="${f(y)}" width="${f(w)}" height="${f(h)}" fill="none" stroke="#000" stroke-width="${f(lw)}" pointer-events="none"/>`);
+          cur = null;
+        };
+        run.forEach(j => {
+          const s = srcOf.get(j);
+          if (s && cur && s.pc === cur.pc && s.m === cur.m1 + 1) cur.m1 = s.m;
+          else { flush(); if (s) cur = { sg: s.sg, pc: s.pc, m0: s.m, m1: s.m, j0: j }; }
+        });
+        flush();
       });
       if (P && App.selRow === row.id) els.push(`<rect x="-1" y="${f(y - 1)}" width="${f(W + 2)}" height="${f(h + 2)}" fill="none" stroke="#2f6feb" stroke-width="1.2" pointer-events="none"/>`);
       // protein name on the right
@@ -56,12 +70,14 @@
         els.push(t); maxRight = Math.max(maxRight, 3 + measure(nm, pt));
       }
       if (!row.name && P && kdaHint) els.push(text(`≈${Math.round(kdaHint)} kDa`, W + 3, y + h / 2 + pt * 1.35, pt * 0.8, 'start', ph));
-      // kDa ticks on the left
-      const b = App.blot(row.blot), cal = st.showMW ? App.calibFor(b) : null, lad = G.ProteinLadders.get(b.ladderId);
-      if (cal && lad && g.strip >= 0 && cal.strips[g.strip]) {
-        const ticks = lad.sizes.map(k => ({ k, v: WB.vAt(cal, g.strip, k) - g.stripV })).filter(t => t.v > g.vTop + 1 && t.v < g.vBot - 1)
-          .map(t => ({ k: t.k, y: y + (t.v - g.vTop) * sc })).sort((a, c) => a.y - c.y);
-        const kept = [], yBand = y + ((g.vBand0 + g.vBand1) / 2 - g.vTop) * sc;
+      // kDa ticks on the left, from the leftmost piece of the row that has marker sizes
+      const b = App.blot(row.blot);
+      const tsg = st.showMW ? row.segs.find(sg => App.pieceTicks(b, App.piece(b, sg.piece)).length) : null;
+      if (tsg) {
+        const top = tsg.vc - row.above;
+        const ticks = App.pieceTicks(b, App.piece(b, tsg.piece)).filter(t => t.v > top + 1 && t.v < tsg.vc + row.below - 1)
+          .map(t => ({ k: t.k, y: y + (t.v - top) * sc })).sort((a, c) => a.y - c.y);
+        const kept = [], yBand = y + (row.above + (tsg.b0 + tsg.b1) / 2) * sc;
         // too close to fit both: the tick nearest the band wins (it tells the size best);
         // also keep clear of ticks already printed for the row above
         ticks.slice().sort((a, c) => Math.abs(a.y - yBand) - Math.abs(c.y - yBand))
