@@ -18,6 +18,14 @@
   const uid = p => p + (uidN++).toString(36) + Math.random().toString(36).slice(2, 5);
   const tick = () => new Promise(r => setTimeout(r, 16));
   const pFrame = pc => WB.frame(pc.cx, pc.cy, pc.angle);
+  // a point (u, v) of piece a, in the frame of piece b (the same place on the membrane)
+  const carry = (a, b, u, v) => { const [x, y] = WB.toImg(pFrame(a), u, v), [u2, v2] = WB.toFrame(pFrame(b), x, y); return { u: u2, v: v2 }; };
+  // letters in reading order: top to bottom, left to right within a band
+  function letterPieces(blot) {
+    const pcs = blot.pieces || [], top = p => p.cy - p.h / 2;
+    pcs.map((p, i) => i).sort((i, k) => (Math.abs(top(pcs[i]) - top(pcs[k])) < 60 ? pcs[i].cx - pcs[k].cx : top(pcs[i]) - top(pcs[k])))
+      .forEach((i, n) => { pcs[i].letter = String.fromCharCode(65 + (n % 26)); });
+  }
 
   const App = { images: new Map(), analysis: {}, S: null, hist: [], future: [], listeners: [], selRow: null, selSeg: null, selLane: null, viewBlot: null, viewImg: null, mode: null };
   try { App.prefLadder = localStorage.getItem('blotfig.ladder') || null; } catch (e) { App.prefLadder = null; }
@@ -113,6 +121,16 @@
     rec._disp = null;
   }
 
+  /* a membrane. Its ladder: the one the user chose last time (people keep one ladder; ladderFrom 'pref'), else
+   * guessed from the marker bands (ladderAuto: to be confirmed) */
+  const newBlot = (images, marker) => ({ id: uid('b'), name: '', images, marker, ladderId: App.prefLadder || null, ladderAuto: !App.prefLadder,
+    ladderFrom: App.prefLadder ? 'pref' : null, pieces: [] });
+  // the ladder of a membrane chosen by the user: remembered for the next membranes
+  App.setLadder = function (b, id) {
+    b.ladderAuto = !id; b.ladderFrom = id ? 'user' : null;
+    b.ladderId = id || (App.analysis[b.id] && App.analysis[b.id].autoLadderId) || null;
+    if (id) { App.prefLadder = id; try { localStorage.setItem('blotfig.ladder', id); } catch (e) { /* storage off */ } }
+  };
   App.addFiles = async function (files) {
     files = [...files].filter(f => /\.(tiff?|png|jpe?g|bmp)$/i.test(f.name));
     if (!files.length) return 0;
@@ -144,7 +162,7 @@
       recs.forEach(r => { prepare(r); App.images.set(r.id, r); });
       // group into membranes
       const groups = WB.groupSessions(recs.map(r => ({ id: r.id, name: r.name, w: r.img.w, h: r.img.h, kind: r.kind, thumb: r.thumb })));
-      let blots = groups.map(g => ({ id: uid('b'), name: '', images: g.chemi.map(c => c.id).concat(g.markers.map(m => m.id)), marker: g.markers[0] ? g.markers[0].id : null, ladderId: null, ladderAuto: true, pieces: [] }));
+      let blots = groups.map(g => newBlot(g.chemi.map(c => c.id).concat(g.markers.map(m => m.id)), g.markers[0] ? g.markers[0].id : null));
       // stray marker photos (all of one place) join a membrane of the same size that has none
       blots.filter(b => !App.chemiOf(b).length).forEach(mb => {
         const m = App.images.get(mb.images[0]);
@@ -434,31 +452,33 @@
   /* ---------- analysis ---------- */
   App.analyze = function (blot) {
     const ch = App.chemiOf(blot);
-    if (blot.marker && !blot.images.includes(blot.marker)) blot.marker = null;
+    if (blot.marker && (!blot.images.includes(blot.marker) || (App.images.get(blot.marker) || {}).kind !== 'marker')) blot.marker = null;
     if (!blot.marker) { const m = App.markersOf(blot)[0]; blot.marker = m ? m.id : null; }
     const mk = blot.marker ? App.images.get(blot.marker) : null;
     if (!ch.length) { App.analysis[blot.id] = null; blot.pieces = []; return null; }
     // the white-light photo as taken, with where it lies on the grid (strips and ladder are read from it unresampled)
     const al = mk && App.alignOf(mk.id), mPcs = al && al.pieces ? (blot.pieces || []).filter(p => al.pieces[p.id]).map(p => ({ cx: p.cx, cy: p.cy, angle: p.angle, w: p.w, h: p.h, T: al.pieces[p.id] })) : [];
     const A = WB.analyzeSession(ch.map(r => ({ id: r.id, img: r.img, exposure: r.exposure, cs: r.cs })), mk && { id: mk.id, img: (mk.raw || mk).img, T: al ? { a: al.a, tx: al.tx, ty: al.ty } : null, pieces: mPcs },
-      { ladderId: blot.ladderAuto ? null : blot.ladderId, prefLadder: App.prefLadder });
+      { ladderId: blot.ladderAuto ? null : blot.ladderId, prefLadder: App.prefLadder, noChemiCheck: !!App.devNoChemi });
     A.chemiIds = ch.map(r => r.id);
     A.H = ch[0].img.h;
     App.analysis[blot.id] = A;
     if (blot.ladderAuto || !blot.ladderId) blot.ladderId = A.ladderId;
     A._calLadder = A.ladderId;
-    // pieces, in analysis order; a piece found again at the same place keeps the marker bands set by hand
+    // pieces, in analysis order; a piece found again at the same place (each old piece once, nearest first)
+    // keeps its id and the marker bands set by hand, moved along with it
     const old = blot.pieces || [];
     const fresh = A.pieces.map(p => Object.assign({ id: uid('p'), marks: null }, JSON.parse(JSON.stringify(p))));
-    fresh.forEach(n => {
-      const o = old.find(o => Math.hypot(o.cx - n.cx, o.cy - n.cy) < 40 && Math.abs(o.w - n.w) < 60);
-      if (o) { n.id = o.id; n.marks = o.marks; }
+    const pairs = [];
+    fresh.forEach(n => old.forEach(o => { const d = Math.hypot(o.cx - n.cx, o.cy - n.cy); if (d < 40 && Math.abs(o.w - n.w) < 60 && Math.abs(o.h - n.h) < 60) pairs.push({ n, o, d }); }));
+    const taken = new Set();
+    pairs.sort((a, c) => a.d - c.d).forEach(({ n, o }) => {
+      if (taken.has(n) || taken.has(o)) return;
+      taken.add(n); taken.add(o);
+      n.id = o.id; n.marks = o.marks ? o.marks.map(m => Object.assign({}, m, carry(o, n, m.u, m.v))) : null;
     });
-    // letters in reading order: top to bottom, left to right within a band
-    const top = p => p.cy - p.h / 2;
-    fresh.map((p, i) => i).sort((i, k) => (Math.abs(top(fresh[i]) - top(fresh[k])) < 60 ? fresh[i].cx - fresh[k].cx : top(fresh[i]) - top(fresh[k])))
-      .forEach((i, n) => { fresh[i].letter = String.fromCharCode(65 + (n % 26)); });
     blot.pieces = fresh;
+    letterPieces(blot);
     // relative exposure factors when file names did not say
     ch.forEach((r, k) => { r.factor = A.factors[k]; });
     return A;
@@ -504,20 +524,58 @@
       return row;
     });
   };
-  // re-run after the user changed which pictures belong to a membrane / their kind; keep names where rows match
-  App.reanalyze = function (blot) {
-    const old = App.S.rows.filter(r => r.blot === blot.id);
+  /* Re-run after the user changed which pictures belong to a membrane, their kind or their alignment. The rows
+   * stay as they are — boxes, lanes, figure columns, order, names: what the user arranged is not undone by a
+   * fresh detection. Each box is carried onto the piece now found under it (the same place on the membrane); a
+   * piece no longer found keeps the boxes on it. Lanes on a ladder lane found only now become marker lanes.
+   * A membrane without rows yet gets the rows detected (opt.fresh: always; the user asked to detect again). */
+  App.reanalyze = function (blot, opt) {
+    const rows = App.S.rows.filter(r => r.blot === blot.id);
+    const oldPcs = (blot.pieces || []).map(p => JSON.parse(JSON.stringify(p)));
     App.analyze(blot);
-    const fresh = App.rowsFromAnalysis(blot);
-    fresh.forEach(n => {
-      const o = old.find(o => o.segs.some(s => n.segs.some(t => t.piece === s.piece && Math.abs(t.vc - s.vc) < Math.max(12, t.b1 - t.b0))));
-      if (o) { n.name = o.name; n.hidden = o.hidden; n.id = o.id; }
-    });
-    const at = App.S.rows.findIndex(r => r.blot === blot.id);
-    App.S.rows = App.S.rows.filter(r => r.blot !== blot.id);
-    App.S.rows.splice(at < 0 ? App.S.rows.length : at, 0, ...fresh);
+    if (!App.analysis[blot.id]) { App.S.rows = App.S.rows.filter(r => r.blot !== blot.id); return; }
+    if (!rows.length || (opt && opt.fresh)) {
+      const fresh = App.rowsFromAnalysis(blot), at = App.S.rows.findIndex(r => r.blot === blot.id);
+      App.S.rows = App.S.rows.filter(r => r.blot !== blot.id);
+      App.S.rows.splice(at < 0 ? App.S.rows.length : at, 0, ...fresh);
+    } else carryRows(blot, oldPcs, rows);
     App.fitLanes(false);
   };
+  function carryRows(blot, oldPcs, rows) {
+    const pcs = blot.pieces;
+    const hadLadder = new Map(oldPcs.map(p => [p.id, (p.ladderUs || []).length > 0]));
+    rows.forEach(row => {
+      const out = [], before = App.segsState(row);
+      row.segs.forEach(sg => {
+        const op = oldPcs.find(p => p.id === sg.piece);
+        if (!op) return;
+        const [mx, my] = WB.toImg(pFrame(op), (sg.x0 + sg.x1) / 2, sg.vc);
+        let np = pcs.find(p => p.id === op.id) || (App.pieceAt(blot, mx, my, 0) || {}).pc;
+        // no piece there any more: the old one stays (its own marker bands; no automatic sizes)
+        if (!np) { np = Object.assign(JSON.parse(JSON.stringify(op)), { strip: -1 }); pcs.push(np); }
+        const at = (u, v) => carry(op, np, u, v), m = at((sg.x0 + sg.x1) / 2, sg.vc), du = m.u - (sg.x0 + sg.x1) / 2;
+        const t = Object.assign({}, sg, { piece: np.id, vc: m.v, x0: sg.x0 + du, x1: sg.x1 + du, lanes: sg.lanes.map(l => ({ u: at(l.u, sg.vc).u, r: l.r })) });
+        // a ladder lane found only now (a white-light picture added): the lanes on it are marker lanes
+        if (!hadLadder.get(op.id) && (np.ladderUs || []).length) {
+          const p = App.segPitch(t);
+          t.lanes.forEach(l => { if (l.r === 's' && App.roleAt(np, l.u, p) === 'm') l.r = 'm'; });
+        }
+        // two boxes of the row now on one piece: one box over both
+        const same = out.find(s => s.piece === np.id);
+        if (same) {
+          const p = App.segPitch(same);
+          t.lanes.forEach(l => { if (!same.lanes.some(k => Math.abs(k.u - l.u) < p * 0.3)) same.lanes.push(l); });
+          same.lanes.sort((a, c) => a.u - c.u);
+          same.x0 = Math.min(same.x0, t.x0); same.x1 = Math.max(same.x1, t.x1);
+        } else out.push(t);
+      });
+      row.segs = out;
+      if (out.length === before.length) App.keepJoined(row, out[0], before);
+      out.forEach(App.snapBox);
+    });
+    App.S.rows = App.S.rows.filter(r => r.blot !== blot.id || r.segs.length);
+    letterPieces(blot);
+  }
   // automatic ladder calibration of a membrane (all its pieces)
   App.calibFor = function (blot) {
     const A = App.analysis[blot.id];
@@ -969,7 +1027,7 @@
     return out;
   };
   // pictures changed (aligned again): everything computed from their pixels
-  App.clearCaches = () => { expoCache.clear(); rasterCache.clear(); thumbCache.clear(); };
+  App.clearCaches = () => { expoCache.clear(); rasterCache.clear(); thumbCache.clear(); peakCache.clear(); };
 
   /* ---------- adding, moving and stitching rows ---------- */
   App.pieceAt = function (b, x, y, pad) {
@@ -1093,19 +1151,80 @@
     pc.marks = pcal ? pcal.knots.filter(k => Math.abs(k.v) <= pc.h / 2).map(k => ({ u, v: k.v, kda: +Math.exp(k.lk).toPrecision(3) })) : [];
     return pc.marks;
   };
-  // a size suggestion for a new mark at v: the ladder size nearest to what the piece's sizes predict
+  // a size suggestion for a new mark at v: the ladder size nearest to what the piece's sizes predict, preferring
+  // one the piece has no mark for yet (when it is not much further off)
   App.suggestKda = function (b, pc, v) {
     const pcal = App.pieceCal(b, pc), k = pcal && WB.kdaAtK(pcal, v), lad = G.ProteinLadders.get(b.ladderId);
     if (!k) return null;
     if (!lad) return Math.round(k);
-    return lad.sizes.slice().sort((p, q) => Math.abs(Math.log(p / k)) - Math.abs(Math.log(q / k)))[0];
+    const taken = (pc.marks || []).map(m => m.kda), off = s => Math.abs(Math.log(s / k));
+    const free = lad.sizes.filter(s => !taken.some(t => Math.abs(Math.log(t / s)) < 0.01) && off(s) < 0.25);
+    return (free.length ? free : lad.sizes).slice().sort((p, q) => off(p) - off(q))[0];
   };
+  // the white-light picture a membrane's marker is read from
+  App.markerRec = b => (b && b.marker && App.images.get(b.marker)) || null;
+  // the lane a piece's marks sit on: their own, else the piece's (first) ladder lane
+  App.markLane = pc => { const ms = (pc.marks || []).map(m => m.u).sort((a, c) => a - c); return ms.length ? ms[ms.length >> 1] : App.ladderU(pc); };
+  /* dark bands down lane u of a piece in the white-light picture (piece frame v, top to bottom): where a mark
+   * snaps to. Darkness against the lane's own brightness around it (a closing over about ±24 px). */
+  const peakCache = new Map();
+  App.ladderPeaks = function (b, pc, u) {
+    const rec = App.markerRec(b);
+    if (!rec || !pc) return [];
+    const key = [rec.id, rec._alignKey || '', pc.cx, pc.cy, pc.angle, pc.w, pc.h, Math.round(u)].join('|');
+    if (peakCache.has(key)) return peakCache.get(key);
+    const F = pFrame(pc), hw = Math.max(5, Math.min(pc.pitch || 60, 160) * 0.28), v0 = -pc.h / 2 + 4, n = Math.max(0, Math.floor(pc.h - 8));
+    const prof = new Float32Array(n);
+    for (let k = 0; k < n; k++) {
+      let s = 0, c = 0;
+      for (let du = -hw; du <= hw; du += 2) { const [x, y] = WB.toImg(F, u + du, v0 + k), val = WB.bilinear(rec.img, x, y); if (!isNaN(val)) { s += val; c++; } }
+      prof[k] = c ? s / c : 0;
+    }
+    const E = G.Engine, sm = E.gaussSmooth(prof, 1.2), r = 24, bg = E.slide(E.slide(sm, r, true), r, false), dark = new Float32Array(n);
+    let mx = 0; for (let k = 0; k < n; k++) { dark[k] = Math.max(0, bg[k] - sm[k]); mx = Math.max(mx, dark[k]); }
+    const out = mx > 0 ? E.findPeaks(dark, 5, mx * 0.12).map(p => ({ v: v0 + p.i, prom: p.prom / mx })).sort((a, c) => a.v - c.v) : [];
+    if (peakCache.size > 200) peakCache.clear();
+    peakCache.set(key, out);
+    return out;
+  };
+  // the dark band nearest to v within tol (piece frame px), else v itself
+  App.snapMarkV = function (b, pc, u, v, tol) {
+    let best = null;
+    App.ladderPeaks(b, pc, u).forEach(p => { const d = Math.abs(p.v - v); if (d <= tol && (!best || d < best.d)) best = { v: p.v, d }; });
+    return best ? best.v : v;
+  };
+  /* a piece's marker for the panel: 'manual' (marks set or confirmed by hand; 'few': one mark and no slope to
+   * size with), 'auto' (read automatically, not checked yet), 'none'; and the sizes it shows */
+  App.markInfo = function (b, pc) {
+    if (pc.marks && pc.marks.length) {
+      const ks = pc.marks.filter(m => m.kda > 0).map(m => m.kda).sort((a, c) => c - a), pcal = App.pieceCal(b, pc);
+      return { state: ks.length >= 2 || (ks.length && pcal && pcal.c < 0) ? 'manual' : 'few', ks };
+    }
+    const ks = App.pieceTicks(b, pc).map(t => t.k);
+    return ks.length ? { state: 'auto', ks } : { state: 'none', ks: [] };
+  };
+  // marks of every piece of a membrane back to the automatic reading
+  App.autoMarks = b => (b.pieces || []).forEach(pc => { pc.marks = null; });
+  /* the sizes read automatically, checked by the user: every such piece's marks set by hand from now on (the
+   * bands seen; a piece where none was seen keeps the sizes as shown). The number of pieces confirmed. */
+  App.confirmMarks = function (b) {
+    let n = 0;
+    (b.pieces || []).forEach(pc => {
+      if (App.markInfo(b, pc).state !== 'auto') return;
+      const ticks = App.pieceTicks(b, pc), u = App.ladderU(pc);
+      if (!App.manualMarks(b, pc).length) pc.marks = ticks.map(t => ({ u, v: t.v, kda: t.k }));
+      n++;
+    });
+    return n;
+  };
+  // pieces whose sizes the figure uses (a shown row runs across them)
+  App.usedPieces = b => (b.pieces || []).filter(pc => App.S.rows.some(r => !r.hidden && r.blot === b.id && r.segs.some(s => s.piece === pc.id)));
 
   /* ---------- membranes: moving pictures between them ---------- */
   App.moveImage = function (imgId, toBlotId) {
     const S = App.S, from = S.blots.find(b => b.images.includes(imgId));
     let to = toBlotId === 'new' ? null : App.blot(toBlotId);
-    if (!to) { to = { id: uid('b'), name: '', images: [], marker: null, ladderId: null, ladderAuto: true, pieces: [] }; S.blots.push(to); }
+    if (!to) { to = newBlot([], null); S.blots.push(to); }
     if (from === to) return;
     if (from) { from.images = from.images.filter(i => i !== imgId); if (from.marker === imgId) from.marker = null; }
     to.images.push(imgId);
@@ -1165,7 +1284,7 @@
     blotsUsed.forEach(bid => {
       const b = App.blot(bid);
       if (S.style.showMW && !vis.some(r => r.blot === bid && App.rowPieces(r).some(pc => App.pieceCal(b, pc)))) {
-        warn.push(`${App.blotName(b)}${b.marker ? '的 Marker 条带没能自动识别' : '没有 Marker 图'}，未标 kDa：可在中间膜图上方点"标 Marker"手动标出 Marker 条带`);
+        warn.push(`${App.blotName(b)}${b.marker ? '的 Marker 条带没能自动识别' : '没有 Marker 图'}，未标 kDa：在左侧第 2 步点"在白光图上核对 / 标注 Marker"，标出 2 条 Marker 带`);
       }
       (b.pieces || []).forEach(pc => {
         const ms = (pc.marks || []).filter(m => m.kda > 0).sort((p, q) => p.v - q.v);

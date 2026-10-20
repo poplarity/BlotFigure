@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>ladderlane</title></head>
+<body><pre id="out">running</pre>
+<script src="../js/tiff.js"></script>
+<script src="../js/engine.js"></script>
+<script src="../js/wbladders.js"></script>
+<script src="../js/wbengine.js"></script>
+<script src="../js/wbdemo.js"></script>
+<script>
+/* Ladder lane in the white-light photo, checked against the exposures: synthetic cut membranes whose strongly
+ * loaded proteins darken the membrane in white light too (dark marks in every sample lane at their heights),
+ * with a fainter ladder. The ladder lane must still be the one found, and the sizes right.
+ * Title: LADDER {fails, out}; each case also run without the check against the exposures, for comparison. */
+(async () => {
+  const out = []; let fails = 0;
+  const say = () => { document.title = 'LADDER ' + JSON.stringify({ fails, out }); document.getElementById('out').textContent = out.join('\n'); };
+  const cases = [
+    ['plain', {}],
+    ['GAPDH dark in white light', { burnt: ['GAPDH'] }],
+    ['3 proteins dark, ladder 40%', { burnt: ['GAPDH', 'mTOR-like', 'p-ERK1/2'], ladderDark: 0.4 }],
+    ['3 proteins dark, ladder 25%', { burnt: ['GAPDH', 'mTOR-like', 'p-ERK1/2'], ladderDark: 0.25 }],
+    ['GAPDH + mTOR dark, ladder 30%', { burnt: ['GAPDH', 'mTOR-like'], ladderDark: 0.3 }],
+    ['3 proteins dark, ladder 18%', { burnt: ['GAPDH', 'mTOR-like', 'p-ERK1/2'], ladderDark: 0.18 }],
+    ['3 proteins dark, ladder 12%', { burnt: ['GAPDH', 'mTOR-like', 'p-ERK1/2'], ladderDark: 0.12 }]
+  ];
+  try {
+    for (const [name, extra] of cases) {
+      const ses = WBDemo.cutWith(extra), im = x => ({ w: x.width, h: x.height, data: x.data });
+      const chemis = ses.images.filter(x => !/Marker/.test(x.name)).map(x => ({ id: x.name, img: im(x), exposure: x.exposure }));
+      const mk = ses.images.find(x => /Marker/.test(x.name)), marker = { id: mk.name, img: im(mk) };
+      // truth: the ladder lane's x on each strip (image coordinates), and the sizes of the rows
+      const lx = ses.ladderTruth.map(t => t.xy[0]), ladX = lx.reduce((a, b) => a + b, 0) / lx.length;
+      [false, true].forEach(off => {
+        const A = WB.analyzeSession(chemis, marker, { ladderId: 'pr26619', noChemiCheck: off });
+        const got = A.ladderStrips.map((l, si) => { const s = A.strips[si]; return l ? l.lanes.map(L => Math.round(WB.toImg(WB.frame(s.cx, s.cy, s.angle), L.u, 0)[0])) : []; });
+        const wrong = got.flat().filter(x => Math.abs(x - ladX) > ses.opts.pitch * 0.35).length, found = got.filter(g => g.some(x => Math.abs(x - ladX) < ses.opts.pitch * 0.35)).length;
+        const kd = ses.truth.map(t => { const r = A.rows.slice().sort((a, b) => Math.abs(a.oy - t.cy) - Math.abs(b.oy - t.cy))[0]; return `${t.kda}->${r && r.kda ? r.kda.toFixed(0) : '-'}`; });
+        const kOk = ses.truth.every(t => { const r = A.rows.slice().sort((a, b) => Math.abs(a.oy - t.cy) - Math.abs(b.oy - t.cy))[0]; return r && r.kda && Math.abs(Math.log(r.kda / t.kda)) < 0.12; });
+        const ok = wrong === 0 && found >= 2 && kOk;
+        if (!off && !ok) fails++;
+        out.push(`${ok ? 'ok  ' : off ? '--  ' : 'FAIL'} ${name}${off ? ' (no check against exposures)' : ''}: ladder lane at x≈${Math.round(ladX)}, found per strip ${JSON.stringify(got)} | sizes ${kd.join(' ')}`);
+        say();
+      });
+    }
+  } catch (e) { out.push('ERROR ' + (e.stack || e)); fails++; }
+  say();
+})();
+</script></body></html>

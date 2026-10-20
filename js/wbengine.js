@@ -246,11 +246,15 @@
   }
 
   /* ---------- strips from the marker photo ---------- */
-  function findStrips(marker, fIn) {
+  function findStrips(marker, fIn, opts) {
     // pieces cut from one membrane are often put back with gaps of only a few pixels: work near full
     // resolution, split thin bridges by erosion, then grow the seeds back over the membrane mask
     const f = Math.max(1, Math.ceil(Math.max(marker.w, marker.h) / 1200));
     const sm = down(marker, f), { w, h } = sm;
+    // where the exposures have a band centred on a line (opts.band(x, y, horizontal), full-resolution photo
+    // coordinates): membrane for sure — a heavily loaded protein can darken the membrane in white light like the
+    // gap between two pieces
+    const bandAt = opts && opts.band ? (x, y, horizontal) => opts.band((x + 0.5) * f, (y + 0.5) * f, horizontal) : null;
     const thr = otsu(sm.data, 1);
     // the gap between pieces is dark but not as dark as the tray: use a threshold between tray and membrane
     const [pm] = percentiles(sm.data.filter((v, i) => v > thr && (i % 3 === 0)), [50], 1);
@@ -310,6 +314,15 @@
           const lineAt = s => a + b * s;
           const mark = s => { for (let dt = -1; dt <= 1; dt++) { const t = Math.round(lineAt(s)) + dt; if (t < 0 || t >= L1 || s < 0 || s >= L2) continue; cut[horizontal ? t * w + s : s * w + t] = 1; } };
           const sA = Math.round(chain[0].s), sB = Math.round(chain[chain.length - 1].s);
+          // a dark line along the middle of a band of the exposures for most of its length is that band, not a seam
+          if (bandAt) {
+            let on = 0;
+            const runs = []; let run = 0;
+            for (let s = sA; s <= sB; s++) { const t = lineAt(s), b2 = horizontal ? bandAt(s, t, true) : bandAt(t, s, false); if (b2) { on++; run++; } else if (run) { runs.push(run * f); run = 0; } }
+            if (run) runs.push(run * f);
+            if (findStrips.vetoLog) findStrips.vetoLog.push({ hz: horizontal, s: [sA * f, sB * f], t: Math.round(lineAt((sA + sB) / 2) * f), on: +(on / (sB - sA + 1)).toFixed(2), runs: runs.join(','), veto: on > 0.4 * (sB - sA + 1) });
+            if (on > 0.4 * (sB - sA + 1)) return;
+          }
           for (let s = sA; s <= sB; s++) mark(s);
           for (const dir of [-1, 1]) {
             let miss = 0;
@@ -815,7 +828,21 @@
     // --- strips from the marker photo. A photo taken elsewhere (marker.T: grid -> photo, marker.pieces: its
     // pieces' own) is read as taken — resampling would blur the thin cuts between pieces — and its strips are
     // mapped onto the grid; ladder lanes and bands are found in each strip's own frame, which carries over.
-    const stripsRaw = marker ? findStrips(marker.img, f) : [];
+    // (the exposures' bands, a little grown, mark where the membrane surely is: a band that darkens the membrane in
+    // white light is no gap between pieces)
+    const nz0 = mad(comp, 3), bandM = new Float32Array(w * h);
+    for (let i = 0; i < w * h; i++) bandM[i] = comp[i] > nz0.med + 12 * nz0.sigma ? 1 : 0;
+    const bandG = lineOp(lineOp(bandM, w, h, 2, true, true), w, h, 2, true, false), toGrid = marker && marker.T ? regInverse(marker.T) : null;
+    // a band centred on a line at (x, y): on the grown band mask, and the signal there not below that half a band
+    // off the line on either side (the smear of a strong band nearby falls away from it on one side)
+    const cAt = (gx, gy) => { const X = Math.floor(gx / f), Y = Math.floor(gy / f); return X >= 0 && Y >= 0 && X < w && Y < h ? comp[Y * w + X] : 0; };
+    const band = (x, y, horizontal) => {
+      const [gx, gy] = toGrid ? regPoint(toGrid, W, Himg, x, y) : [x, y], i = Math.floor(gy / f) * w + Math.floor(gx / f);
+      if (!(gx >= 0 && gy >= 0 && gx < w * f && gy < h * f && bandG[i] > 0.5)) return false;
+      const d = 4 * f, c = cAt(gx, gy), m = horizontal ? Math.max(cAt(gx, gy - d), cAt(gx, gy + d)) : Math.max(cAt(gx - d, gy), cAt(gx + d, gy));
+      return c >= 0.9 * m;
+    };
+    const stripsRaw = marker ? findStrips(marker.img, f, opt.noChemiCheck ? null : { band }) : [];
     const strips = marker && marker.T ? stripsRaw.map(s => {
       const g = regFrame(regInverse(marker.T), W, Himg, s);
       const own = (marker.pieces || []).find(p => { const [u, v] = toFrame(frame(p.cx, p.cy, p.angle), g.cx, g.cy); return Math.abs(u) <= p.w / 2 && Math.abs(v) <= p.h / 2; });
@@ -854,24 +881,31 @@
     }
     if (!(pitchDs > 0)) pitchDs = 40 / f;
     const pitch = pitchDs * f;
-    // --- ladder lane + bands from the marker photo, per strip
+    // --- ladder lane + bands from the marker photo, per strip. A dark mark in the white-light photo that a chemi
+    // band explains — the band of a sample row, with bands in other lanes at that height too (a heavily loaded
+    // protein can darken the membrane) — counts little; a ladder lane carries marks no sample row explains
+    // (when the ladder shows in the exposures as well, it is a lane of its own there, not a row across lanes).
+    const explained = (si, u, v) => rowsRaw.some(r => regions[r.region].strip === si && v / f >= r.v0 - 3 && v / f <= r.v1 + 3 &&
+      r.peaks.some(p => Math.abs(p - u / f) < pitchDs * 0.35) && r.peaks.filter(p => Math.abs(p - u / f) > pitchDs * 0.6).length >= 2);
     let ladderStrips = [];
     if (marker && strips.length) {
-      ladderStrips = findLadders(marker.img, stripsRaw, pitch);
+      ladderStrips = findLadders(marker.img, stripsRaw, pitch, opt.noChemiCheck ? {} : { explained });     // (tests: without)
       if (!ladderStrips.some(l => l && l.bands.length)) notes.push('Marker 图中没有找到 Ladder 条带');
     }
-    // --- ladder choice + calibration (shared slope across strips)
+    // --- ladder choice + calibration (shared slope across strips): every ladder ranked by how well it fits; the
+    // one the user named (opt.ladderId) is used whenever it fits at all
     let calib = null, ladderId = opt.ladderId || null, ladderRank = [];
     const stripBands = ladderStrips.map(l => (l ? l.bands : []));
     if (stripBands.some(b => b.length)) {
-      const cands = (opt.ladderId ? [G.ProteinLadders.get(opt.ladderId)] : G.ProteinLadders.all().filter(l => !l.chemi)).filter(Boolean);
+      const named = opt.ladderId && G.ProteinLadders.get(opt.ladderId);
+      const cands = G.ProteinLadders.all().filter(l => !l.chemi || l === named);
       ladderRank = cands.map(l => {
         const cal = calibrate(ladderStrips, strips, l.sizes, Himg);
-        return cal && { id: l.id, cal, q: cal.q + (l.id === opt.prefLadder ? -0.01 : 0), miss: cal.miss };
+        return cal && { id: l.id, cal, q: cal.q, miss: cal.miss };
       }).filter(Boolean).sort((a, b) => a.q - b.q);
       // fewer than 3 ladder bands cannot pin down a size curve; neither can moved pieces with 2 bands each
       // (each piece has its own offset, so which 2 sizes they are stays ambiguous)
-      const top = ladderRank[0];
+      const top = named ? ladderRank.find(r => r.id === named.id) : ladderRank[0];
       if (top && top.cal.pinned) { calib = top.cal; ladderId = top.id; }
       else if (top && top.cal.npts >= 3) notes.push('各条膜上可见的 Ladder 条带都不足 3 条，且膜条不在原位，分子量无法可靠确定，请手动标注');
       else if (top) notes.push('Marker 图中可用的 Ladder 条带太少（少于 3 条），无法标注分子量');
@@ -1020,7 +1054,8 @@
       r.ks = [...new Set(r.segs.flatMap(sg => sg.ms.map(m => colOf(pieces[sg.region], m)).filter(c => c != null)))].sort((a, b) => a - b);
     });
     out.sort((a, b) => a.oy - b.oy);
-    return { strips, regions, pieces, rows: out, pitch, factors, calib, ladderId, ladderRank: ladderRank.map(x => ({ id: x.id, q: x.q, rms: x.cal.rmsLn, miss: x.miss })), ladderStrips, notes, f };
+    const autoLadderId = ladderRank[0] && ladderRank[0].cal.pinned ? ladderRank[0].id : null;     // (what the bands alone suggest)
+    return { strips, regions, pieces, rows: out, pitch, factors, calib, ladderId, autoLadderId, ladderRank: ladderRank.map(x => ({ id: x.id, q: x.q, rms: x.cal.rmsLn, miss: x.miss })), ladderStrips, notes, f };
   }
 
   /* rows (one per protein) in a straightened region window, plus lane peaks along each row.
@@ -1109,7 +1144,8 @@
    * the x positions where such marks repeat (across pieces when they were put back in place; people
    * often cut right through the ladder lane, so one piece may hold only part of it).
    * Returns per strip {uStrip, bands: [v...], lanes: [{u, bands}]} in strip-frame full-res units. */
-  function findLadders(img, strips, pitch) {
+  function findLadders(img, strips, pitch, opts) {
+    const explained = (opts && opts.explained) || (() => false);
     const f = Math.max(1, Math.ceil(Math.max(img.w, img.h) / 1200));
     const sm = down(img, f), { w, h } = sm, d = sm.data, P = pitch / f;
     // background = closing with a wide, short rectangle: removes dark marks narrower than ~1 lane
@@ -1141,7 +1177,9 @@
       const si = inside[Math.round(c.sy / c.n) * w + Math.round(c.sx / c.n)] - 1;
       if (si < 0) return;
       let m = 0; for (let y = c.y0; y <= c.y1; y++) for (let x = c.x0; x <= c.x1; x++) if (lab[y * w + x] === c.id) m += dark[y * w + x];
-      blobs.push({ x: (c.sx / c.n + 0.5) * f, y: (c.sy / c.n + 0.5) * f, si, mass: m });
+      const x = (c.sx / c.n + 0.5) * f, y = (c.sy / c.n + 0.5) * f, [bu, bv] = toFrame(Fs[si], x, y);
+      // (a mark where a sample row has its band counts a quarter)
+      blobs.push({ x, y, si, mass: m, wt: explained(si, bu, bv) ? 0.25 : 1 });
     });
     // columns of marks (global x)
     blobs.sort((a, b) => a.x - b.x);
@@ -1150,10 +1188,11 @@
       const c = cols.find(c => Math.abs(c.x - b.x) < pitch * 0.3);
       if (c) { c.items.push(b); c.x = c.items.reduce((s, q2) => s + q2.x, 0) / c.items.length; } else cols.push({ x: b.x, items: [b] });
     });
+    cols.forEach(c => { c.n = c.items.reduce((s, b) => s + b.wt, 0); });
     const multi = strips.length > 1;
-    const maxN = Math.max(0, ...cols.map(c => c.items.length));
+    const maxN = Math.max(0, ...cols.map(c => c.n));
     // a real ladder lane collects marks in most pieces; scratches and edge notches collect a few
-    const ladderCols = cols.filter(c => c.items.length >= 2 && c.items.length >= maxN * 0.5 && (!multi || new Set(c.items.map(b => b.si)).size >= 2 || c.items.length >= 3));
+    const ladderCols = cols.filter(c => c.n >= 2 && c.n >= maxN * 0.5 && (!multi || new Set(c.items.map(b => b.si)).size >= 2 || c.n >= 3));
     findLadders.debug = { thr, blobs: blobs.length, cols: cols.map(c => `${Math.round(c.x)}:${c.items.length}`), own: [] };
     return strips.map((s, si) => {
       const F = Fs[si];
@@ -1168,7 +1207,7 @@
       // or 2 marks when that is the only such column and it sits within 1.5 lanes of a piece end
       if (!lanes.some(l => l.bands.length)) {
         const own = [];
-        blobs.filter(b => b.si === si).map(b => toFrame(F, b.x, b.y)).sort((a, b) => a[0] - b[0]).forEach(([u, v]) => {
+        blobs.filter(b => b.si === si && b.wt === 1).map(b => toFrame(F, b.x, b.y)).sort((a, b) => a[0] - b[0]).forEach(([u, v]) => {
           const c = own.find(c => Math.abs(c.u - u) < pitch * 0.3);
           if (c) { c.vs.push(v); c.us.push(u); c.u = c.us.reduce((a, b) => a + b, 0) / c.us.length; } else own.push({ u, us: [u], vs: [v] });
         });

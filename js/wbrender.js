@@ -70,7 +70,7 @@
         const t = ed(`data-edit="rowname" data-row="${row.id}"`, text(nm, W + 3, y + h / 2 + pt * 0.35, pt, 'start', row.name ? '' : ph));
         els.push(t); maxRight = Math.max(maxRight, 3 + measure(nm, pt));
       }
-      if (!row.name && P && kdaHint) els.push(text(`≈${Math.round(kdaHint)} kDa`, W + 3, y + h / 2 + pt * 1.35, pt * 0.8, 'start', ph));
+      if (!row.name && P && kdaHint) { const t = `≈${Math.round(kdaHint)} kDa`; els.push(text(t, W + 3, y + h / 2 + pt * 1.35, pt * 0.8, 'start', ph)); maxRight = Math.max(maxRight, 3 + measure(t, pt * 0.8)); }
       // kDa ticks on the left, from the leftmost piece of the row that has marker sizes
       const b = App.blot(row.blot);
       const tsg = st.showMW ? row.segs.find(sg => App.pieceTicks(b, App.piece(b, sg.piece)).length) : null;

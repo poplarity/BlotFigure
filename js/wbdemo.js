@@ -51,7 +51,13 @@
           if (s) for (const b of ladderBands) {
             if (b.y < s.y || b.y > s.y + s.h) continue;
             const dx = (mx - b.x) / (o.laneW / 2), dy = (my - b.y) / 4.5;
-            if (Math.abs(dx) < 1.2) v -= 0.42 * Math.exp(-dy * dy) / (1 + Math.exp((Math.abs(dx) - 1) * 9));
+            if (Math.abs(dx) < 1.2) v -= 0.42 * (o.ladderDark || 1) * Math.exp(-dy * dy) / (1 + Math.exp((Math.abs(dx) - 1) * 9));
+          }
+          // (o.burnt: heavily loaded proteins whose bands darken the membrane in white light too)
+          if (s && o.burnt) for (const b of bands) {
+            if (!o.burnt.includes(b.p.name) || Math.abs(my - b.y) > b.thick * 3 || Math.abs(mx - b.x) > o.laneW) continue;
+            const dx = (mx - b.x) / (o.laneW / 2), dy = (my - b.y) / (b.thick / 2.2);
+            v -= 0.3 * Math.min(1, b.amt / 8) * Math.exp(-dy * dy) / (1 + Math.exp((Math.abs(dx) - 1) * 7));
           }
         } else {
           // chemi: dark tray, faint membrane glow, slow gradient
@@ -156,5 +162,16 @@
   }
   function files(session) { return session.images.map(im => ({ name: im.name, buffer: encodeTiff16(im) })); }
 
-  G.WBDemo = { cutSession, scatterSession, movedSession, encodeTiff16, files, LADDER };
+  // the cut membrane again, with options (tests): e.g. {burnt: ['GAPDH'], ladderDark: 0.4}
+  const cutWith = extra => makeSession(Object.assign({
+    prefix: 'Blot1', seed: 3,
+    strips: [{ x: 230, y: 70, w: 1000, h: 300, dx: 0, dy: -10, angle: 0.6 }, { x: 230, y: 370, w: 1000, h: 250, dx: 4, dy: 8, angle: -0.4 }, { x: 230, y: 620, w: 1000, h: 420, dx: -3, dy: 28, angle: 0.3 }],
+    proteins: [
+      { name: 'mTOR-like', kda: 110, thick: 11, amounts: amt(9, [1, 1.1, 0.9, 0.4, 0.3, 1, 1.2, 0.5, 0.35]) },
+      { name: 'p-ERK1/2', kda: 50, thick: 9, doublet: true, amounts: amt(1.6, [0.15, 1, 1.6, 0.2, 0.1, 1.1, 1.8, 0.25, 0.1]) },
+      { name: 'GAPDH', kda: 30, thick: 12, amounts: amt(42, [1, 1, 0.95, 1.05, 1, 1, 0.98, 1.02, 1]) }
+    ]
+  }, extra));
+
+  G.WBDemo = { cutSession, scatterSession, movedSession, cutWith, encodeTiff16, files, LADDER };
 })(window);
