@@ -28,7 +28,7 @@ cd BlotFigure
 | `&border=1` | 打开"条带加边框" |
 | `&selpiece=B` | 选中的行跨几条膜条时，泳道工具对准膜条 B 上的那个框（需同时用 `&sel=`） |
 | `&zoomsel=1` | 膜图放大到选中的行（截图用） |
-| `&mode=marks` / `&mode=addrow` | 进入"核对 / 标注 Marker"（`&markpiece=D`：放大到膜条 D 的 Marker 道） / 框选添加模式 |
+| `&mode=marks` / `&mode=addrow` / `&mode=pieces` | 进入"核对 / 标注 Marker"（`&markpiece=D`：放大到膜条 D 的 Marker 道） / 框选添加 / 调整膜条模式 |
 | `&imgs=1` | 展开左侧的图片缩略图（默认收起，只显示张数） |
 | `&tour=1` | 脚本运行时也显示首次打开的三栏引导（平时只在 `localStorage` 没有 `blotfig.tour` 时显示一次） |
 | `&nochemi=1` | 认膜条切缝、找 Marker 道时不对照曝光图（对比用） |
@@ -38,7 +38,7 @@ cd BlotFigure
 | `&noalign=1` / `&dbg=1` | 不做对齐（各张图保持原样） / 标题 JSON 的 `dbg` 里记下认膜时的配准过程 |
 | `&popimg=12` / `&alignimg=12&alignby=dx,dy,度&alignhold=1` | 打开名字以 12 开头的图的 ⋯ 菜单 / 进入它的手动对齐并拖动（`alignhold` 停在拖动中，截图用） |
 | `&scrollto=secRows` | 把左侧面板滚到某个元素（截图用；`&sel=` 选中的行会自动滚到能看见） |
-| `&scenario=…` | 脚本化地跑一遍编辑功能，每步状态记在标题 JSON 的 `scen` 里（每行：`膜条:起始列:泳道角色` 和成图列）：`lanes` 框的缩放、框内重新识别、均分、加减/切换泳道、挪列、拼接行跟随；`drag` 用鼠标/键盘事件在膜图上拖角柄、拖竖线、双击加道、Delete、移动框、框选添加；`detect` 每行的框在每张曝光里只按框内像素识别的结果（原框 t、整条膜条宽的框 l）；`stitch` 拆开与并成一行（`App.mergeRows`，叠放的膜条、同一膜条的两行应被拒绝）；`arrange` 用鼠标事件在成图上排列：上下拖行、拖到另一行上并排、按膜条左右拖（Alt 只挪一个框）、拖过第 1 列补列、拖标签、列表里拖、Alt+↑↓；`realign` 手动对齐曝光 12：拖动、[ ] 旋转、完成、撤销/重做、不对齐、恢复自动（每步记下对齐参数和像素签名）；`kind` 先改一个框和行名，再把 09 改成白光又改回、01 改成曝光图又改回、14 移到新膜又移回、重新对齐、移除 07，每步记下所有框（膜条字母、位置、范围、列）——调过的东西都应保持不变（加 `&dbgpcs=1` 还记下膜条和每条候选切缝的判定）；`marks` / `picker` 手动 Marker 的数据层；`mark2` 用鼠标和键盘标 Marker：点膜条标签放大、拖刻度吸附（Alt 不吸附）、撤销、点 Marker 道加一条再"不加了"（膜条应仍是自动）、输入分子量、从选择框删除、点虚线的推算刻度、↑↓、Delete、"全部确认"、"全部恢复自动"、选型号后记住；`focus` 在左侧列表里输入蛋白名（输入框不应丢焦点，回车跳到下一行）。`lanes` `drag` `detect` `stitch` `arrange` `realign` `kind` 用真实样例（膜条 A–E），`marks` `picker` `mark2` `focus` 用示例（`demo=1`） |
+| `&scenario=…` | 脚本化地跑一遍编辑功能，每步状态记在标题 JSON 的 `scen` 里（每行：`膜条:起始列:泳道角色` 和成图列）：`lanes` 框的缩放、框内重新识别、均分、加减/切换泳道、挪列、拼接行跟随；`drag` 用鼠标/键盘事件在膜图上拖角柄、拖竖线、双击加道、Delete、移动框、框选添加；`detect` 每行的框在每张曝光里只按框内像素识别的结果（原框 t、整条膜条宽的框 l）；`stitch` 拆开与并成一行（`App.mergeRows`，叠放的膜条、同一膜条的两行应被拒绝）；`arrange` 用鼠标事件在成图上排列：上下拖行、拖到另一行上并排、按膜条左右拖（Alt 只挪一个框）、拖过第 1 列补列、拖标签、列表里拖、Alt+↑↓；`realign` 手动对齐曝光 12：拖动、[ ] 旋转、完成、撤销/重做、不对齐、恢复自动（每步记下对齐参数和像素签名）；`kind` 先改一个框和行名，再把 09 改成白光又改回、01 改成曝光图又改回、14 移到新膜又移回、重新对齐、移除 07，每步记下所有框（膜条字母、位置、范围、列）——调过的东西都应保持不变（加 `&dbgpcs=1` 还记下膜条和每条候选切缝的判定）；`marks` / `picker` 手动 Marker 的数据层；`mark2` 用鼠标和键盘标 Marker：点膜条标签放大、拖刻度吸附（Alt 不吸附）、撤销、点 Marker 道加一条再"不加了"（膜条应仍是自动）、输入分子量、从选择框删除、点虚线的推算刻度、↑↓、Delete、"全部确认"、"全部恢复自动"、选型号后记住；`focus` 在左侧列表里输入蛋白名（输入框不应丢焦点，回车跳到下一行）；`edit2` 在 C、D 两条膜条之间的缝上拖出一个框（成图应正好是框住的部分）、把它拖到 D 上（归到 D）、拖最右一条泳道线（中间均匀排开；Alt 只动这一条）、"首尾对齐"多一道，再调整膜条：C 右移、D 下边上移并旋转、删掉 E、画一条新的、应用，撤销 / 重做；`proj` 保存项目再打开，所有行、刻度、显示范围应与之前完全一样；`perf` 拖一个框的右边 20 次，记下每次鼠标移动和刷新成图的耗时（`window.__perfRun` 可以在性能分析器下再跑一遍）。`lanes` `drag` `detect` `stitch` `arrange` `realign` `kind` `edit2` `proj` `perf` 用真实样例（膜条 A–E），`marks` `picker` `mark2` `focus` 用示例（`demo=1`） |
 
 载入完成后页面标题变成 `READY {...}`，里面是各张图的对齐（`align`：`grid` 网格基准图、`marker` 读膜条和 Ladder 的白光图、每张挪动过的图 `名=角度,tx,ty+单独对齐的膜条/依据`）、膜、膜条（`pieces`：分析得到的泳道格点与 Ladder 位置 `lad`）、行（`rowsGeo`：每个框 `膜条:vc:起始列:泳道角色`、框的范围 `box`、成图列 `cols`）、曝光、显示范围（`levels`）、警告等状态的 JSON，方便脚本检查。
 
@@ -49,6 +49,7 @@ cd BlotFigure
 | `engine.html` | 算法自测：合成膜带真值对照（行位置、角度、泳道数、kDa、曝光选择），改了 `wbengine.js` 必跑 |
 | `boxlanes.html` | `WB.detectBoxLanes`（框内识别泳道）自测：15 种合成框，每种写明应识别出的泳道，标题里 `fails` 应为 0，改了框内识别必跑 |
 | `register.html` 或 `register.html?dir=<目录URL>&names=a.tif,...` | 对齐自测，标题 `REG {fails}`：合成膜平移、旋转后找回（含一道泳道的周期性误配）、后一次拍摄中整张膜挪动且一条膜条又单独挪动（每条膜条各自找回）、另一张膜对不上；接真实样例时：白光图分成三个位置、曝光图和同次拍摄的白光图一致、复制图挪动后找回、膜条各自挪动后单独找回 |
+| `classify.html` 或 `classify.html?dir=&names=&kinds=m,c,…` | 曝光图 / 白光图的自动区分（不看文件名），原样以及压到 1/4、1/10 灰度范围时各判一次，标题 `CLASSIFY {fails}`；不带参数用示例膜 |
 | `ladderlane.html` | Marker 道识别自测，标题 `LADDER {fails}`：合成膜在白光图里把样品条带画黑、Marker 带变浅（40/25/18/12%），每种情况对照曝光图和不对照各跑一遍，检查 Marker 道的位置和各行的 kDa；改了 `findStrips` / `findLadders` 必跑 |
 | `register2.html?dir=&names=` | 曝光图两两对齐、曝光图按膜的轮廓对白光图（跨模态，不可靠，只作参考） |
 | `glow.html?dir=&names=` | 画出每张图对齐时比较的特征（曝光：条带；白光：膜的边缘和 Ladder）和曝光图里膜的底光 |
@@ -64,7 +65,7 @@ msedge --headless=new --disable-gpu --user-data-dir=$env:TEMP\wb_dbg --allow-fil
   --virtual-time-budget=400000 --dump-dom "file:///.../BlotFigure/test/engine.html" > out.html
 ```
 
-注意：无界面模式下 `alert()` 会卡住；`File.arrayBuffer()` 也会卡，所以调试入口都用 `{name, buffer}` 载入。每次运行用一个新的 `--user-data-dir`：页面在 `localStorage` 里记着上次选的 Marker 型号（`blotfig.ladder`）、看过引导（`blotfig.tour`）、图片缩略图展开与否（`blotfig.imgs`），沿用旧目录会改变结果。
+注意：无界面模式下 `alert()` 会卡住；`File.arrayBuffer()` 也会卡，所以调试入口都用 `{name, buffer}` 载入。`--virtual-time-budget` 下时钟是虚拟的：`performance.now()` 量不出耗时，gzip 流（保存项目）也走不完，这类检查（`proj`、`perf`）用 Playwright 在真实时间里跑，例如借 GelFigure 的 `node_modules`：`chromium.launch({ args: ['--allow-file-access-from-files'] })`，打开带参数的页面，等标题变成 `READY`。每次运行用一个新的 `--user-data-dir`：页面在 `localStorage` 里记着上次选的 Marker 型号（`blotfig.ladder`）、看过引导（`blotfig.tour`）、图片缩略图展开与否（`blotfig.imgs`），沿用旧目录会改变结果。
 
 ## 数据模型（每个框有自己的泳道）
 
@@ -75,6 +76,12 @@ msedge --headless=new --disable-gpu --user-data-dir=$env:TEMP\wb_dbg --allow-fil
 - 排列（成图怎么摆）和识别（每条膜条里有什么）分开：成图从上到下就是 `S.rows` 的顺序（`App.moveRow` / `moveRowBy`）；左右位置是每个框的 `c0`（`App.shiftAlign` 默认挪这条膜条上的所有框，因为它们共用泳道）；挪到第 1 列以左时 `App.makeRoom` 在左边补列（泳道名、条件、分组、范围一起挪）；`App.mergeRows` 把两行并成一行（不同膜、同一膜条、上下叠放的膜条都拒绝）。
 - `pc.marks`（手动 Marker 刻度 `{u, v, kda}`）存在时替代这条膜条的自动 Ladder 标定（`App.pieceCal`）。`null` = 用自动读出的（界面上是"待核对"的建议）；用户一动这条膜条的刻度（拖、加、改、删），`App.manualMarks` 先把自动读出的条带变成刻度再改；"全部确认"（`App.confirmMarks`）把还是自动的膜条照样定下来。`App.markInfo` 给出每条膜条的状态（`manual` 已确认 / `auto` 待核对 / `few` 只有 1 条且没有斜率 / `none`）；顶栏和第 2 步只数成图用到的膜条（`App.usedPieces`）。刻度吸附到白光图里这条 Marker 道的深色带（`App.ladderPeaks` / `App.snapMarkV`）。
 - Marker 型号：`blot.ladderId`，`blot.ladderAuto` 为真时是按条带猜的（要用户确认），`blot.ladderFrom` = `'pref'`（沿用上次选的）/ `'user'`；用户选过的型号存在 `App.prefLadder`（`localStorage` 的 `blotfig.ladder`），新载入的膜默认用它（`App.setLadder`）。
+- 框不受膜条边界限制：成图画的是框住的像素（`App.runRaster` 不再把膜条外的部分涂成背景）。框仍在某条膜条的坐标系里（它的角度、Marker、成图里的模块），移到另一条膜条上时（`App.rehomeSeg`，按框的中点）换算到那条膜条的坐标里，图上的位置不变。框选添加的框（`App.addRowBox`）保留画的范围，按框里识别出的泳道间距等分成几道（`App.evenBox`）。
+- 泳道（GelFigure 的"首尾泳道等间距"）：拖最左 / 最右一条泳道线时中间的泳道均匀排开（`App.dragLane`，Alt 只动这一条），"首尾对齐"按泳道数在首尾两条之间等分（`App.evenEnds`）。框的左右边拖出第 1 列以左时 `sg.c0` 暂时 < 1，`App.commit` 里 `roomLeft` 给所有行在左边补列。
+- 膜条可以手动调整（`'pieces'` 模式，`wbview.js` 的 `pedit` 是工作副本，"应用"时才生效）：`App.setPieces(blot, list)` 把膜条存进 `blot.userStrips`（`{id, cx, cy, angle, w, h}`，网格坐标），之后的分析都用它们（`analyzeSession` 的 `opt.strips`，按顺序，id 跟着走），框按 id 换算、留在图上原处，删掉的膜条上的框交给最近的一条；`null` = 回到自动。撤销 / 重做后 `App.syncPieces` 发现分析用的膜条和状态里的不一致就重新分析。
+- 拖动时（`App.dragging`）成图跟着刷新，但不重新评分各张曝光、不重算警告；膜图上行标签的 ★ 用上次提交时的推荐曝光（`App.bestSeen`）。`WB.evalExposure` 用定长类型数组和原生排序（一个框可以有几十万像素）。
+- 项目文件（`App.saveProject` / `App.openProject`）：`'BLOTFIG1'` + 头的长度（u32）+ 头（JSON：状态 `S`、每张图的 id / 名字 / 类型 / 曝光时间 / 字节数）+ 各张图原样的文件字节，整体 gzip（浏览器支持 `CompressionStream` 时）。打开时按原 id 解码图片，套用 `S.align`，再分析每张膜（膜条 id 按位置对上，框、刻度原样）。`rec.src` 是载入时的文件（`File` 或 `{name, buffer}`），保存时才重新读。
+- Marker 型号列表（`wbladders.js`）与 GelFigure 的预染蛋白 Marker 一致（含 `ref` 参考带、`vendor` 分组），只去掉了在膜上看不见的非预染 Marker；老的 id（`br_pp` 等）不变。标 Marker 时右上角的参考图（`ladderCard`）按 log 分子量等距画。
 - 重新分析（改图片类型、移图、移除图、重新对齐）用 `App.reanalyze`：膜条按位置和大小一一对上旧的（保留 id、字母、手动刻度），行和框原样保留，只把框换算到新膜条的坐标里（`carryRows`）；只有"重新识别"（`{fresh: true}`）才丢掉现在的行重新识别。`findStrips` 认切缝时，一条暗线如果大部分落在曝光图里一条带的正中（不是旁边强带的拖尾），就当作条带而不是切缝。
 - 同一张膜的各张图在同一个网格上：`blot.frame` 是网格基准（大多数图所在位置的一张白光图），`S.align[imgId] = {a, tx, ty, pieces: {pieceId: {a, tx, ty}}, how: 'auto' | 'manual', by}` 把网格坐标映射到这张图的原图坐标（绕图片中心旋转 a 度再平移；`pieces` 是单独挪动过的膜条自己的变换）。没有条目 = 和网格一致。原图留在 `rec.raw`，`rec.img` / `rec.cs` 是重采样到网格上的图（`App.applyAlign`；撤销/重做后 `App.syncAlign` 重新采样），所以别的代码都直接用对齐后的图。分析读膜条和 Ladder 的白光图（`blot.marker`，保持最先那张：之后拍的白光图常透出曝光里的强带）用原图读，再按它的变换映射到网格（重采样会把膜条之间几个像素的切缝糊掉）。
 - 对齐流程（`App.alignBlot` → 分析 → `App.alignPieces` → 有变化再分析）：白光图对第一张白光图配准、按位置分组，最多图的位置作基准；曝光图两两比相似度连成一棵树，每条边用弱的一张作参考配准、沿树合成，再整体落到某个白光图位置上（贴近 6 px 以内的取那个位置；白光图不少于曝光图时取最近的位置）；分析出膜条后，每张白光图的每条膜条单独配准，曝光图沿用同位置白光图的膜条变换。载入时不同组的白光图配准后相关 ≥ 0.9 的并成一张膜（`sameMembrane`）；整体对不上、但每条膜条单独配准后都对得上（按面积平均 ≥ 0.85、每条 ≥ 0.6）的也并（膜条被单独挪过）；只有曝光图的组不自动合并。配准本身在 `wbengine.js`：`registerRigid`（相位相关多角度粗搜 + 归一化相关细搜，粗搜保留多个峰以免差一道泳道）、`registerPieces`（膜条窗口内先粗后细，必要时在可达范围内粗搜）、`regWarp`（按膜条分段重采样，饱和像素保持饱和）。
@@ -89,7 +96,8 @@ msedge --headless=new --disable-gpu --user-data-dir=$env:TEMP\wb_dbg --allow-fil
 
 ## 已知待办
 
-- 自动挑 Ladder 在样例上会挑错（挑成 sp26625，分子量整体偏大），需要在第 2 步手动选一次 Bio-Rad 1610374（`br_pp`），之后会记住。
+- 自动挑 Ladder 在样例上会挑错（只有 2–3 条可见的 Ladder 带时，几十种型号里总有拟合得更好的），需要在第 2 步手动选一次 Bio-Rad 1610374（`br_pp`），之后会记住。
+- 白光图的自动区分只在两套样例上验证过（iBright 的 14 张、合成示例）；别的成像仪导出的图认错时请收集样例。
 - iBright 文件名里没有曝光时间，图注里的曝光时间要手填。
 - 最上面那行贴着 250 kDa 条带（对齐后约 224 kDa，对齐前算成约 293 kDa），这一段 Ladder 条带稀疏，分子量误差较大。
 - 竖着剪开、又上下错位摆放的两半膜：同一个蛋白不会自动并成一行（高度差太大），需要在成图上把一行拖到另一行上。

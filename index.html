@@ -15,6 +15,13 @@
   <div class="topbar-right">
     <button class="icon-btn" id="btnUndo" title="撤销 (Ctrl+Z)">↺</button>
     <button class="icon-btn" id="btnRedo" title="重做 (Ctrl+Shift+Z)">↻</button>
+    <div class="menu-wrap">
+      <button class="text-btn" id="btnFile">文件 ▾</button>
+      <div class="menu hidden right" id="fileMenu">
+        <label>打开项目…<small>.blotfig 项目文件（含全部图片和标注）</small><input type="file" id="projInput" accept=".blotfig" hidden></label>
+        <button id="btnSaveProj">保存项目…<small>全部图片 + 框、名字、Marker 刻度和版式，换电脑也能接着做（Ctrl+S）</small></button>
+      </div>
+    </div>
     <button class="icon-btn" id="btnHelp" title="使用说明">?</button>
     <span class="divider"></span>
     <select id="dpiTop" title="导出分辨率"><option value="300">300 dpi</option><option value="600" selected>600 dpi</option><option value="1200">1200 dpi</option></select>
@@ -38,7 +45,7 @@
       <p>每张膜的多个曝光（短 / 中 / 长）和 Marker 白光图一起拖入即可。<br>工具会自动：<br>· 把图片归到各自的膜<br>· 找出每个蛋白的条带行<br>· 每行挑最长且不过曝的曝光<br>· 识别 Ladder 并标 kDa<br>· 按泳道对齐拼成一张图</p>
       <label class="btn primary big">选择图片（可多选）<input type="file" id="fileInput2" multiple accept=".tif,.tiff,.png,.jpg,.jpeg,.bmp" hidden></label>
       <button class="btn big" id="btnDemo" title="3 次曝光的切开的膜 + 另一张斜放的膜">看看示例</button>
-      <p class="privacy">图片只在本机浏览器处理，不会上传。</p>
+      <p class="privacy">图片只在本机浏览器处理，不会上传。<br>保存过的项目：右上角"文件 → 打开项目"。</p>
     </div>
 
     <div id="sections" class="hidden">
@@ -113,6 +120,7 @@
         <div class="seg" id="imgTabs"></div>
         <span class="flex"></span>
         <button class="btn sm ghost" id="fitFull" title="整张膜（滚轮缩放，空格或右键拖动平移）">全图</button>
+        <button class="btn sm ghost" id="fitSel" title="放大到选中的那一行的框">选中行</button>
         <span class="zoomlabel" id="zoomLabel"></span>
       </div>
       <div id="levelBar" class="levelbar hidden">
@@ -124,6 +132,7 @@
       </div>
       <div id="editorBox" tabindex="0">
         <canvas id="editor"></canvas>
+        <div id="ladderCard" class="ladder-card hidden"></div>
         <div id="viewBanner" class="mode-banner hidden"><span id="viewModeText"></span><span id="viewModeExtra"></span><button id="viewModeCancel">取消 (Esc)</button></div>
         <div id="dropHint"><div class="dh-icon">▤</div><div class="dh-text">把图片拖到这里</div><div class="dh-sub">多张一起拖：各曝光 + Marker 白光图</div></div>
       </div>
@@ -163,12 +172,14 @@
   </ol>
   <h3>常见情况</h3>
   <ul>
-    <li><b>分子量不对</b>：先在左边"Marker"里确认型号。刻度对不上 Marker 带：点"在白光图上核对 / 标注 Marker"（或点某条膜条的小标签，直接放大到它的 Marker 道），膜上显示白光图和每条膜条的 Marker 刻度——拖动刻度对准条带（会自动吸附到条带上，按住 Alt 不吸附），点空白处加一条刻度并选分子量，点刻度上的数字改分子量或删除，选中后 ↑↓ 微调、Delete 删除。每条膜条有 2 条刻度就能算出各行分子量；标过或确认过的膜条，成图左侧只画这些刻度。"全部恢复自动"丢掉手动标的和确认过的刻度。</li>
+    <li><b>分子量不对</b>：先在左边"Marker"里确认型号。刻度对不上 Marker 带：点"在白光图上核对 / 标注 Marker"（或点某条膜条的小标签，直接放大到它的 Marker 道），膜上显示白光图和每条膜条的 Marker 刻度，右上角是这个型号的官方条带示意（橙色 = 彩色 / 加粗的参考带）——拖动刻度对准条带（会自动吸附到条带上，按住 Alt 不吸附），点空白处加一条刻度并选分子量，点刻度上的数字改分子量或删除，选中后 ↑↓ 微调、Delete 删除。每条膜条有 2 条刻度就能算出各行分子量；标过或确认过的膜条，成图左侧只画这些刻度。"全部恢复自动"丢掉手动标的和确认过的刻度。</li>
     <li><b>某个蛋白在这张曝光里太亮 / 太暗</b>：在左边点这一行，展开后点别的曝光，红色 = 过曝像素。每张图只做整图线性调整，同一张图的所有行一起变。</li>
     <li><b>某个蛋白漏了，或没曝出来</b>：点"在膜上框选添加"，在膜上拖一个框把它框住（只按框里的条带识别泳道）；没曝出来的就"按分子量添加"一行，再换长曝光。</li>
-    <li><b>框的范围不合适</b>：在中间的膜上点框选中这一行，拖框的边或四角自由缩放，框里的泳道跟着增减；拖框内部移动整个框（按住 Shift 同时上下移动这一行在各条膜条上的框）。</li>
-    <li><b>泳道没对上</b>：泳道只在每个框里识别，框里的竖线就是泳道，上方数字是它在成图里的列（M = Marker 道，× = 不用，点数字切换）。多认了：点那根竖线后按 Delete；漏了：双击框内加一道，或把框边拖过去；位置偏了：拖动竖线，或选中框后 ←→ 平移、Alt+←→ 调间距；整个框都不对：在左边展开这一行，点"重新识别"或"均分 N 道"；列号错位：点 ‹ ›。</li>
-    <li><b>图片类型认错了</b>（白光图当成了曝光图等）：点图片右上角的 ⋯ 改类型。已经调好的框都保持不动，只更新分子量和对齐。</li>
+    <li><b>框的范围不合适</b>：在中间的膜上点框选中这一行，拖框的边或四角自由缩放（左右边增减泳道）；拖框内部移动整个框，可以拖到任何位置，包括别的膜条上（按住 Shift 同时上下移动这一行在各条膜条上的框）。成图里显示的就是框住的部分，不受膜条边界限制。</li>
+    <li><b>泳道没对上</b>（和 GelFigure 一样的"首尾泳道等间距"）：在膜上把框里<b>最左、最右</b>两条泳道线拖到泳道中心，中间的泳道会均匀排开（按住 Alt 只动这一条）；条数不对就在左边展开这一行，改泳道数后点"首尾对齐"。边缘的条带被切掉一部分：把最左或最右的泳道线往外拖，泳道整体加宽。框上方数字是每一道在成图里的列（M = Marker 道，× = 不用，点数字切换）。多认了：点那根竖线后按 Delete；漏了：双击框内加一道，或把框边拖过去；列号错位：点 ‹ ›；整个框都不对：点"框内重新识别"。</li>
+    <li><b>膜条认错了</b>（两条合成一条、切歪了、漏了一条）：在左边膜卡片上点"调整膜条"——拖动膜条移动，拖边角改大小，拖上方的 ↻ 旋转，在空白处拖出一条新的，选中后 Delete 删掉，点"✓ 应用"。按调整后的膜条重新读 Marker 和条带，已经调好的框都留在原处；"恢复自动"回到自动识别。</li>
+    <li><b>图片类型认错了</b>（白光图当成了曝光图等）：点"查看 / 修改图片"，在图片右上角的 ⋯ 里改类型（某张膜没认出白光图时会自动展开并提示）。已经调好的框都保持不动，只更新分子量和对齐。怎么认的：先看文件名（Marker / White / 白光 / Chemi / 曝光…），没有的话看图：白光图是一大片亮的膜放在暗的托盘上，曝光图大部分是背景、只有条带亮。</li>
+    <li><b>保存，下次接着做</b>："文件 → 保存项目"（Ctrl+S）把全部图片和框、名字、Marker 刻度、版式存成一个 .blotfig 文件；"文件 → 打开项目"接着做，换电脑也行。关闭页面前没保存会提醒。</li>
     <li><b>调整成图里各行的上下顺序</b>：在右侧成图上按住一行的条带上下拖到想要的位置（也可以拖成图左边的膜条标签，或左侧列表里每行前面的标签）；选中一行后 Alt+↑↓ 一次挪一位。</li>
     <li><b>左右对齐泳道</b>（剪过的膜，比如膜条 A 的第 4–6 道要对准膜条 B 的第 1–3 道）：在成图上把一行的条带左右拖，按列吸附；这条膜条上的各行一起动（它们共用同一套泳道），按住 Alt 只挪这一个框。拖过第 1 列时左边自动补列，泳道名跟着挪。</li>
     <li><b>同一个蛋白在两条膜条上</b>（膜从中间竖着剪开）：通常会自动并成一行；没有的话，在成图上把一行拖到另一行上松开，两个框按左右顺序接成连续的列。"拆开"可以撤回。</li>
@@ -182,7 +193,7 @@
     <li>内参应与目标蛋白在同一张膜上，工具会检查并提示。</li>
     <li>过曝条带不可定量；导出未裁切原图作为补充材料（用拍摄的原图，不做对齐或旋转，框画在条带实际所在的位置），图注提示会自动生成。</li>
   </ul>
-  <p class="muted small">快捷键：Ctrl+Z 撤销 · 空格+拖动或右键拖动 平移 · 滚轮 缩放 · 选中行后 ↑↓ 移动框、Alt+↑↓ 调整在成图里的上下顺序、←→ 平移泳道、Alt+←→ 调间距、Delete 删除整行 · 选中竖线后 ←→ 微调、Delete 删掉这一道 · 双击框内 加一道 · 标 Marker 时选中刻度后 ↑↓ 微调、Delete 删除 · Esc 取消</p>
+  <p class="muted small">快捷键：Ctrl+Z 撤销 · 空格+拖动或右键拖动 平移 · 滚轮 缩放 · 选中行后 ↑↓ 移动框、Alt+↑↓ 调整在成图里的上下顺序、←→ 平移泳道、Alt+←→ 调间距、Delete 删除整行 · 选中竖线后 ←→ 微调、Delete 删掉这一道 · 双击框内 加一道 · 标 Marker 时选中刻度后 ↑↓ 微调、Delete 删除 · 调整膜条时选中后方向键移动、[ ] 旋转、Delete 删除 · Ctrl+S 保存项目 · Esc 取消</p>
   <p class="muted small"><button class="link" id="btnTourAgain">再看一遍界面引导</button></p>
 </div></div>
 

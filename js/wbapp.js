@@ -2,8 +2,9 @@
  * images (not undoable): decoded pictures with kind (chemi | marker), exposure and signal.
  * S (undoable): membranes ("blots") with their pieces, figure rows (one per protein), figure lanes
  * (columns), levels, annotations.
- * A row has a segment on each piece it runs across. Every segment is a box on its piece, in the piece frame
- * (u along the lanes, v down): x0..x1 across, vc-above … vc+below down (band b0..b1 around vc), and it has
+ * A row has a segment on each piece it runs across. Every segment is a box in its piece's frame (u along the
+ * lanes, v down) — anywhere on the picture, not bound by the piece's outline; the piece gives its tilt, its
+ * marker sizes and its module in the figure: x0..x1 across, vc-above … vc+below down (band b0..b1 around vc), and it has
  * lanes of its own — sg.lanes [{u, r}] with r 's' sample | 'm' marker | 'x' left out. The sample lanes fill
  * figure columns sg.c0, sg.c0+1, … in order. Lanes come from the analysis (the piece's lattice), from the
  * box's own pixels (WB.detectBoxLanes) or from the user; resizing a box keeps the lanes inside it and
@@ -41,6 +42,7 @@
   App.refresh = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; App.emit('refresh'); }); };
   App.commit = function () {
     if (!App.S) return;
+    roomLeft();
     App.fitLanes(false);
     App.refreshChoices();
     const snap = JSON.stringify(App.S);
@@ -48,8 +50,8 @@
     App.emit('change');
   };
   // (pictures are resampled again where the restored state aligns them differently)
-  App.undo = () => { if (App.hist.length < 2) return; App.future.push(App.hist.pop()); App.S = JSON.parse(App.hist[App.hist.length - 1]); App.selLane = null; App.syncAlign(); App.emit('change'); };
-  App.redo = () => { if (!App.future.length) return; const s = App.future.pop(); App.hist.push(s); App.S = JSON.parse(s); App.selLane = null; App.syncAlign(); App.emit('change'); };
+  App.undo = () => { if (App.hist.length < 2) return; App.future.push(App.hist.pop()); App.S = JSON.parse(App.hist[App.hist.length - 1]); App.selLane = null; App.syncPieces(); App.syncAlign(); App.emit('change'); };
+  App.redo = () => { if (!App.future.length) return; const s = App.future.pop(); App.hist.push(s); App.S = JSON.parse(s); App.selLane = null; App.syncPieces(); App.syncAlign(); App.emit('change'); };
 
   function busy(on, text) {
     const b = document.getElementById('busy'); if (!b) return;
@@ -131,6 +133,64 @@
     b.ladderId = id || (App.analysis[b.id] && App.analysis[b.id].autoLadderId) || null;
     if (id) { App.prefLadder = id; try { localStorage.setItem('blotfig.ladder', id); } catch (e) { /* storage off */ } }
   };
+  // a marker photo saved at another resolution: resampled to the matching exposure
+  function matchSizes(recs) {
+    const chemiAll = recs.concat([...App.images.values()]).filter(c => c.kind === 'chemi');
+    recs.filter(r => r.kind === 'marker').forEach(m => {
+      if (chemiAll.some(c => c.img.w === m.img.w && c.img.h === m.img.h)) return;
+      const c = chemiAll.find(c => Math.abs(c.img.w / c.img.h - m.img.w / m.img.h) < 0.015 * (c.img.w / c.img.h));
+      if (c) { m.img = resample(m.img, c.img.w, c.img.h); m.resampled = true; }
+    });
+  }
+
+  /* ---------- projects: one file with everything (state: boxes, names, marks, settings; the pictures as
+   * loaded, byte for byte) to go on later or on another computer. 'BLOTFIG1', the header's length (u32), the
+   * header (JSON), then the pictures' files one after the other; gzip-compressed where the browser can. ---------- */
+  const MAGIC = 'BLOTFIG1';
+  App.saveProject = async function () {
+    const recs = [...App.images.values()], bufs = [];
+    for (const r of recs) bufs.push(r.src && r.src.buffer ? r.src.buffer : await r.src.arrayBuffer());
+    const head = { version: 1, app: 'BlotFigure', viewBlot: App.viewBlot, S: App.S,
+      images: recs.map((r, i) => ({ id: r.id, name: r.name, kind: r.kind, exposure: r.exposure, size: bufs[i].byteLength })) };
+    const json = new TextEncoder().encode(JSON.stringify(head)), len = new Uint8Array(4);
+    new DataView(len.buffer).setUint32(0, json.length, true);
+    let blob = new Blob([new TextEncoder().encode(MAGIC), len, json, ...bufs]);
+    if (typeof CompressionStream !== 'undefined') blob = await new Response(blob.stream().pipeThrough(new CompressionStream('gzip'))).blob();
+    return blob;
+  };
+  App.openProject = async function (file) {
+    busy(true, '打开项目…'); await tick();
+    try {
+      let buf = file.buffer || await file.arrayBuffer(), u8 = new Uint8Array(buf);
+      if (u8[0] === 0x1f && u8[1] === 0x8b) { buf = await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer(); u8 = new Uint8Array(buf); }
+      if (new TextDecoder().decode(u8.subarray(0, 8)) !== MAGIC) throw new Error('这不是 BlotFigure 项目文件（.blotfig）');
+      const n = new DataView(buf, 8, 4).getUint32(0, true), head = JSON.parse(new TextDecoder().decode(u8.subarray(12, 12 + n)));
+      const recs = [];
+      let at = 12 + n;
+      for (const im of head.images) {
+        busy(true, `打开项目：读取图片 ${recs.length + 1}/${head.images.length}…`); await tick();
+        const f = new File([buf.slice(at, at + im.size)], im.name); at += im.size;
+        const d = await G.TIFF.loadFile(f);
+        recs.push({ id: im.id, name: im.name, img: { w: d.width, h: d.height, data: d.data }, spp: d.spp, bits: d.bits, src: f, kind: im.kind, exposure: im.exposure });
+      }
+      App.images.clear(); App.analysis = {};
+      matchSizes(recs);
+      recs.forEach(r => { prepare(r); App.images.set(r.id, r); });
+      App.S = head.S;
+      App.selRow = App.selSeg = App.selLane = App.selMark = null; App.mode = null;
+      App.viewBlot = App.blot(head.viewBlot) ? head.viewBlot : (App.S.blots[0] || {}).id; App.viewImg = null;
+      App.syncAlign();
+      busy(true, '打开项目：分析各张膜…'); await tick();
+      // the analysis again (pieces found at the same places keep their ids, the boxes on them stay as saved)
+      App.S.blots.forEach(b => App.analyze(b));
+      App.hist = []; App.future = [];
+      App.commit();
+      App.saved = App.hist[App.hist.length - 1];
+      App.emit('loaded');
+      return App.images.size;
+    } finally { busy(false); }
+  };
+
   App.addFiles = async function (files) {
     files = [...files].filter(f => /\.(tiff?|png|jpe?g|bmp)$/i.test(f.name));
     if (!files.length) return 0;
@@ -147,18 +207,13 @@
         // (what comes into view is background: the tray of a white-light photo, an exposure's own background)
         const mv = App.devMove && App.devMove[f.name];
         if (mv) { const im = { w: d.width, h: d.height, data: d.data }; d.data = WB.regWarp(im, WB.regInverse(mv), [], G.Engine.percentiles(d.data, [WB.classify(im, { name: f.name, spp: d.spp }) === 'marker' ? 3 : 50], 97)[0]); }
-        recs.push({ id: uid('i'), name: f.name, img: { w: d.width, h: d.height, data: d.data }, spp: d.spp, bits: d.bits });
+        // (src: the file itself, read again when the project is saved)
+        recs.push({ id: f.id || uid('i'), name: f.name, img: { w: d.width, h: d.height, data: d.data }, spp: d.spp, bits: d.bits, src: f });
         busy(true, `读取图片 ${recs.length}/${files.length}…`); await tick();
       }
       busy(true, '识别曝光图与 Marker 图…'); await tick();
       recs.forEach(r => { r.kind = WB.classify(r.img, { name: r.name, spp: r.spp }); r.exposure = WB.exposureFromName(r.name); });
-      // a marker photo saved at another resolution: resample to the matching exposure
-      const chemiAll = recs.concat([...App.images.values()]).filter(c => c.kind === 'chemi');
-      recs.filter(r => r.kind === 'marker').forEach(m => {
-        if (chemiAll.some(c => c.img.w === m.img.w && c.img.h === m.img.h)) return;
-        const c = chemiAll.find(c => Math.abs(c.img.w / c.img.h - m.img.w / m.img.h) < 0.015 * (c.img.w / c.img.h));
-        if (c) { m.img = resample(m.img, c.img.w, c.img.h); m.resampled = true; }
-      });
+      matchSizes(recs);
       recs.forEach(r => { prepare(r); App.images.set(r.id, r); });
       // group into membranes
       const groups = WB.groupSessions(recs.map(r => ({ id: r.id, name: r.name, w: r.img.w, h: r.img.h, kind: r.kind, thumb: r.thumb })));
@@ -459,9 +514,10 @@
     // the white-light photo as taken, with where it lies on the grid (strips and ladder are read from it unresampled)
     const al = mk && App.alignOf(mk.id), mPcs = al && al.pieces ? (blot.pieces || []).filter(p => al.pieces[p.id]).map(p => ({ cx: p.cx, cy: p.cy, angle: p.angle, w: p.w, h: p.h, T: al.pieces[p.id] })) : [];
     const A = WB.analyzeSession(ch.map(r => ({ id: r.id, img: r.img, exposure: r.exposure, cs: r.cs })), mk && { id: mk.id, img: (mk.raw || mk).img, T: al ? { a: al.a, tx: al.tx, ty: al.ty } : null, pieces: mPcs },
-      { ladderId: blot.ladderAuto ? null : blot.ladderId, prefLadder: App.prefLadder, noChemiCheck: !!App.devNoChemi });
+      { ladderId: blot.ladderAuto ? null : blot.ladderId, prefLadder: App.prefLadder, noChemiCheck: !!App.devNoChemi, strips: blot.userStrips || null });
     A.chemiIds = ch.map(r => r.id);
     A.H = ch[0].img.h;
+    A._strips = JSON.stringify(blot.userStrips || null);
     App.analysis[blot.id] = A;
     if (blot.ladderAuto || !blot.ladderId) blot.ladderId = A.ladderId;
     A._calLadder = A.ladderId;
@@ -470,7 +526,10 @@
     const old = blot.pieces || [];
     const fresh = A.pieces.map(p => Object.assign({ id: uid('p'), marks: null }, JSON.parse(JSON.stringify(p))));
     const pairs = [];
-    fresh.forEach(n => old.forEach(o => { const d = Math.hypot(o.cx - n.cx, o.cy - n.cy); if (d < 40 && Math.abs(o.w - n.w) < 60 && Math.abs(o.h - n.h) < 60) pairs.push({ n, o, d }); }));
+    // pieces set by hand are themselves, in order (ids from the user's list); found ones: the old piece at the
+    // same place
+    if (blot.userStrips) fresh.forEach((n, k) => { const us = blot.userStrips[k], o = us && old.find(p => p.id === us.id); if (us) n.id = us.id; if (o) pairs.push({ n, o, d: 0 }); });
+    else fresh.forEach(n => old.forEach(o => { const d = Math.hypot(o.cx - n.cx, o.cy - n.cy); if (d < 40 && Math.abs(o.w - n.w) < 60 && Math.abs(o.h - n.h) < 60) pairs.push({ n, o, d }); }));
     const taken = new Set();
     pairs.sort((a, c) => a.d - c.d).forEach(({ n, o }) => {
       if (taken.has(n) || taken.has(o)) return;
@@ -550,7 +609,8 @@
         const op = oldPcs.find(p => p.id === sg.piece);
         if (!op) return;
         const [mx, my] = WB.toImg(pFrame(op), (sg.x0 + sg.x1) / 2, sg.vc);
-        let np = pcs.find(p => p.id === op.id) || (App.pieceAt(blot, mx, my, 0) || {}).pc;
+        // (pieces set by hand: one taken away hands its boxes to the nearest one left)
+        let np = pcs.find(p => p.id === op.id) || (App.pieceAt(blot, mx, my, blot.userStrips ? Infinity : 0) || {}).pc;
         // no piece there any more: the old one stays (its own marker bands; no automatic sizes)
         if (!np) { np = Object.assign(JSON.parse(JSON.stringify(op)), { strip: -1 }); pcs.push(np); }
         const at = (u, v) => carry(op, np, u, v), m = at((sg.x0 + sg.x1) / 2, sg.vc), du = m.u - (sg.x0 + sg.x1) / 2;
@@ -576,6 +636,15 @@
     App.S.rows = App.S.rows.filter(r => r.blot !== blot.id || r.segs.length);
     letterPieces(blot);
   }
+  /* the pieces of a membrane set by hand (moved, resized, turned, drawn, taken away): the analysis reads the
+   * ladder in these from now on; the boxes stay where they are on the picture. null: found automatically again. */
+  App.setPieces = function (blot, list) {
+    blot.userStrips = list ? list.map(p => ({ id: p.id, cx: p.cx, cy: p.cy, angle: Math.round(p.angle * 100) / 100, w: p.w, h: p.h })) : null;
+    App.reanalyze(blot);
+    App.syncAlign();          // (pieces aligned on their own are resampled over their new outline)
+  };
+  // after undo / redo: a membrane whose pieces set by hand differ from what was analysed is analysed again
+  App.syncPieces = () => App.S.blots.forEach(b => { const A = App.analysis[b.id]; if (A && A._strips !== JSON.stringify(b.userStrips || null)) App.analyze(b); });
   // automatic ladder calibration of a membrane (all its pieces)
   App.calibFor = function (blot) {
     const A = App.analysis[blot.id];
@@ -683,11 +752,12 @@
       for (let u = L[0].u - p; u >= x0 - 1e-6 && L.length < 80; u -= p) L.unshift({ u, r: App.roleAt(pc, u, p) });
       for (let u = L[L.length - 1].u + p; u <= x1 + 1e-6 && L.length < 80; u += p) L.push({ u, r: App.roleAt(pc, u, p) });
     }
+    // (lanes gained left of column 1 go below it for now: the commit makes room on the left for every row)
     let c0 = base.c0;
     const stay = base.lanes.find(l => l.r === 's' && inside(l));
     if (stay) {
       const col = base.c0 + base.lanes.filter(l => l.r === 's' && l.u < stay.u - 1e-6).length;
-      c0 = Math.max(1, col - L.filter(l => l.r === 's' && l.u < stay.u - 1e-6).length);
+      c0 = col - L.filter(l => l.r === 's' && l.u < stay.u - 1e-6).length;
     }
     sg.lanes = L; sg.c0 = c0; sg.p = p; sg.x0 = x0; sg.x1 = x1;
   };
@@ -722,6 +792,30 @@
     n = Math.max(1, Math.min(60, Math.round(n || sg.lanes.length || 1)));
     const p = (sg.x1 - sg.x0) / n;
     sg.lanes = Array.from({ length: n }, (_, k) => { const u = sg.x0 + (k + 0.5) * p; return { u, r: App.roleAt(pc, u, p) }; });
+    sg.p = p;
+    return n;
+  };
+  /* GelFigure's way: lanes on one membrane come from one comb, so once the first and last lane lines sit on their
+   * lanes every lane between follows from the count. An end lane dragged to u (lanes as before the drag: base)
+   * spreads the lanes between evenly; any other lane moves alone. */
+  App.dragLane = function (sg, i, u, base) {
+    const L = base.lanes, n = L.length;
+    if (n < 3 || (i !== 0 && i !== n - 1)) { App.moveLane(sg, i, u); return; }
+    const a = i === 0 ? Math.min(u, L[n - 1].u - 3 * (n - 1)) : L[0].u, z = i === n - 1 ? Math.max(u, L[0].u + 3 * (n - 1)) : L[n - 1].u;
+    sg.lanes = L.map((l, k) => ({ u: a + (z - a) * k / (n - 1), r: l.r }));
+    sg.p = (z - a) / (n - 1);
+  };
+  // n lanes spaced evenly between the box's first and last lane, which stay (one lane: across the box); a lane
+  // keeps its role (sample / left out / marker) when one was close by
+  App.evenEnds = function (row, sg, n) {
+    const L = sg.lanes, pc = App.pieceOf(row, sg);
+    n = Math.max(1, Math.min(60, Math.round(n || L.length)));
+    if (L.length < 2 || n < 2) return App.evenBox(row, sg, n);
+    const a = L[0].u, z = L[L.length - 1].u, p = (z - a) / (n - 1), old = App.segPitch(sg);
+    sg.lanes = Array.from({ length: n }, (_, k) => {
+      const u = a + k * p, near = L.slice().sort((x, y) => Math.abs(x.u - u) - Math.abs(y.u - u))[0];
+      return { u, r: near && Math.abs(near.u - u) < Math.min(p, old) * 0.45 ? near.r : App.roleAt(pc, u, p) };
+    });
     sg.p = p;
     return n;
   };
@@ -921,12 +1015,18 @@
     expoCache.set(key, res);
     return res;
   };
+  // the recommended exposure of every row as of the last change (drawn while dragging, when scoring every
+  // exposure on every mouse move would be far too slow)
+  const bestSeen = new Map();
+  App.bestSeen = row => bestSeen.get(row.id) || null;
   App.refreshChoices = function (forceLevels) {
     const S = App.S;
     S.rows.forEach(r => {
       const ex = App.rowExpo(r);
       if (!ex.length) return;
-      if (r.auto || !ex.some(e => e.id === r.img)) r.img = ex[WB.chooseExposure(ex)].id;
+      const best = ex[WB.chooseExposure(ex)].id;
+      bestSeen.set(r.id, best);
+      if (r.auto || !ex.some(e => e.id === r.img)) r.img = best;
     });
     // display levels: one setting per image, from the rows that use it (whole-image, linear)
     const used = new Map();
@@ -971,13 +1071,9 @@
     const F = pFrame(pc);
     const win = WB.sampleWindow(sigOf(rec), F, u0, u1, v0, v1, step);
     const cv = document.createElement('canvas'); cv.width = win.w; cv.height = win.h;
-    const ctx = cv.getContext('2d'), id = ctx.createImageData(win.w, win.h), map = App.mapper(row.img), bgV = map(lv.black);
-    for (let j = 0; j < win.h; j++) for (let i = 0; i < win.w; i++) {
-      const k = j * win.w + i, u = u0 + (i + 0.5) * step, v = v0 + (j + 0.5) * step;
-      // outside the piece (a gap, a neighbouring piece): plain background
-      const val = Math.abs(u) <= pc.w / 2 + 1 && Math.abs(v) <= pc.h / 2 + 1 ? map(win.data[k]) : bgV;
-      id.data[k * 4] = id.data[k * 4 + 1] = id.data[k * 4 + 2] = val; id.data[k * 4 + 3] = 255;
-    }
+    // what the box covers, wherever it lies (the pieces found are only a guess; outside the picture: background)
+    const ctx = cv.getContext('2d'), id = ctx.createImageData(win.w, win.h), map = App.mapper(row.img);
+    for (let k = 0; k < win.w * win.h; k++) { const val = map(win.data[k]); id.data[k * 4] = id.data[k * 4 + 1] = id.data[k * 4 + 2] = val; id.data[k * 4 + 3] = 255; }
     ctx.putImageData(id, 0, 0);
     const out = { href: cv.toDataURL('image/png'), w: win.w, h: win.h };
     if (rasterCache.size > 300) rasterCache.clear();
@@ -1061,19 +1157,36 @@
     insertRow(row);
     return row;
   };
-  // a row from a box drawn on a piece (frame units): lanes and band read from the box alone
+  /* a row from a box drawn anywhere (frame units of piece pcId): the figure shows exactly the box drawn, split
+   * into lanes of equal width — as many as the lane spacing found in the box says (the end lanes can then be
+   * dragged onto their bands, the lanes between follow). The box belongs to the piece under its middle. */
   App.addRowBox = function (blotId, pcId, u0, u1, v0, v1) {
     const b = App.blot(blotId), pc = App.piece(b, pcId), ch = App.chemiOf(b);
     if (!pc || !ch.length) return null;
     const half = Math.max(3, (v1 - v0) / 2);
     const sg = { piece: pc.id, vc: (v0 + v1) / 2, b0: -half / 2, b1: half / 2, lanes: [], c0: 1, p: pc.pitch || 100, x0: u0, x1: u1 };
     const row = { id: uid('r'), blot: blotId, name: '', img: ch[ch.length - 1].id, auto: true, hidden: false, manual: true, segs: [sg], above: half, below: half };
-    if (!App.redetectBox(row, sg)) App.evenBox(row, sg, Math.max(1, Math.round((u1 - u0) / (pc.pitch || 100))));
+    App.redetectBox(row, sg);
+    const p = sg.lanes.length >= 2 ? App.segPitch(sg) : pc.pitch || 100;
+    sg.x0 = u0; sg.x1 = u1;
+    App.evenBox(row, sg, Math.max(1, Math.round((u1 - u0) / p)));
+    App.rehomeSeg(row, sg);
     App.alignSeg(row, sg);
-    App.snapBox(sg);
     App.findBand(row, sg);
     insertRow(row);
     return row;
+  };
+  /* a box moved (or drawn) onto another piece belongs to that piece from then on (its sizes, its module in the
+   * figure); it stays where it is on the picture. Not when the row has a box on that piece already. */
+  App.rehomeSeg = function (row, sg) {
+    const b = App.blot(row.blot), op = App.piece(b, sg.piece);
+    if (!op) return null;
+    const mid = (sg.x0 + sg.x1) / 2, [mx, my] = WB.toImg(pFrame(op), mid, sg.vc), hit = App.pieceAt(b, mx, my, 0);
+    if (!hit || hit.pc === op || row.segs.some(s => s !== sg && s.piece === hit.pc.id)) return null;
+    const np = hit.pc, vc0 = sg.vc, m = carry(op, np, mid, vc0), du = m.u - mid;
+    sg.lanes = sg.lanes.map(l => ({ u: carry(op, np, l.u, vc0).u, r: l.r }));
+    sg.x0 += du; sg.x1 += du; sg.vc = m.v; sg.piece = np.id;
+    return np;
   };
   // place a row where a given molecular weight runs (on a piece that covers it)
   App.addRowAtKda = function (kda, prefBlot) {

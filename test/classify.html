@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>classify</title></head>
+<body>
+<pre id="out"></pre>
+<script src="../js/tiff.js"></script>
+<script src="../js/engine.js"></script>
+<script src="../js/wbladders.js"></script>
+<script src="../js/wbengine.js"></script>
+<script src="../js/wbdemo.js"></script>
+<script>
+/* WB.classify (exposure / white light) without help from the file names: the pictures as they are, and dimmed
+ * into a quarter or a tenth of the range (white-light photos saved as 16-bit files often use little of it).
+ * ?dir=<folder URL>&names=a.tif,...&kinds=c,c,m,... (expected); without: the demo membranes.
+ * Title: CLASSIFY {fails, out} */
+(async () => {
+  const q = new URLSearchParams(location.search), out = [], fails = [];
+  let items = [];
+  if (q.get('dir')) {
+    const names = q.get('names').split(','), kinds = (q.get('kinds') || '').split(',');
+    for (let i = 0; i < names.length; i++) {
+      const d = await TIFF.decode(await (await fetch(q.get('dir') + '/' + names[i])).arrayBuffer());
+      items.push({ name: names[i], img: { w: d.width, h: d.height, data: d.data }, want: kinds[i] === 'm' ? 'marker' : kinds[i] === 'c' ? 'chemi' : null });
+    }
+  } else {
+    const s = WBDemo.cutSession();
+    s.images.forEach(im => items.push({ name: im.name, img: { w: im.width, h: im.height, data: im.data }, want: /marker|white/i.test(im.name) ? 'marker' : 'chemi' }));
+  }
+  items.forEach(it => {
+    const res = [1, 0.25, 0.1].map(k => { const d = k === 1 ? it.img.data : Float32Array.from(it.img.data, v => v * k); return WB.classify({ w: it.img.w, h: it.img.h, data: d }, { name: 'x' + Math.random() })[0]; });
+    const want = it.want || WB.classify(it.img, { name: it.name });
+    const ok = res.every(r => r === want[0]);
+    if (!ok) fails.push(it.name);
+    out.push(`${ok ? 'ok  ' : 'FAIL'} ${it.name}: want ${want} | as is / 25% / 10%: ${res.join(' ')}`);
+  });
+  document.getElementById('out').textContent = out.join('\n');
+  document.title = 'CLASSIFY ' + JSON.stringify({ fails: fails.length, out });
+})();
+</script>
+</body></html>

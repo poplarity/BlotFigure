@@ -151,10 +151,19 @@
     // Chemi images are mostly background: nearly all dark (raw) or nearly all white (inverted export,
     // as iBright does), even for long exposures with a glowing membrane.
     const sm = down(img, Math.max(1, Math.ceil(Math.max(img.w, img.h) / 300)));
-    let bright = 0, dark = 0;
-    for (let i = 0; i < sm.data.length; i++) { const v = sm.data[i]; if (v > 0.5) bright++; if (v < 0.15) dark++; }
-    const fb = bright / sm.data.length, fd = dark / sm.data.length;
-    return fb > 0.12 && fb < 0.8 && fd > 0.1 ? 'marker' : 'chemi';
+    const looksWhite = (lo, hi) => {
+      let bright = 0, dark = 0;
+      const sc = 1 / Math.max(1e-9, hi - lo);
+      for (let i = 0; i < sm.data.length; i++) { const v = (sm.data[i] - lo) * sc; if (v > 0.5) bright++; if (v < 0.15) dark++; }
+      const fb = bright / sm.data.length, fd = dark / sm.data.length;
+      return fb > 0.12 && fb < 0.8 && fd > 0.1;
+    };
+    if (looksWhite(0, 1)) return 'marker';
+    // a white-light photo saved in a small part of the range (16-bit files often are): the same test on the
+    // picture stretched to its own range. An exposure does not pass: its top values are the bands, far above a
+    // glowing membrane.
+    const [lo, hi] = percentiles(sm.data, [1, 99.5], 1);
+    return hi < 0.6 && hi - lo > 0.004 && looksWhite(lo, hi) ? 'marker' : 'chemi';
   }
 
   /* signal image (bands = high values) and clip level for a chemi exposure */
@@ -842,12 +851,20 @@
       const d = 4 * f, c = cAt(gx, gy), m = horizontal ? Math.max(cAt(gx, gy - d), cAt(gx, gy + d)) : Math.max(cAt(gx - d, gy), cAt(gx + d, gy));
       return c >= 0.9 * m;
     };
-    const stripsRaw = marker ? findStrips(marker.img, f, opt.noChemiCheck ? null : { band }) : [];
-    const strips = marker && marker.T ? stripsRaw.map(s => {
-      const g = regFrame(regInverse(marker.T), W, Himg, s);
-      const own = (marker.pieces || []).find(p => { const [u, v] = toFrame(frame(p.cx, p.cy, p.angle), g.cx, g.cy); return Math.abs(u) <= p.w / 2 && Math.abs(v) <= p.h / 2; });
-      return Object.assign({}, s, own ? regFrame(regInverse(own.T), W, Himg, s) : g);
-    }) : stripsRaw;
+    // (opt.strips: pieces set by hand, on the grid — used as they are, in their order; the photo's own view of
+    // them for the ladder)
+    let stripsRaw, strips;
+    if (opt.strips && opt.strips.length) {
+      strips = opt.strips.map(s => ({ cx: s.cx, cy: s.cy, angle: s.angle, w: s.w, h: s.h }));
+      stripsRaw = !marker ? [] : marker.T ? strips.map(s => Object.assign({}, s, regFrame(marker.T, W, Himg, s))) : strips;
+    } else {
+      stripsRaw = marker ? findStrips(marker.img, f, opt.noChemiCheck ? null : { band }) : [];
+      strips = marker && marker.T ? stripsRaw.map(s => {
+        const g = regFrame(regInverse(marker.T), W, Himg, s);
+        const own = (marker.pieces || []).find(p => { const [u, v] = toFrame(frame(p.cx, p.cy, p.angle), g.cx, g.cy); return Math.abs(u) <= p.w / 2 && Math.abs(v) <= p.h / 2; });
+        return Object.assign({}, s, own ? regFrame(regInverse(own.T), W, Himg, s) : g);
+      }) : stripsRaw;
+    }
     if (marker && !strips.length) notes.push('Marker 图中没有识别出膜条');
     // --- regions: membrane strips from the marker photo, else clusters of chemi signal
     const compImg = { w, h, data: comp };
@@ -1453,41 +1470,47 @@
   /* exposure quality of a row in one picture (full resolution). parts: one per piece the row lies on,
    * {F: piece frame, u0, u1: lanes, vTop, vBot: crop, b0, b1: band} */
   function evalExposure(img, cs, parts, factor) {
-    const band = [], bg = [], diffs = [];
+    // (typed arrays sorted natively: a box can hold a few hundred thousand pixels)
+    let n = 0;
+    parts.forEach(p => { n += (Math.floor(p.vBot - p.vTop) + 1) * (Math.floor(p.u1 - p.u0) + 1); });
+    let band = new Float32Array(n), bg = new Float32Array(n), diffs = new Float32Array(n), nb_ = 0, ng = 0, nd_ = 0;
     let sat = 0;
-    const satAt = (x, y) => { const xi = Math.round(x), yi = Math.round(y); if (xi < 1 || yi < 1 || xi >= img.w - 1 || yi >= img.h - 1) return false; return cs.sig[yi * img.w + xi] >= cs.clip - 1e-6; };
+    const W = img.w, H = img.h, sig = cs.sig, clip = cs.clip;
+    const satAt = (x, y) => { const xi = Math.round(x), yi = Math.round(y); if (xi < 1 || yi < 1 || xi >= W - 1 || yi >= H - 1) return false; return sig[yi * W + xi] >= clip - 1e-6; };
     parts.forEach(p => {
+      const F = p.F;
       for (let v = p.vTop; v <= p.vBot; v += 1) {
         let prev = NaN, prev2 = NaN;
+        const inBand = v >= p.b0 - 2 && v <= p.b1 + 2;
         for (let u = p.u0; u <= p.u1; u += 1) {
-          const [x, y] = toImg(p.F, u, v);
+          const x = F.ox + u * F.c - v * F.s, y = F.oy + u * F.s + v * F.c;
           const xi = Math.round(x), yi = Math.round(y);
-          if (xi < 0 || yi < 0 || xi >= img.w || yi >= img.h) { prev = prev2 = NaN; continue; }
-          const val = cs.sig[yi * img.w + xi];
-          if (v >= p.b0 - 2 && v <= p.b1 + 2) {
-            band.push(val);
+          if (xi < 0 || yi < 0 || xi >= W || yi >= H) { prev = prev2 = NaN; continue; }
+          const val = sig[yi * W + xi];
+          if (inBand) {
+            band[nb_++] = val;
             // clipped pixel with clipped neighbours (single hot pixels are ignored)
-            if (cs.clip !== Infinity && val >= cs.clip - 1e-6) {
-              let nb = 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (satAt(x + dx, y + dy)) nb++;
+            if (clip !== Infinity && val >= clip - 1e-6) {
+              const nb = (satAt(x + 1, y) ? 1 : 0) + (satAt(x - 1, y) ? 1 : 0) + (satAt(x, y + 1) ? 1 : 0) + (satAt(x, y - 1) ? 1 : 0);
               if (nb >= 2) sat++;
             }
             prev = prev2 = NaN;
           } else {
-            bg.push(val);
+            bg[ng++] = val;
             // pixel noise from differences 2 px apart: smooth smears and gradients do not count as noise
-            if (!isNaN(prev2)) diffs.push(Math.abs(val - prev2));
+            if (!isNaN(prev2)) diffs[nd_++] = Math.abs(val - prev2);
             prev2 = prev; prev = val;
           }
         }
       }
     });
-    bg.sort((a, b) => a - b); band.sort((a, b) => a - b);
+    band = band.subarray(0, nb_).sort(); bg = bg.subarray(0, ng).sort(); diffs = diffs.subarray(0, nd_);
     const q = (a, p) => (a.length ? a[clamp(Math.round(p * (a.length - 1)), 0, a.length - 1)] : 0);
     const bgMed = q(bg, 0.5), bgSig = Math.max(1e-5, (q(bg, 0.84) - q(bg, 0.16)) / 2);
     const peak = q(band, 0.995);
     // pixel noise: mean |difference| of the lower 90 % (dust and edges left out), as a Gaussian sigma;
     // a mean rather than a median, which is 0 on the quantized background of 8-bit exports
-    diffs.sort((a, b) => a - b);
+    diffs.sort();
     const nd = Math.max(1, Math.floor(diffs.length * 0.9));
     let sd = 0; for (let i = 0; i < nd && i < diffs.length; i++) sd += diffs[i];
     // (E|d| = 2σ/√π for the difference of two samples; the 90 % trimmed mean is 0.823 of the full mean)
