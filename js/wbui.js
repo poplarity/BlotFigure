@@ -40,33 +40,39 @@
     const onView = m === 'addrow' || m === 'marks' || m === 'align' || m === 'pieces';
     $('modeBanner').classList.toggle('hidden', !m || onView);
     $('viewBanner').classList.toggle('hidden', !onView);
-    $('modeText').textContent = m === 'group' ? '在成图上从第一个泳道名拖到最后一个' : '';
-    $('viewModeText').textContent = m === 'addrow' ? '在任意位置拖出一个框：成图里就是框住的部分（或点蛋白所在的高度）'
-      : m === 'marks' ? '拖刻度对准 Marker 带（自动吸附，Alt 不吸附）· 点空白处加一条 · 点数字改分子量'
+    $('modeText').textContent = m === 'group' ? '在成图上从第一个泳道名拖到最后一个' : m === 'arrow' ? '在成图上点目标条带：箭头吸附到条带，按 Marker 标分子量' : '';
+    $('viewModeText').textContent = m === 'addrow' ? '移到蛋白条带上点一下放下框（或按住拖出任意大小）· Esc 取消'
+      : m === 'marks' ? '第 4 步：点一条 Marker 带，选它的分子量 · 拖动对准（自动吸附，Alt 不吸附）· 点数字改'
       : m === 'align' ? '拖动图片让条带落进框里 · Shift+拖动或 [ ] 旋转 · 方向键微调'
-      : m === 'pieces' ? '拖动膜条移动 · 拖边角改大小 · 拖 ↻ 旋转 · 空白处拖出新膜条 · 选中后 Delete 删除' : '';
+      : m === 'pieces' ? '第 2 步：拖动蓝框移动 · 拖边角改大小 · 拖 ↻ 旋转 · 空白处拖出新膜条 · Delete 删除' : '';
     const vb = App.S && App.blot(App.viewBlot);
+    // (the modes of steps 2 and 4 end with the step: their banners lead on to the next one)
     $('viewModeExtra').innerHTML = m === 'align' ? '<button id="vmAuto" title="按白光图和条带自动对齐（整张膜的图都重新对齐）">自动对齐</button><button id="vmNone" title="按原样使用这张图，不移动">不对齐</button>'
-      : m === 'pieces' ? `${vb && vb.userStrips ? '<button id="vmPcAuto" title="丢掉手动调整的膜条，按白光图重新自动识别">恢复自动</button>' : ''}<button id="vmPcApply" class="go" title="按调整后的膜条重新读 Marker 和条带（框留在原处）">✓ 应用</button>` : '';
+      : m === 'pieces' ? `${vb && vb.userStrips ? '<button id="vmPcAuto" title="丢掉手动调整，按 Marker 图重新自动找膜条">恢复自动</button>' : ''}<button id="vmPcNext" class="go">${pcUnseen() ? '这张对了，看下一张膜 →' : '下一步 →'}</button>`
+      : m === 'marks' ? '<button id="vmMkNext" class="go">下一步 →</button>' : '';
     if (m === 'align') {
       const id = App.alignImg;
       $('vmAuto').onclick = () => { G.View.alignEnd(); App.mode = null; App.busy(true, '自动对齐…'); setTimeout(() => { App.autoAlign(id); App.busy(false); App.commit(); App.setMode('align'); G.View.alignStart(id); toast('已重新自动对齐这张膜的图'); }, 20); };
       $('vmNone').onclick = () => { G.View.alignEnd(); App.setAlign(id, null); App.commit(); G.View.alignStart(id); toast('这张图按原样使用（不移动）'); };
     }
     if (m === 'pieces') {
-      $('vmPcApply').onclick = () => applyPieces(vb, G.View.piecesEnd(true));
+      $('vmPcNext').onclick = () => nextStep(2);
       if ($('vmPcAuto')) $('vmPcAuto').onclick = () => { G.View.piecesEnd(false); applyPieces(vb, null, true); };
     }
-    $('viewModeCancel').textContent = m === 'marks' || m === 'align' ? '完成' : m === 'pieces' ? '取消' : '取消 (Esc)';
+    if (m === 'marks') $('vmMkNext').onclick = () => nextStep(4);
+    $('viewModeCancel').classList.toggle('hidden', m === 'pieces' || m === 'marks');
+    $('viewModeCancel').textContent = m === 'align' ? '完成' : '取消 (Esc)';
     $('btnAddRow').classList.toggle('primary', m === 'addrow');
     $('btnAddGroup').classList.toggle('on', m === 'group');
+    $('btnAddArrow').classList.toggle('on', m === 'arrow');
+    $('preview').classList.toggle('picking', m === 'arrow');
     if (m !== 'marks') { App.selMark = null; App.markFocus = null; }
     if (S()) renderMarker();
     G.View.draw();
   };
   $('modeCancel').onclick = () => App.setMode(null);
   $('viewModeCancel').onclick = () => App.setMode(null);
-  /* marking the ladder on a membrane's white-light picture (a piece: zoomed to its marker lane) */
+  /* marking the ladder on a membrane's Marker picture (step 4; a piece: zoomed to it) */
   function startMarks(b, pc) {
     if (!S() || !b) return;
     if (App.mode && App.mode !== 'marks') App.setMode(null);
@@ -80,14 +86,18 @@
     App.emit('select');
     if (pc) G.View.fitPiece(pc); else G.View.fitFull();
     $('editorBox').focus({ preventScroll: true });
-    if (!mk) toast('这张膜没有白光图：在曝光图上标 Marker 带也可以（看得见 Marker 的话）', 4200);
+    if (!mk) toast('这张膜没有 Marker 图：在曝光图上标 Marker 带也可以（看得见 Marker 的话）', 4200);
   }
-  /* the membrane's pieces by hand: on its white-light picture (the outlines show best there) */
+  /* the membrane's pieces by hand (step 2): on its Marker picture (the outlines show best there). Several
+   * membranes: one after the other ("next" goes on to the next one not looked at yet). */
+  const pcSeen = new Set();
+  const pcUnseen = () => S().blots.find(o => !pcSeen.has(o.id));
   function startPieces(b) {
     if (!S() || !b) return;
     if (App.mode) App.setMode(null);
     closePop();
     App.viewBlot = b.id;
+    pcSeen.add(b.id);
     const mk = App.markerRec(b);
     if (mk) App.viewImg = mk.id;
     App.selRow = null; App.selSeg = null; App.selLane = null;
@@ -96,31 +106,25 @@
     G.View.piecesStart();
     $('editorBox').focus({ preventScroll: true });
   }
-  // pcs: the outlines as edited (null: nothing changed); toAuto: found automatically again
-  function applyPieces(b, pcs, toAuto) {
-    App.setMode(null);
-    if (!b || (!pcs && !toAuto)) { if (b && !toAuto) toast('膜条没有改动'); return; }
+  /* pcs: the outlines as edited (null: nothing changed) applied — the membrane analysed on them, its boxes
+   * staying where they are; toAuto: the pieces found automatically again. then: once done. */
+  function applyPieces(b, pcs, toAuto, then) {
+    if (!b || (!pcs && !toAuto)) { if (then) then(); return; }
     App.busy(true, '按膜条重新分析…');
     setTimeout(() => {
       App.setPieces(b, toAuto ? null : pcs);
       App.busy(false); App.commit();
-      toast(toAuto ? '膜条已恢复自动识别（框都留在原处）' : `已按调整后的 ${b.pieces.length} 条膜条重新读 Marker 和条带；框都留在原处`, 3600);
+      if (toAuto) { toast('膜条已恢复自动识别'); if (App.curStep === 2) startPieces(b); }
+      if (then) then();
     }, 20);
-  }
-  // the sizes read automatically on a membrane checked: confirmed as they are
-  function confirmMarks(b) {
-    const n = App.confirmMarks(b);
-    if (App.mode === 'marks') App.setMode(null);
-    App.commit();
-    toast(n ? `已确认 ${n} 条膜条的 Marker 刻度（之后随时可以再拖动修改）` : '没有待核对的刻度');
   }
 
   /* ---------- loading ---------- */
   async function addFiles(files) {
     const n = await App.addFiles(files);
     if (!n) return;
-    const st = S(), named = st.rows.length, moved = st.blots.reduce((s, b) => s + nMoved(b), 0);
-    toast(`已载入 ${n} 张图片：${st.blots.length} 张膜，识别出 ${named} 行条带` + (moved ? `；有 ${moved} 张拍摄时膜的位置不同，已自动对齐（标"已对齐"，在图片的 ⋯ 里可手动调整）` : ''), moved ? 6000 : 3400);
+    const st = S(), moved = st.blots.reduce((s, b) => s + nMoved(b), 0);
+    toast(`已载入 ${n} 张图片（${st.blots.length} 张膜）` + (moved ? `，${moved} 张拍摄时膜的位置不同，已自动对齐` : '') + '。第 1 步：确认每张膜的 Marker 图', moved ? 5200 : 4000);
   }
   ['fileInput', 'fileInput2'].forEach(id => $(id).addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; }));
   async function loadDemo() {
@@ -175,7 +179,8 @@
     if (e.key === 'Escape') {
       if (!$('helpDlg').classList.contains('hidden')) { $('helpDlg').classList.add('hidden'); return; }
       if (popOpen) { closePop(); return; }            // (one thing at a time: the popover, then the mode)
-      if (App.mode) App.setMode(null);
+      // (the modes of steps 2 and 4 last as long as the step)
+      if (App.mode && App.mode !== 'pieces' && App.mode !== 'marks') App.setMode(null);
     }
     // Alt+↑↓: the selected row one place up / down in the figure
     if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && S() && App.selRow) {
@@ -218,33 +223,27 @@
   }
   const nMoved = b => b.images.filter(id => App.isMoved(id)).length;
   const wlOpen = new Set();          // membranes whose white-light pictures are all shown
-  // the pictures themselves are shown on request (a line of counts otherwise): the tabs above the membrane switch
-  // between them, the thumbnails are for fixing a kind / membrane / alignment
-  let imgsOpen = false;
-  try { imgsOpen = localStorage.getItem('blotfig.imgs') === '1'; } catch (e) { /* storage off */ }
-  function setImgsOpen(on) { imgsOpen = on; try { localStorage.setItem('blotfig.imgs', on ? '1' : '0'); } catch (e) { /* storage off */ } renderBlots(); }
-  $('btnImgs').onclick = () => setImgsOpen(!imgsOpen);
+  /* step 1: every membrane with its pictures — the Marker picture (★: the one its pieces are found in and its
+   * marker is marked on) marked, any other set as it in one click; a picture's kind, exposure time, alignment
+   * and membrane in its ⋯ */
   function renderBlots() {
     const st = S(), box = $('blotList'); box.innerHTML = '';
     st.blots.forEach(b => {
       const card = document.createElement('div');
       card.className = 'blot-card' + (b.id === App.viewBlot ? ' view' : '');
-      const nCh = App.chemiOf(b).length, nM = App.markersOf(b).length;
-      card.innerHTML = `<div class="blot-head"><input type="text" value="${esc(b.name)}" placeholder="${esc(App.blotName(b))}" title="膜的名字（几张膜时用来区分）">
-          <button class="link" data-act="pieces" title="膜条认错了（合在一起、切歪了、漏了）：在膜图上移动、缩放、旋转、画出或删掉膜条">调整膜条</button>
-          <button class="link" data-act="redetect" title="丢掉现在的行，按图片重新识别（Ctrl+Z 可撤销）">重新识别</button></div>
-        <div class="blot-sub">${(b.pieces || []).length} 条膜条${b.userStrips ? '<span class="tag-hand" title="膜条是手动调整的">手动</span>' : ''} · ${st.rows.filter(r => r.blot === b.id).length} 行${nMoved(b) ? ` · <span title="拍摄之间膜的位置变过：这些图已对齐到同一位置">${nMoved(b)} 张已对齐</span>` : ''}</div>` +
-        (imgsOpen ? `<div class="th-label">曝光图 <span>${nCh}</span></div><div class="thumbs" data-kind="chemi"></div>
-        <div class="th-label">白光图（Marker）<span>${nM || '<b class="warn-t">没有</b>'}</span></div><div class="thumbs" data-kind="marker"></div>`
-          : `<div class="blot-sum">曝光图 <b>${nCh}</b> 张 · 白光图 ${nM ? `<b>${nM}</b> 张` : '<b class="warn-t">没有</b>'}</div>`) +
-        (!nM && !b.noWhiteOk ? '<div class="blot-sum">白光图认成了曝光图？在它的 ⋯ 里改类型。<button class="link" data-act="nowl" title="这张膜就是没有白光图：不再提示">确实没有</button></div>' : '');
-      // white-light pictures (often one per capture, all alike): the one the marker is read from and the grid's,
-      // the rest behind "+N" unless opened or shown
+      const nCh = App.chemiOf(b).length, nM = App.markersOf(b).length, mk = App.markerRec(b);
+      card.innerHTML = `<div class="blot-head"><input type="text" value="${esc(b.name)}" placeholder="${esc(App.blotName(b))}" title="膜的名字（几张膜时用来区分）"></div>
+        <div class="blot-sub">${nCh} 张曝光 · ${nM} 张白光 / 复合图${nMoved(b) ? ` · <span title="拍摄之间膜的位置变过：这些图已对齐到同一位置">${nMoved(b)} 张已对齐</span>` : ''}</div>
+        ${mk ? '' : '<p class="hint warn-t">没认出 Marker 图：点看得见 Marker 的那张下面的"设为 Marker 图"。确实没有的话也可以继续，只是不能标分子量。</p>'}
+        <div class="th-label">白光 / 复合图 <span>${nM}</span></div><div class="thumbs" data-kind="marker"></div>
+        <div class="th-label">曝光图 <span>${nCh}</span></div><div class="thumbs" data-kind="chemi"></div>`;
+      // white-light pictures (often one per capture, all alike): the Marker picture and the grid's, the rest
+      // behind "+N" unless opened or shown
       const wl = App.markersOf(b), keep = r => wlOpen.has(b.id) || wl.length <= 3 || r.id === b.marker || r.id === b.frame || (r.id === App.viewImg && b.id === App.viewBlot);
-      if (imgsOpen) b.images.map(id => App.images.get(id)).filter(Boolean).filter(r => r.kind !== 'marker' || keep(r)).sort((x, y) => (x.kind === 'marker') - (y.kind === 'marker') || (x.exposure || 0) - (y.exposure || 0)).forEach(rec => {
+      b.images.map(id => App.images.get(id)).filter(Boolean).filter(r => r.kind !== 'marker' || keep(r)).sort((x, y) => (y.id === b.marker) - (x.id === b.marker) || (x.exposure || 0) - (y.exposure || 0)).forEach(rec => {
         const th = card.querySelector(`.thumbs[data-kind="${rec.kind}"]`);
         const t = document.createElement('div');
-        t.className = 'thumb' + (rec.id === App.viewImg && b.id === App.viewBlot ? ' on' : '');
+        t.className = 'thumb' + (rec.id === App.viewImg && b.id === App.viewBlot ? ' on' : '') + (rec.id === b.marker ? ' mk' : '');
         t.title = rec.name + (rec.resampled ? '（已缩放到与曝光图相同尺寸）' : '');
         t.appendChild(thumbCanvas(rec));
         // which figure rows take their bands from this exposure (row colours)
@@ -253,15 +252,22 @@
         // the membrane lay elsewhere in this picture: aligned onto the others (the grid's own picture: 基准)
         const al = App.alignOf(rec.id), alHtml = App.isMoved(rec.id) ? `<span class="aligned" title="${esc(alignWords(rec, b))}；在 ⋯ 里可手动调整">${al.how === 'manual' ? '手动' : '已对齐'}</span>`
           : b.frame === rec.id && b.images.some(id => App.isMoved(id)) ? '<span class="aligned base" title="基准：这张膜的其他图都对齐到这张">基准</span>' : '';
-        // (the white-light picture the marker is read from)
-        const cap = rec.kind === 'marker' ? (b.marker === rec.id ? '<b title="Marker 条带从这张白光图读">读 Marker</b>' : '白光') : `<b>${esc(App.expoLabel(rec))}</b>`;
+        // the Marker picture (★), else its label and "set as the Marker picture"
+        const cap = rec.id === b.marker ? '<span class="isx" title="膜条从这张图找，Marker 在这张图上标">★ Marker 图</span>'
+          : `${rec.kind === 'marker' ? '白光' : `<b>${esc(App.expoLabel(rec))}</b>`}<br><button class="setmk" title="膜条从这张图找，Marker 在这张图上标">设为 Marker 图</button>`;
         t.insertAdjacentHTML('beforeend', `${usesHtml}${alHtml}<div class="cap">${cap}</div><button class="more" title="类型、曝光时间、对齐、移到别的膜、移除">⋯</button>`);
-        t.onclick = e => { if (e.target.classList.contains('more')) return; App.viewBlot = b.id; App.viewImg = rec.id; App.emit('select'); G.View.fitFull(); };
+        t.onclick = e => { if (e.target.classList.contains('more') || e.target.classList.contains('setmk')) return; App.viewBlot = b.id; App.viewImg = rec.id; App.emit('select'); G.View.fitFull(); };
         t.querySelector('.more').onclick = e => { e.stopPropagation(); imagePopover(rec, b, t); };
+        const sm = t.querySelector('.setmk');
+        if (sm) sm.onclick = e => {
+          e.stopPropagation();
+          App.busy(true, '按这张图重新找膜条…');
+          setTimeout(() => { App.setMarkerImage(b, rec.id); App.viewBlot = b.id; App.viewImg = rec.id; App.busy(false); App.commit(); G.View.fitFull(); toast(`${App.blotName(b)} 的 Marker 图改成了 ${rec.name}`); }, 20);
+        };
         th.appendChild(t);
       });
       const hidden = wl.filter(r => !keep(r)).length;
-      if (imgsOpen && (hidden || (wlOpen.has(b.id) && wl.length > 3))) {
+      if (hidden || (wlOpen.has(b.id) && wl.length > 3)) {
         const more = document.createElement('button');
         more.className = 'thumb-more'; more.textContent = hidden ? `+${hidden} 张` : '收起';
         more.title = hidden ? '其余的白光图（每次拍摄一张，通常看起来一样）' : '';
@@ -269,19 +275,25 @@
         card.querySelector('.thumbs[data-kind="marker"]').appendChild(more);
       }
       card.querySelector('.blot-head input').addEventListener('change', done(e => { b.name = e.target.value.trim(); }));
-      card.querySelector('[data-act="pieces"]').onclick = () => startPieces(b);
-      const nowl = card.querySelector('[data-act="nowl"]');
-      if (nowl) nowl.onclick = done(() => { b.noWhiteOk = true; });
-      card.querySelector('[data-act="redetect"]').onclick = () => {
-        if (!confirm('按图片重新识别这张膜上的所有行？\n现在调过的框、行的顺序和名字都会丢掉（Ctrl+Z 可撤销）。')) return;
-        App.busy(true, '重新识别…');
-        setTimeout(() => { App.reanalyze(b, { fresh: true }); App.busy(false); App.commit(); toast('已重新识别（Ctrl+Z 可撤销）'); }, 20);
-      };
       box.appendChild(card);
     });
     $('stBlots').textContent = `${st.blots.length} 张膜 · ${App.images.size} 张图`;
-    $('btnImgs').textContent = imgsOpen ? '收起图片 ▴' : '查看 / 修改图片 ▾';
-    $('imgsHint').textContent = imgsOpen ? '认错了曝光图 / 白光图，或分错了膜：点图片右上角的 ⋯' : '认错了图片类型、分错了膜时在这里改';
+    $('sum1').innerHTML = st.blots.map(b => { const mk = App.markerRec(b); return `${esc(App.blotName(b))}：Marker 图 <b>${mk ? esc(mk.name) : '没有'}</b>，${App.chemiOf(b).length} 张曝光`; }).join('<br>');
+  }
+  /* step 2: the pieces of each membrane (outlines edited on the picture); several membranes: one at a time */
+  function renderPieces() {
+    const st = S(), box = $('pieceList');
+    box.innerHTML = st.blots.map(b => `<div class="pc-blot${b.id === App.viewBlot ? ' view' : ''}" data-blot="${b.id}">${st.blots.length > 1 ? `<b>${esc(App.blotName(b))}</b>` : ''}
+      <span>${(b.pieces || []).length} 条膜条（${(b.pieces || []).map(p => p.letter).sort().join(' ')}）${b.userStrips ? '<span class="tag-hand">手动调整过</span>' : ''}</span>
+      ${st.blots.length > 1 && b.id !== App.viewBlot ? '<button class="link" data-act="show">看这张膜</button>' : ''}</div>`).join('');
+    box.querySelectorAll('[data-act="show"]').forEach(btn => btn.onclick = () => {
+      const to = App.blot(btn.closest('.pc-blot').dataset.blot), from = App.blot(App.viewBlot);
+      // (the outlines edited on the membrane shown are applied first)
+      applyPieces(from, App.curStep === 2 ? G.View.piecesEnd(true) : null, false, () => startPieces(to));
+    });
+    $('stPieces').textContent = `${st.blots.reduce((s, b) => s + (b.pieces || []).length, 0)} 条膜条`;
+    $('next2').textContent = App.curStep === 2 && pcUnseen() ? '这张膜对了，看下一张 →' : st.rows.length ? '膜条对了，回到蛋白框 →' : '膜条对了，下一步：生成蛋白框 →';
+    $('sum2').innerHTML = st.blots.map(b => `${st.blots.length > 1 ? esc(App.blotName(b)) + '：' : ''}<b>${(b.pieces || []).length}</b> 条膜条${b.userStrips ? '（手动调整过）' : ''}`).join('<br>');
   }
 
   /* ---------- popover ---------- */
@@ -307,9 +319,9 @@
   }
   document.addEventListener('mousedown', e => { if (popOpen && !pop.contains(e.target) && !e.target.classList.contains('more') && e.target !== $('editor')) closePop(); });
   const shortName = name => name.replace(/\s*\(.*?\)/g, '').replace(/\*$/, '');
-  /* size of a marker band set by hand: the ladder's sizes (the suggested one highlighted; Enter takes it) or any
-   * value. A new mark: Esc or a click elsewhere drops it; the next band clicked accepts the suggestion. was: the
-   * piece's marks before (null: read automatically — left without a choice, it stays so) */
+  /* size of a marker band: the ladder's sizes (the suggested one highlighted; Enter takes it) or any value. A new
+   * mark: Esc or a click elsewhere drops it; the next band clicked accepts the suggestion. was: the piece's marks
+   * before (null: none — left without a choice, it stays so) */
   function markPicker(b, pc, mark, cx, cy, isNew, was) {
     if (popOpen) closePop(true);
     const lad = G.ProteinLadders.get(b.ladderId);
@@ -318,7 +330,7 @@
     pop.innerHTML = `<h4>膜条 ${esc(pc.letter)}：这条 Marker 带是多少 kDa？</h4>
       <div class="kda-grid">${sizes.map(k => `<button data-k="${k}" class="${k === sug ? 'on' : ''}${lad && (lad.ref || []).includes(k) ? ' ref' : ''}"${lad && (lad.ref || []).includes(k) ? ' title="参考带（彩色 / 加粗）"' : ''}>${k}</button>`).join('')}</div>
       <div class="field inline"><label class="inline-label">其他</label><input type="number" id="pKda" class="num" step="any" min="0" placeholder="${sug || 'kDa'}"> kDa${sug ? `<span class="hint" style="margin:0 0 0 auto">回车 = ${sug}</span>` : ''}</div>
-      <p class="hint">${lad ? `按 ${esc(shortName(lad.name))} 列出` : '还没选 Marker 型号（左侧第 2 步），列出的是常见分子量'}</p>
+      <p class="hint">${lad ? `按 ${esc(shortName(lad.name))} 列出（橙色 = 参考带）` : '还没选 Marker 型号（左侧第 4 步最上面），列出的是常见分子量'}</p>
       <div class="actions">${isNew ? '<button class="btn sm" id="pNo">不加了</button>' : '<button class="btn sm danger" id="pDelMark">删除这条</button>'}<button class="btn sm primary" id="pOk">确定</button></div>`;
     placePopAt(cx + 14, cy - 30);
     const back = () => $('editorBox').focus({ preventScroll: true });
@@ -341,10 +353,10 @@
     setTimeout(() => inp.focus({ preventScroll: true }), 0);
   }
 
-  /* ---------- 2 marker ---------- */
-  // the ladder of each membrane, how every piece gets its sizes (confirmed or set by hand / read automatically,
-  // to be checked / not yet), and marking on the picture. Clicking a piece's chip marks that piece, zoomed in.
-  const MARK_STATE = { manual: '已确认', auto: '待核对', few: '再标 1 条', none: '未标' };
+  /* ---------- 4 marker ---------- */
+  // the ladder of each membrane and the marks of every piece (set by hand: nothing is read automatically).
+  // Clicking a piece's chip marks that piece, zoomed in.
+  const MARK_STATE = { manual: '可算分子量', few: '再标 1 条', none: '未标' };
   // the ladder menu, grouped by maker
   const ladderOptions = sel => G.ProteinLadders.groups().map(g => `<optgroup label="${esc(g.vendor)}">${g.ladders.map(l => `<option value="${l.id}"${l.id === sel ? ' selected' : ''}>${esc(l.name)}</option>`).join('')}</optgroup>`).join('');
   /* while marking: the ladder as its maker shows it — the bands spaced by log size (about how a gradient gel runs
@@ -361,64 +373,58 @@
       return `<rect x="8" y="${(y(k) - (ref ? 3 : 2)).toFixed(1)}" width="40" height="${ref ? 6 : 4}" rx="2" fill="${ref ? '#e8590c' : '#4263eb'}" opacity="${ref ? 1 : 0.85}"/>` +
         `<text x="56" y="${(y(k) + 4).toFixed(1)}" font-size="12" font-weight="${ref ? 700 : 500}" fill="${ref ? '#c2410c' : '#24324a'}">${k}${got ? ' ✓' : ''}</text>`;
     }).join('');
-    card.innerHTML = `<div class="lc-head"><b>Marker 参考</b><button id="lcHide" title="收起（在左侧第 2 步的按钮旁可再打开）">×</button></div>
+    card.innerHTML = `<div class="lc-head"><b>Marker 参考</b><button id="lcHide" title="收起（左侧第 4 步里可再打开）">×</button></div>
       <div class="lc-name" title="${esc(lad.name)}">${esc(shortName(lad.name))}</div>
       <svg width="116" height="${H + 2 * top}" viewBox="0 0 116 ${H + 2 * top}"><rect x="6" y="2" width="44" height="${H + 2 * top - 4}" rx="4" fill="#f1f4fa"/>${bands}</svg>
       <p class="lc-note">按 log 分子量等距的示意，实际间距随胶浓度而变；<b>橙色</b> = 彩色 / 加粗的参考带${pc ? `；✓ = 膜条 ${esc(pc.letter)} 已标` : ''}</p>`;
     card.classList.remove('hidden');
     $('lcHide').onclick = () => { cardHidden = true; card.classList.add('hidden'); renderMarker(); };
   }
+  /* step 4: the ladder of each membrane (its sizes as the maker lists them, the reference bands in orange) and
+   * the marks of each piece — the pieces the figure uses first */
   function renderMarker() {
-    const st = S(), box = $('markerPanel'), marking = App.mode === 'marks';
-    let html = '', todo = 0;
+    const st = S(), box = $('markerPanel');
+    let html = `<p class="lead">在中间的 Marker 图上<b>点一条 Marker 带</b>，选它的分子量（会吸附到条带上，按住 Alt 不吸附）。每条膜条标 <b>2 条以上</b>就能算出各行的分子量，之后其余大小的位置用虚线提示，点一下就加上。</p>`;
+    let todo = 0;
     st.blots.forEach(b => {
-      const A = App.analysis[b.id], auto = A && A.autoLadderId && G.ProteinLadders.get(A.autoLadderId), hasM = !!App.markerRec(b);
-      const pcs = (b.pieces || []).slice().sort((p, q) => (p.letter || '').localeCompare(q.letter || ''));
-      const used = new Set(App.usedPieces(b).map(pc => pc.id)), info = new Map(pcs.map(pc => [pc.id, App.markInfo(b, pc)]));
-      const note = b.ladderAuto ? (auto ? `按条带看像 ${esc(shortName(auto.name))}，请确认` : '请选择') : b.ladderFrom === 'pref' ? '上次用的' : '';
-      const nAuto = pcs.filter(pc => info.get(pc.id).state === 'auto').length;
-      if (b.ladderAuto && used.size) todo++;
+      const hasM = !!App.markerRec(b), lad = G.ProteinLadders.get(b.ladderId);
+      const used = new Set(App.usedPieces(b).map(pc => pc.id));
+      const pcs = (b.pieces || []).slice().sort((p, q) => (used.has(q.id) - used.has(p.id)) || (p.letter || '').localeCompare(q.letter || ''));
       html += `<div class="mk-blot" data-blot="${b.id}">${st.blots.length > 1 ? `<div class="mk-title">${esc(App.blotName(b))}</div>` : ''}
-        <label class="mk-label">Marker 型号${note ? `<span class="mk-note${b.ladderAuto ? ' todo' : ''}">${note}</span>` : ''}</label>
-        <select class="ladder-sel${b.ladderAuto ? ' todo' : ''}"><option value=""${b.ladderAuto ? ' selected' : ''}>${b.ladderAuto ? '— 选你用的 Marker —' : '按条带自动猜'}</option>${ladderOptions(b.ladderAuto ? null : b.ladderId)}</select>
-        ${hasM ? '' : '<p class="hint warn-t">没有白光图：拖进来，或在图片的 ⋯ 里把某张改成"Marker 白光"；也可以直接在曝光图上标。</p>'}
+        <label class="mk-label">Marker 型号${b.ladderId && b.ladderId === App.prefLadder ? '<span class="mk-note">上次用的</span>' : ''}</label>
+        <select class="ladder-sel${lad ? '' : ' todo'}"><option value=""${lad ? '' : ' selected'}>— 选你用的 Marker —</option>${ladderOptions(lad ? b.ladderId : null)}</select>
+        ${lad ? `<div class="mk-sizes" title="这个型号的条带（官方列表），橙色是彩色 / 加粗的参考带">${lad.sizes.map(k => `<span class="${(lad.ref || []).includes(k) ? 'ref' : ''}">${k}</span>`).join('')}</div>` : ''}
+        ${hasM ? '' : '<p class="hint warn-t">这张膜没有 Marker 图（第 1 步）：在曝光图上看得见 Marker 的话也可以标。</p>'}
         <div class="mk-chips">${pcs.map(pc => {
-          const mi = info.get(pc.id);
+          const mi = App.markInfo(b, pc);
           if (mi.state !== 'manual' && used.has(pc.id)) todo++;
-          return `<button class="mk-chip ${mi.state}${used.has(pc.id) ? '' : ' unused'}" data-pc="${pc.id}" title="膜条 ${esc(pc.letter)}：${MARK_STATE[mi.state]}${mi.ks.length ? '，' + mi.ks.join(' / ') + ' kDa' : ''}${used.has(pc.id) ? '' : '（成图没有用到这条膜条）'}。点一下放大到它的 Marker 道"><b>${esc(pc.letter)}</b><span>${mi.ks.length ? mi.ks.slice(0, 4).map(k => +k.toPrecision(3)).join('·') + (mi.ks.length > 4 ? '…' : '') : '—'}</span><i>${MARK_STATE[mi.state]}</i></button>`;
+          return `<button class="mk-chip ${mi.state}${used.has(pc.id) ? '' : ' unused'}" data-pc="${pc.id}" title="膜条 ${esc(pc.letter)}：${MARK_STATE[mi.state]}${mi.ks.length ? '，' + mi.ks.join(' / ') + ' kDa' : ''}${used.has(pc.id) ? '' : '（成图没有用到这条膜条）'}。点一下放大到它"><b>${esc(pc.letter)}</b><span>${mi.ks.length ? mi.ks.slice(0, 4).map(k => +k.toPrecision(3)).join('·') + (mi.ks.length > 4 ? '…' : '') : '—'}</span><i>${MARK_STATE[mi.state]}</i></button>`;
         }).join('')}</div>
-        <div class="mk-links">${nAuto ? `<button class="link mk-ok" title="自动读出的刻度在白光图上看过了、都对">✓ 全部确认（${nAuto} 条待核对）</button>` : ''}${pcs.some(pc => pc.marks) ? '<button class="link mk-auto" title="丢掉手动标的和确认过的刻度，按自动读出的重来">全部恢复自动</button>' : ''}</div></div>`;
+        ${pcs.some(pc => pc.marks && pc.marks.length) ? '<div class="mk-links"><button class="link mk-clear" title="这张膜上标的所有刻度都去掉（Ctrl+Z 可撤销）">清除这张膜的刻度</button></div>' : ''}</div>`;
     });
-    html += `<div class="mk-actions"><button class="btn ${marking ? '' : 'primary'}" id="btnMarks">${marking ? '✓ 完成' : '在白光图上核对 / 标注 Marker'}</button></div>
-      <p class="hint">${marking ? '拖刻度对准 Marker 带（自动吸附到条带，按住 Alt 不吸附）；点空白处加一条并选分子量；点数字改分子量或删除；选中后 ↑↓ 微调、Delete 删除。都对了点"全部确认"。'
-        : '自动读出的刻度只是建议，可能不准：点上面的按钮在白光图上看一眼，不对就拖到对准条带，都对就点"全部确认"。每条膜条有 2 条刻度就能算出分子量。'}</p>`;
+    if (cardHidden && App.mode === 'marks') html += '<p><button class="link mk-card-on">显示 Marker 参考图</button></p>';
     box.innerHTML = html;
     box.querySelectorAll('.mk-blot').forEach(div => {
       const b = App.blot(div.dataset.blot);
       div.querySelector('.ladder-sel').addEventListener('change', done(e => {
-        App.setLadder(b, e.target.value);
-        if (e.target.value) toast(`已选 ${shortName(G.ProteinLadders.get(e.target.value).name)}：以后新载入的膜默认用它${(b.pieces || []).some(pc => pc.marks) ? '；已确认的刻度不变（要按新型号重读点"全部恢复自动"）' : ''}`, 4200);
+        const id = e.target.value;
+        App.setLadder(b, id);
+        // (the other membranes without one yet: most likely the same ladder)
+        const more = id ? S().blots.filter(o => o !== b && !o.ladderId) : [];
+        more.forEach(o => App.setLadder(o, id));
+        if (id) toast(`已选 ${shortName(G.ProteinLadders.get(id).name)}${more.length ? '，其他膜也用它（不同就在那张膜下面改）' : ''}；以后新载入的膜默认用它`, 3600);
       }));
-      div.querySelectorAll('.mk-chip').forEach(c => c.onclick = () => startMarks(b, App.piece(b, c.dataset.pc)));
-      const ok = div.querySelector('.mk-ok');
-      if (ok) ok.onclick = () => confirmMarks(b);
-      const au = div.querySelector('.mk-auto');
-      if (au) au.onclick = done(() => { App.autoMarks(b); toast('已恢复自动读出的刻度'); });
+      div.querySelectorAll('.mk-chip').forEach(c => c.onclick = () => { if (App.curStep !== 4) openStep(4); startMarks(b, App.piece(b, c.dataset.pc)); });
+      const cl = div.querySelector('.mk-clear');
+      if (cl) cl.onclick = done(() => { App.clearMarks(b); toast('已清除这张膜的刻度（Ctrl+Z 可撤销）'); });
     });
-    $('btnMarks').onclick = () => { if (App.mode === 'marks') App.setMode(null); else startMarks(App.blot(App.viewBlot) || st.blots[0]); };
-    $('stMarker').textContent = todo ? `${todo} 处待核对` : '已确认';
-    $('stMarker').classList.toggle('warn', !!todo);
-    // the ladder's own pattern beside the picture (closed: a button brings it back)
-    if (marking && cardHidden) box.querySelector('.mk-actions').insertAdjacentHTML('beforeend', '<button class="link mk-card-on">显示 Marker 参考图</button>');
     const con = box.querySelector('.mk-card-on');
     if (con) con.onclick = () => { cardHidden = false; renderMarker(); };
+    $('stMarker').textContent = todo ? `${todo} 条膜条没标完` : '';
+    $('stMarker').classList.toggle('warn', !!todo);
+    $('sum4').innerHTML = st.style.showMW ? st.blots.map(b => `${st.blots.length > 1 ? esc(App.blotName(b)) + '：' : ''}${(b.pieces || []).map(pc => `${esc(pc.letter)} ${App.markInfo(b, pc).ks.length} 条`).join(' · ')}`).join('<br>') : '这次不标分子量';
+    // the ladder's own pattern beside the picture while marking
     ladderCard(App.blot(App.viewBlot));
-    // marking: the banner confirms the membrane shown
-    if (marking) {
-      const vb = App.blot(App.viewBlot), n = vb ? (vb.pieces || []).filter(pc => App.markInfo(vb, pc).state === 'auto').length : 0;
-      $('viewModeExtra').innerHTML = n ? '<button id="vmConfirm" title="自动读出的刻度看过了、都对">✓ 全部确认</button>' : '';
-      if (n) $('vmConfirm').onclick = () => confirmMarks(vb);
-    }
   }
   // where a picture lies on its membrane's grid, in words
   function alignWords(rec, b) {
@@ -501,9 +507,33 @@
       box.appendChild(el);
       if (sel) box.appendChild(rowDetail(row, ex, best));
     });
-    if (!st.rows.length) box.innerHTML = '<p class="hint">没有识别出条带。用下面的按钮在膜上框选添加，或按分子量添加。</p>';
-    const named = st.rows.filter(r => r.name && !r.hidden).length, vis = st.rows.filter(r => !r.hidden).length;
-    $('stRows').textContent = `${named}/${vis} 已命名`;
+    if (!st.rows.length) box.innerHTML = '<p class="hint">没有找到蛋白条带：点下面的"+ 添加一个蛋白框"，再到膜上点一下放下。</p>';
+    const vis = st.rows.filter(r => !r.hidden).length, hid = st.rows.length - vis;
+    $('stRows').textContent = st.rows.length ? `${vis} 行${hid ? ` · ${hid} 行隐藏` : ''}` : '';
+    $('sum3').innerHTML = `<b>${vis}</b> 个蛋白框${hid ? `（另有 ${hid} 个很弱的隐藏了）` : ''}`;
+  }
+  /* step 5: the proteins' names in figure order (Enter: the next one) */
+  function renderNames() {
+    const st = S(), box = $('nameList'), vis = st.rows.filter(r => !r.hidden);
+    box.innerHTML = vis.map(r => { const k = App.rowKda(r), sg = G.ProteinLadders.suggest(k);
+      return `<div class="name-item" data-id="${r.id}"><span class="grip" style="--c:${App.rowColor(r)}">${esc(modLabel(r))}</span><input type="text" value="${esc(r.name)}" placeholder="${esc(sg[0] ? sg[0] + '？' : '蛋白名')}" list="protList"><span class="kda">${k ? '≈' + Math.round(k) + ' kDa' : ''}</span></div>`; }).join('');
+    box.querySelectorAll('.name-item').forEach(it => {
+      const row = App.row(it.dataset.id), inp = it.querySelector('input');
+      inp.addEventListener('focus', () => { fillDatalist(App.rowKda(row)); });
+      inp.addEventListener('input', live(e => { row.name = e.target.value; }));
+      inp.addEventListener('change', done());
+      inp.addEventListener('keydown', e => {
+        if (e.key !== 'Enter' || composing(e)) return;
+        e.preventDefault();
+        const nx = it.nextElementSibling && it.nextElementSibling.querySelector('input');
+        inp.blur();
+        const again = nx && $('nameList').querySelector(`.name-item[data-id="${nx.closest('.name-item').dataset.id}"] input`);
+        if (again) again.focus(); else toast('蛋白名填完了');
+      });
+    });
+    const named = vis.filter(r => r.name).length, fl = App.figLanes(), ln = fl.filter(j => st.lanes[j - 1].name).length;
+    $('stLanes').textContent = `蛋白名 ${named}/${vis.length} · 泳道名 ${ln}/${fl.length}`;
+    $('sum5').innerHTML = `蛋白名 <b>${named}/${vis.length}</b> · 泳道名 <b>${ln}/${fl.length}</b>`;
   }
   /* the selected row, opened: its exposures (weakest to strongest; ★ = recommended, red pixels = clipped) and
    * its boxes on the membrane — how many lanes each has, the figure columns they fill, and the lane tools */
@@ -524,16 +554,22 @@
         <div class="bt-line"><span class="ptag" title="膜条 ${esc(pc ? pc.letter : '?')}">${esc(pc ? pc.letter : '?')}</span>
           <span class="bt-n"><b>${n}</b> 道${nm ? ` <span class="tag-m">+${nm} M</span>` : ''}${nx ? ` <span class="tag-x">+${nx} 不用</span>` : ''}</span>
           <span class="bt-cols">成图第 <b>${cols}</b> 列</span>
-          <button class="pnav" data-shift="-1" title="这个框的泳道在成图里往左挪一列">‹</button><button class="pnav" data-shift="1" title="往右挪一列">›</button></div>
+          <button class="pnav" data-shift="-1" title="这个框的泳道在成图里往左挪一列（最左到第 1 列，不会推动其他行）"${sg.c0 <= 1 ? ' disabled' : ''}>‹</button><button class="pnav" data-shift="1" title="往右挪一列">›</button></div>
         <div class="bt-line"><span class="bt-even">泳道数 <input type="number" class="num" min="1" max="60" value="${sg.lanes.length}"> <button class="btn sm primary" data-act="even" title="最左、最右两条泳道线不动，中间按泳道数均匀排开">首尾对齐</button></span>
           <button class="btn sm ghost" data-act="redetect" title="只看框里的像素，重新找泳道">框内重新识别</button></div>
+        <div class="bt-line"><span class="bt-rot">倾斜 <button class="pnav" data-rot="-0.1" title="逆时针 0.1°（选中框后按 [ ）">−</button><b>${(sg.rot || 0).toFixed(1)}°</b><button class="pnav" data-rot="0.1" title="顺时针 0.1°（选中框后按 ] ）">+</button></span>
+          <button class="btn sm ghost" data-act="level" title="按框里的条带把框摆正（条带和膜条不完全水平时）">按条带摆正</button>${sg.rot ? '<button class="link" data-act="rot0">归零</button>' : ''}</div>
       </div>`;
     }).join('');
     wrap.innerHTML = `${(b.pieces || []).length > 1 ? segLine : ''}
       ${ex.length ? `<div class="rd-title">曝光<span>${why}</span>${row.img !== best ? '<button class="link" data-act="usebest">改用推荐</button>' : ''}</div><div class="tiles"></div>` : ''}
       <div class="rd-title">泳道<button class="link" data-act="zoom" title="中间的膜图放大到这一行的框">在膜上放大</button></div>
-      <div class="lane-help"><b>泳道线没对准？</b>在膜图上把框里<b>最左、最右</b>两条泳道线拖到泳道中心，中间的会均匀排开（按住 Alt 只动一条）；条数不对就改泳道数，点"首尾对齐"。<br>
-        拖框的左右边：增减泳道；上下边：改高度；拖框内部：移动（可以拖到别的膜条上）。双击框内加一道，点竖线后 Delete 删掉；点框上方的数字切换 样品 / 不用 / Marker。</div>${boxes}`;
+      <ul class="lane-help"><li><b>泳道线没对准</b>：把框里最左、最右两条拖到泳道中心，中间的自动均分（Alt 只动一条）</li>
+        <li><b>条数不对</b>：改下面的泳道数再点"首尾对齐"；或双击框内加一道，点竖线后 Delete 删掉</li>
+        <li><b>边上的条带被切</b>：把框的左边或右边往外拖</li>
+        <li><b>某道不用 / 是 Marker</b>：点框上方的数字切换</li>
+        <li><b>歪了</b>：拖框上方的 ↻，或用下面的"倾斜"微调</li>
+        <li><b>太亮 / 太暗</b>：膜图上方的"暗部 / 亮部"只调这一行</li></ul>${boxes}`;
     wrap.querySelector('[data-act="zoom"]').onclick = () => { App.viewBlot = row.blot; App.viewImg = row.img; App.emit('select'); G.View.fitRow(row); };
     const split = wrap.querySelector('[data-act="split"]');
     if (split) split.onclick = done(() => { App.splitRow(row); toast('已拆开：每条膜条各成一行'); });
@@ -553,13 +589,18 @@
       const sg = row.segs.find(s => s.piece === div.dataset.seg);
       if (!sg) return;
       div.addEventListener('mousedown', () => { if (App.selSeg !== sg.piece) { App.selSeg = sg.piece; App.selLane = null; G.View.draw(); wrap.querySelectorAll('.bt-seg').forEach(x => x.classList.toggle('sel', x === div)); } });
-      div.querySelectorAll('[data-shift]').forEach(btn => btn.onclick = done(() => { if (!App.shiftCols(row, sg, +btn.dataset.shift)) toast('已经从第 1 列开始了'); }));
+      div.querySelectorAll('[data-shift]').forEach(btn => btn.onclick = done(() => { if (!App.shiftCols(row, sg, +btn.dataset.shift)) toast('已经在第 1 列了：要让它比其他行更靠左，把其他行往右挪（›）'); }));
       div.querySelector('[data-act="redetect"]').onclick = done(() => {
         const n = App.editLanes(row, sg, () => App.redetectBox(row, sg));
         App.findBand(row, sg); App.selLane = null;
         const nm = sg.lanes.filter(l => l.r === 'm').length;
         toast(n ? `框内识别出 ${n} 道${nm ? `（另有 ${nm} 道 Marker）` : ''}` : '框里没识别到泳道：拖框调整范围，或填道数后点"排布"', 3200);
       });
+      const pcOf = () => App.pieceOf(row, sg);
+      div.querySelectorAll('[data-rot]').forEach(btn => btn.onclick = done(() => { App.setSegRot(pcOf(), sg, (sg.rot || 0) + +btn.dataset.rot); App.findBand(row, sg); }));
+      div.querySelector('[data-act="level"]').onclick = done(() => { const d = App.levelBox(row, sg); toast(d != null ? `已按条带把框摆正（转了 ${d.toFixed(2)}°）` : '框里的条带不够清楚（至少 3 道），没有改；可以用 − + 或拖框上方的 ↻ 手动转'); });
+      const r0 = div.querySelector('[data-act="rot0"]');
+      if (r0) r0.onclick = done(() => { App.setSegRot(pcOf(), sg, 0); App.findBand(row, sg); });
       const inp = div.querySelector('.bt-even input');
       const even = done(() => { const n = App.editLanes(row, sg, () => App.evenEnds(row, sg, +inp.value)); App.selLane = null; toast(`已按最左、最右两条泳道等间距排布 ${n} 道`); });
       div.querySelector('[data-act="even"]').onclick = even;
@@ -581,20 +622,14 @@
     $('protList').innerHTML = [...new Set(sug.concat(used, base))].map(n => `<option value="${esc(n)}">`).join('');
   }
   $('btnAddRow').onclick = () => { if (!S()) return; App.setMode(App.mode === 'addrow' ? null : 'addrow'); };
-  function addKda() {
-    const k = +$('addKda').value; if (!(k > 0)) { toast('先填分子量（kDa）'); return; }
-    const row = App.addRowAtKda(k, App.viewBlot);
-    if (!row) { toast('没有哪张膜带 Marker 能覆盖这个分子量；可以用"在膜图上框选添加"'); return; }
-    // a newly added, possibly invisible protein: prefer the longest exposure
-    const ch = App.chemiOf(App.blot(row.blot)); row.img = ch[ch.length - 1].id; row.auto = false;
-    App.selRow = row.id; App.viewBlot = row.blot; App.viewImg = row.img;
-    $('addKda').value = '';
-    App.commit();
-    toast(`已在 ${k} kDa 处添加一行（用最长曝光），点"蛋白名"输入名称`);
-    editRowName(row.id);
-  }
-  $('btnAddKda').onclick = addKda;
-  $('addKda').addEventListener('keydown', e => { if (e.key === 'Enter' && !composing(e)) addKda(); });
+  $('btnRedetect').onclick = () => {
+    if (!S() || !confirm('按膜条重新识别所有蛋白框？\n现在调过的框、行的顺序和名字都会丢掉（Ctrl+Z 可撤销）。')) return;
+    App.busy(true, '重新识别…');
+    setTimeout(() => {
+      S().blots.forEach(b => { App.reanalyze(b, { fresh: true }); S().rows.filter(r => r.blot === b.id).forEach(r => r.segs.forEach(sg => App.levelBox(r, sg))); });
+      App.busy(false); App.commit(); toast('已重新识别所有蛋白框（Ctrl+Z 可撤销）');
+    }, 20);
+  };
 
   /* ---------- 3 lanes ---------- */
   function renderLanes() {
@@ -604,8 +639,6 @@
     $('laneList').innerHTML = st.lanes.map((l, i) => `<div class="item${i + 1 < st.range[0] || i + 1 > st.range[1] ? ' out' : ''}"><span class="idx">${i + 1}</span><span style="flex:1">${esc(l.name) || '<span class="muted">—</span>'}</span>
       <label class="switch"><input type="checkbox" data-j="${i + 1}" ${l.hidden ? '' : 'checked'}>显示</label></div>`).join('');
     $('laneList').querySelectorAll('[data-j]').forEach(c => c.addEventListener('change', done(e => { st.lanes[+c.dataset.j - 1].hidden = !e.target.checked; })));
-    const fl = App.figLanes(), named = fl.filter(j => st.lanes[j - 1].name).length;
-    $('stLanes').textContent = `${fl.length} 条 · ${named}/${fl.length} 已命名`;
   }
   const onRange = done(() => {
     let a = +$('rangeA').value, b = +$('rangeB').value; if (a > b) [a, b] = [b, a];
@@ -627,11 +660,42 @@
   /* ---------- 4 annotations ---------- */
   $('btnAddCond').onclick = done(() => { S().conditions.push({ name: '', values: S().lanes.map(() => '') }); toast('在成图上点每个格子切换 + / − / 空；点"条件"输入名称', 3200); });
   $('btnAddGroup').onclick = () => { if (S()) App.setMode(App.mode === 'group' ? null : 'group'); };
+  $('btnAddArrow').onclick = () => { if (S()) App.setMode(App.mode === 'arrow' ? null : 'arrow'); };
+  /* a target-band arrow: its name, whether its size is shown, the symbol (an arrowhead; * # † for other bands),
+   * the side; taken away */
+  function arrowPopover(k, at) {
+    const a = S().arrows[k]; if (!a) return;
+    const row = App.row(a.row), sz = App.arrowSize(a);
+    const syms = [['◀', '箭头'], ['*', '*'], ['#', '#'], ['†', '†']];
+    pop.innerHTML = `<h4>目标条带 · ${esc(row ? App.rowLabel(row) : '')}</h4>
+      <div class="field inline"><label class="inline-label">名称</label><input type="text" id="paText" style="flex:1" value="${esc(a.text)}" placeholder="可空，如 p-ERK1/2、剪切体"></div>
+      <div class="field inline"><label class="inline-label">符号</label><div class="seg">${syms.map(([s, t]) => `<button data-sym="${s}" class="${a.sym === s ? 'on' : ''}"${s === '*' ? ' title="常用来标非特异条带"' : ''}>${t}</button>`).join('')}</div></div>
+      <label class="switch"><input type="checkbox" id="paAuto" ${a.auto ? 'checked' : ''}${a.sym === '◀' ? '' : ' disabled'}><span>标分子量：${sz ? esc(sz) : '先在第 4 步标 Marker'}</span></label>
+      <div class="field inline"><label class="inline-label">放在</label><div class="seg"><button data-side="left" class="${a.side === 'left' ? 'on' : ''}">左边</button><button data-side="right" class="${a.side !== 'left' ? 'on' : ''}">右边</button></div></div>
+      <div class="actions"><button class="btn sm danger" id="paDel">删除</button><button class="btn sm primary" id="paOk">完成</button></div>`;
+    placePopAt(at.right + 10, at.top - 20);
+    const inp = pop.querySelector('#paText');
+    inp.addEventListener('input', live(e => { a.text = e.target.value; }));
+    inp.addEventListener('change', done());
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter' && !composing(e)) closePop(); });
+    pop.querySelectorAll('[data-sym]').forEach(b => b.onclick = done(() => { a.sym = b.dataset.sym; arrowPopover(k, at); }));
+    pop.querySelectorAll('[data-side]').forEach(b => b.onclick = done(() => { a.side = b.dataset.side; arrowPopover(k, at); }));
+    pop.querySelector('#paAuto').addEventListener('change', done(e => { a.auto = e.target.checked; }));
+    pop.querySelector('#paDel').onclick = () => { S().arrows.splice(k, 1); closePop(); App.commit(); toast('已删除这个箭头（Ctrl+Z 可撤销）'); };
+    pop.querySelector('#paOk').onclick = () => closePop();
+  }
   function renderAnno() {
     const st = S(), rows = [];
     st.groups.forEach((g, k) => rows.push(`<div class="item"><span class="kind">分组</span><span class="idx" style="width:auto">${g.from}–${g.to}</span><input type="text" data-g="${k}" value="${esc(g.text)}" placeholder="分组文字"><button class="x" data-gdel="${k}">×</button></div>`));
     st.conditions.forEach((c, r) => rows.push(`<div class="item"><span class="kind">条件</span><input type="text" data-c="${r}" value="${esc(c.name)}" placeholder="条件名，如 Dox"><button class="x" data-cdel="${r}">×</button></div>`));
+    (st.arrows || []).forEach((a, k) => {
+      const row = App.row(a.row); if (!row) return;
+      const what = a.sym === '◀' ? App.arrowLabel(a) || '未标分子量' : a.sym + (a.text ? ' ' + a.text : '');
+      rows.push(`<div class="item"><span class="kind">箭头</span><button class="link anno-arrow" data-a="${k}" title="点开修改">${esc(App.rowLabel(row))} · ${esc(what)}</button><button class="x" data-adel="${k}">×</button></div>`);
+    });
     const L = $('annoList'); L.innerHTML = rows.join('');
+    L.querySelectorAll('[data-a]').forEach(b => b.onclick = () => arrowPopover(+b.dataset.a, b.getBoundingClientRect()));
+    L.querySelectorAll('[data-adel]').forEach(b => b.onclick = done(() => st.arrows.splice(+b.dataset.adel, 1)));
     L.querySelectorAll('[data-g]').forEach(i => { const g = st.groups[+i.dataset.g]; i.addEventListener('input', live(e => { g.text = e.target.value; })); i.addEventListener('change', done()); });
     L.querySelectorAll('[data-c]').forEach(i => { const c = st.conditions[+i.dataset.c]; i.addEventListener('input', live(e => { c.name = e.target.value; })); i.addEventListener('change', done()); });
     L.querySelectorAll('[data-gdel]').forEach(b => b.onclick = done(() => st.groups.splice(+b.dataset.gdel, 1)));
@@ -644,6 +708,7 @@
   $('labelAngle').addEventListener('change', done(e => { S().style.labelAngle = e.target.value; }));
   ['invert', 'showMW', 'unitHeader', 'border'].forEach(id => $(id).addEventListener('change', done(e => { S().style[id] = e.target.checked; })));
   $('panelLetter').addEventListener('change', done(e => { S().style.panelLetter = e.target.value.trim(); }));
+  ['mwSide', 'nameSide'].forEach(id => $(id).addEventListener('change', done(e => { S().style[id] = e.target.value; })));
 
   /* ---------- middle header: image tabs + levels ---------- */
   const toSl = v => Math.round(Math.sqrt(clamp(v, 0, 1)) * 1000), fromSl = s => (s / 1000) ** 2;
@@ -665,22 +730,34 @@
     const isC = rec && rec.kind === 'chemi';
     $('levelBar').classList.toggle('hidden', !isC);
     if (isC) {
-      const lv = App.levelsOf(rec.id), users = st.rows.filter(r => r.img === rec.id && !r.hidden);
-      $('levelName').textContent = users.length ? `用于：${users.map(r => r.name || '未命名').join('、')}` : '这张图未被使用';
+      // the selected row shown in its own picture: the bar adjusts that row alone (else the whole picture)
+      const row = lvRow(), sel = App.selRow && App.row(App.selRow), users = st.rows.filter(r => r.img === rec.id && !r.hidden);
+      const lv = row ? App.rowLevels(row) : App.levelsOf(rec.id);
+      $('levelName').innerHTML = row ? `调整 <b>${esc(App.rowLabel(row).replace(/ 行$/, ''))}</b>（只这一行）<button class="link" id="lvToImg" title="改这张图的所有行">改整张图</button>`
+        : `${users.length ? `调整整张图（${users.length} 行用它）` : '这张图未被使用'}${sel && sel.img === rec.id ? '<button class="link" id="lvToRow">只调选中的行</button>' : ''}`;
+      if ($('lvToImg')) $('lvToImg').onclick = () => { lvImage = true; renderStageHead(); };
+      if ($('lvToRow')) $('lvToRow').onclick = () => { lvImage = false; renderStageHead(); };
       $('lvBlack').value = toSl(lv.black); $('lvWhite').value = toSl(lv.white);
     }
+  }
+  // the bar on the whole picture although a row is selected (until another row is)
+  let lvImage = false, lvSel = null;
+  function lvRow() {
+    if (App.selRow !== lvSel) { lvSel = App.selRow; lvImage = false; }
+    const r = App.selRow && App.row(App.selRow), rec = G.View.curImage();
+    return !lvImage && r && rec && r.img === rec.id ? r : null;
   }
   $('viewBlot').addEventListener('change', e => { App.viewBlot = e.target.value; App.viewImg = null; App.emit('select'); G.View.fitFull(); });
   const lvSet = (key) => live(e => {
     const rec = G.View.curImage(); if (!rec) return;
-    const lv = Object.assign({}, App.levelsOf(rec.id)), v = fromSl(+e.target.value);
+    const row = lvRow(), lv = Object.assign({}, row ? App.rowLevels(row) : App.levelsOf(rec.id)), v = fromSl(+e.target.value);
     if (key === 'black') lv.black = Math.min(v, lv.white - 0.0005); else lv.white = Math.max(v, lv.black + 0.0005);
-    lv.manual = true; S().levels[rec.id] = lv;
-    G.View.draw();
+    if (row) row.lv = { black: lv.black, white: lv.white };
+    else { lv.manual = true; S().levels[rec.id] = lv; G.View.draw(); }
   });
   $('lvBlack').addEventListener('input', lvSet('black')); $('lvWhite').addEventListener('input', lvSet('white'));
   $('lvBlack').addEventListener('change', done()); $('lvWhite').addEventListener('change', done());
-  $('btnLvAuto').onclick = done(() => { const rec = G.View.curImage(); if (rec) { delete S().levels[rec.id]; App.refreshChoices(); } });
+  $('btnLvAuto').onclick = done(() => { const rec = G.View.curImage(), row = lvRow(); if (row) delete row.lv; else if (rec) { delete S().levels[rec.id]; App.refreshChoices(); } });
   $('showSat').addEventListener('change', () => G.View.draw());
   $('fitFull').onclick = () => G.View.fitFull();
   $('fitSel').onclick = () => { const r = App.selRow && App.row(App.selRow); if (!r) return; if (App.viewBlot !== r.blot) { App.viewBlot = r.blot; App.viewImg = r.img; App.emit('select'); } G.View.fitRow(r); };
@@ -774,10 +851,12 @@
   prev.addEventListener('click', e => {
     if (!S() || swallowClick) return;
     const img = e.target.closest('image[data-row]');
+    if (img && App.mode === 'arrow') { placeArrow(img.dataset.row, e.clientY); return; }
     if (img) { selectRow(img.dataset.row, true); return; }
     const g = e.target.closest('[data-edit]'); if (!g) return;
     const kind = g.dataset.edit;
-    if (kind === 'rowname') openEd('rowname', g.dataset.row);
+    if (kind === 'arrow') arrowPopover(+g.dataset.k, g.getBoundingClientRect());
+    else if (kind === 'rowname') openEd('rowname', g.dataset.row);
     else if (kind === 'group') openEd('group', +g.dataset.k);
     else if (kind === 'condname') openEd('condname', +g.dataset.r);
     else if (kind === 'cond') {
@@ -826,8 +905,18 @@
     const tip = ov.querySelector('.droptip');
     tip.textContent = text; tip.style.left = x + 'px'; tip.style.top = y + 'px'; tip.classList.toggle('hidden', !text);
   }
+  // a target-band arrow where the figure row was clicked (screen y), at the band nearest it; its settings opened
+  function placeArrow(id, cy) {
+    const row = App.row(id), r = rowRects(lastFig).find(x => x.id === id); if (!row || !r) return;
+    const frac = (cy - prev.getBoundingClientRect().top - r.top) / Math.max(1, r.bot - r.top);
+    const a = App.addArrow(row, row.segs[0].vc - row.above + frac * (row.above + row.below));
+    App.setMode(null); App.commit();
+    const k = S().arrows.indexOf(a), g = prev.querySelector(`g[data-edit="arrow"][data-k="${k}"]`);
+    if (g) arrowPopover(k, g.getBoundingClientRect());
+    toast(App.arrowSize(a) ? `已标出 ${App.arrowSize(a)}：可以加名称、换成 * # †、放到另一边` : '已加箭头：第 4 步标好 Marker 后自动显示分子量', 3600);
+  }
   prev.addEventListener('mousedown', e => {
-    if (e.button !== 0 || !S()) return;
+    if (e.button !== 0 || !S() || App.mode === 'arrow') return;
     const tag = e.target.closest('.rowtag'), img = !tag && e.target.closest('image[data-row]');
     if (!tag && !img) return;
     pdrag = { id: (tag || img).dataset.row, piece: img ? img.dataset.piece : null, x0: e.clientX, y0: e.clientY, mode: null, onlyOrder: !!tag, k: 0, drop: null, alt: false };
@@ -894,9 +983,10 @@
     } else if (d.mode === 'align' && d.k) {
       const sg = row.segs.find(s => s.piece === d.piece);
       if (!sg) { updatePreview(); return; }
-      const n = App.shiftAlign(row, sg, d.k, d.alt);
+      const mv = App.shiftAlign(row, sg, d.k, d.alt);
+      if (!mv.n) { updatePreview(); toast('已经在第 1 列了：要让它比其他行更靠左，把其他行往右拖', 3200); return; }
       App.commit();
-      toast(`${d.alt || n < 2 ? '这个框' : `膜条 ${(App.findPiece(d.piece) || { pc: {} }).pc.letter} 上的 ${n} 个框`}往${d.k > 0 ? '右' : '左'}挪了 ${Math.abs(d.k)} 列`);
+      toast(`${d.alt || mv.n < 2 ? '这个框' : `膜条 ${(App.findPiece(d.piece) || { pc: {} }).pc.letter} 上的 ${mv.n} 个框`}往${mv.d > 0 ? '右' : '左'}挪了 ${Math.abs(mv.d)} 列${mv.d !== d.k ? '（最左到第 1 列）' : ''}`);
     } else updatePreview();
   });
   // the list: drag rows by their grip
@@ -925,44 +1015,129 @@
     if (App.moveRow(d.id, to)) { App.commit(); toast('已调整行的顺序'); }
   });
 
-  /* ---------- guidance: the steps on the left and the next one in the top bar ----------
-   * A step is done (green) when nothing in it needs the user; the first one that does is highlighted. The top
-   * bar says what to do next, and a click on it does it (opens the editor, starts marking, selects the row). */
-  let coachAct = null;
+  /* ---------- the steps: one after the other, each on what the one before established ----------
+   * S.step: how far the user has come; App.curStep: the step open. The open step shows its body and (steps 2 and
+   * 4) runs its mode on the membrane view; done steps fold to a line and open again on a click; later ones wait.
+   * The top bar says what to do in the open step, and a click on it does it. */
+  const STEP_SEC = { 1: 'secImages', 2: 'secPieces', 3: 'secRows', 4: 'secMarker', 5: 'secNames' };
+  // the pieces the figure uses that have fewer than 2 marks ({b, pc}), and them in words: "膜条 B、C" /
+  // "膜 1 的膜条 B、C，膜 2 的膜条 A"
+  const unmarked = () => S().blots.flatMap(b => App.usedPieces(b).filter(pc => App.markInfo(b, pc).state !== 'manual').map(pc => ({ b, pc })));
+  const piecesText = list => {
+    const by = new Map(); list.forEach(t => { if (!by.has(t.b)) by.set(t.b, []); by.get(t.b).push(t.pc.letter); });
+    return [...by].map(([b, ls]) => (S().blots.length > 1 ? `${App.blotName(b)} 的` : '') + '膜条 ' + ls.join('、')).join('，');
+  };
   const goTo = id => { const el = $(id); if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' }); };
+  const flash = x => { const el = typeof x === 'string' ? $(x) : x; if (!el) return; el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1300); };
+  function openStep(n) {
+    const st = S(); if (!st) return;
+    n = Math.max(1, Math.min(n, st.step));
+    closePop();
+    const was = App.curStep, b = App.blot(App.viewBlot) || st.blots[0];
+    const go = () => {
+      App.curStep = n;
+      if (n === 2) startPieces(b);
+      else if (n === 4) startMarks(b);
+      else {
+        if (App.mode) App.setMode(null);
+        if (n === 1 && b && b.marker) App.viewImg = b.marker;
+        if (n >= 3 && b && App.images.get(App.viewImg) && App.images.get(App.viewImg).kind === 'marker') App.viewImg = null;
+        App.emit('change'); G.View.fitFull();
+      }
+      renderSteps(); updateCoach();
+      goTo(STEP_SEC[n]);
+    };
+    // leaving step 2: the outlines edited there are applied first
+    if (was === 2 && n !== 2 && App.mode === 'pieces') applyPieces(b, G.View.piecesEnd(true), false, go); else go();
+  }
+  /* "next" in step n: step 1 confirms the Marker pictures; 2 applies the pieces and makes the boxes (a membrane
+   * that has boxes keeps them); 3 and 4 move on */
+  function nextStep(n) {
+    const st = S(); if (!st) return;
+    if (n === 1) {
+      const none = st.blots.filter(b => !App.markerRec(b));
+      if (none.length && !confirm(`${none.map(App.blotName).join('、')} 没有 Marker 图：膜条只能按曝光图的信号找，也不能标分子量。继续？`)) return;
+    }
+    if (n === 4 && st.style.showMW) {
+      const todo = unmarked();
+      if (todo.length && !confirm(`${piecesText(todo)} 还没标够 2 条 Marker 带：成图里这些膜条上的行没有分子量刻度。\n仍然继续？（以后可以回到第 4 步补标）`)) return;
+    }
+    if (n === 2) {
+      const b = App.blot(App.viewBlot) || st.blots[0], pcs = App.mode === 'pieces' ? G.View.piecesEnd(true) : null;
+      // a membrane whose pieces were not looked at yet: that one first
+      const more = pcUnseen();
+      if (more) { applyPieces(b, pcs, false, () => { startPieces(more); renderPieces(); updateCoach(); toast(`${App.blotName(b)} 的膜条好了，再看 ${App.blotName(more)} 的`, 3200); }); return; }
+      if (App.mode === 'pieces') App.setMode(null);
+      applyPieces(b, pcs, false, () => {
+        App.busy(true, '找每个蛋白的条带…');
+        setTimeout(() => {
+          const had = st.rows.length;
+          App.makeBoxes();
+          App.busy(false);
+          st.step = Math.max(st.step, 3); App.curStep = 3;
+          App.selRow = null; App.viewImg = null;
+          if (!had) App.viewBlot = st.blots[0].id;          // (the boxes from the first membrane on)
+          App.commit(); G.View.fitFull(); goTo('secRows');
+          const n3 = st.rows.filter(r => !r.hidden).length;
+          toast(had ? '膜条已更新，框都留在原处' : n3 ? `找到 ${n3} 个蛋白，右边就是成图。点框检查，好了点"下一步"` : '没找到蛋白条带：点"+ 添加一个蛋白框"自己框', 4200);
+        }, 20);
+      });
+      return;
+    }
+    st.step = Math.max(st.step, n + 1);
+    App.commit();
+    openStep(n + 1);
+  }
+  [1, 2, 3, 4].forEach(n => { $('next' + n).onclick = () => nextStep(n); });
+  $('skip4').onclick = () => { S().style.showMW = false; toast('这次不标分子量：成图不显示分子量刻度（第 5 步"更多版式"里可以再打开）', 3600); nextStep(4); };
+  // a done step's header opens it again
+  Object.entries(STEP_SEC).forEach(([n, id]) => $(id).querySelector('.sec-head').addEventListener('click', () => { if (S() && +n <= S().step && +n !== App.curStep) openStep(+n); }));
+
+  let coachAct = null;
   function updateCoach() {
-    const st = S(), vis = st.rows.filter(r => !r.hidden), fl = App.figLanes();
-    const used = st.blots.filter(b => vis.some(r => r.blot === b.id));
-    const unnamedRows = vis.filter(r => !r.name), unnamedLanes = fl.filter(j => !st.lanes[j - 1].name);
-    const sat = vis.filter(r => { const e = App.rowExpo(r).find(x => x.id === r.img); return e && e.satFrac > 0.002; });
-    const ladderTodo = used.find(b => b.ladderAuto && App.markerRec(b));
-    // pieces the figure uses whose sizes are not confirmed yet (read automatically, or none)
-    const markTodo = st.style.showMW ? used.map(b => ({ b, pcs: App.usedPieces(b).filter(pc => App.markInfo(b, pc).state !== 'manual') })).find(x => x.pcs.length) : null;
+    const st = S(), n = App.curStep || st.step, vis = st.rows.filter(r => !r.hidden), fl = App.figLanes();
     let msg, ok = false;
     coachAct = null;
-    const noWL = st.blots.find(b => !App.markersOf(b).length && !b.noWhiteOk);
-    if (!vis.length) { msg = '没有识别出条带：在左侧<b>"蛋白"</b>里框选添加，或按分子量添加'; coachAct = () => { goTo('secRows'); App.setMode('addrow'); }; }
-    else if (noWL) { msg = `${esc(App.blotName(noWL))}没有识别出白光图：其中有白光图的话，<b>点这里</b>在它的 ⋯ 里改成"Marker 白光"`; coachAct = () => { setImgsOpen(true); goTo('secImages'); }; }
-    else if (ladderTodo) { msg = `下一步：在左侧第 2 步<b>选你用的 Marker 型号</b>（只需选一次）`; coachAct = () => { goTo('secMarker'); const s = document.querySelector(`.mk-blot[data-blot="${ladderTodo.id}"] .ladder-sel`); if (s) s.focus(); }; }
-    else if (markTodo) {
-      const { b, pcs } = markTodo, unread = pcs.filter(pc => App.markInfo(b, pc).state !== 'auto');
-      if (!unread.length) { msg = `下一步：<b>核对 Marker 刻度</b>（自动读出的，可能不准；${pcs.length} 条膜条待核对）`; coachAct = () => { goTo('secMarker'); startMarks(b); }; }
-      else { msg = `膜条 ${esc(unread[0].letter)} 还没有分子量：<b>点这里</b>在${App.markerRec(b) ? '白光图' : '图'}上标 2 条 Marker 带${App.markerRec(b) ? '' : '（不需要分子量的话，在"版式"里关掉"分子量刻度"）'}`; coachAct = () => { goTo('secMarker'); startMarks(b, unread[0]); }; }
+    if (n === 1) { msg = `第 1 步：确认每张膜的 <b>Marker 图</b>（左边标 ★ 的那张），对了就点"下一步"`; coachAct = () => flash('next1'); }
+    else if (n === 2) {
+      const many = st.blots.length > 1 ? `（${esc(App.blotName(App.blot(App.viewBlot)))}${pcUnseen() ? '，看完再看下一张膜' : ''}）` : '';
+      msg = `第 2 步：看<b>蓝框</b>是不是刚好框住每条膜${many}，不对就在图上拖动修改；对了点"下一步"`; coachAct = () => flash('next2');
     }
-    else if (unnamedRows.length) { msg = `下一步：<b>输入蛋白名</b>（成图右侧灰字，回车跳下一行，还差 ${unnamedRows.length} 行）`; coachAct = () => openEd('rowname', unnamedRows[0].id); }
-    else if (unnamedLanes.length) { msg = `下一步：<b>输入泳道名</b>（成图上方灰色数字，回车跳下一条，还差 ${unnamedLanes.length} 条）`; coachAct = () => openEd('lane', unnamedLanes[0]); }
-    else if (sat.length) { msg = `「${esc(sat[0].name)}」所选曝光有过曝：<b>点这里</b>换一张更短的曝光`; coachAct = () => { selectRow(sat[0].id, true); goTo('secRows'); }; }
-    else { msg = '已可导出 —— 右上角<b>导出 PNG</b>；补充材料用"未裁切原图"'; ok = true; coachAct = () => { $('btnPNG').classList.add('flash'); setTimeout(() => $('btnPNG').classList.remove('flash'), 1200); }; }
+    else if (n === 3) {
+      if (!vis.length) { msg = '第 3 步：没找到蛋白条带，<b>点这里</b>再到膜上点一下放一个框'; coachAct = () => App.setMode('addrow'); }
+      else { msg = `第 3 步：检查每个<b>蛋白框</b>（点框选中，拖边角改大小，泳道线拖到泳道中心），好了点"下一步"`; coachAct = () => flash('next3'); }
+    } else if (n === 4) {
+      const todo = unmarked();
+      const noLad = st.blots.find(b => !b.ladderId);
+      if (noLad) { msg = '第 4 步：先在左边<b>选你用的 Marker 型号</b>（只需选一次）'; coachAct = () => { const s = document.querySelector(`.mk-blot[data-blot="${noLad.id}"] .ladder-sel`); if (s) { s.focus(); flash(s); } }; }
+      else if (todo.length) { msg = `第 4 步：在 Marker 图上<b>点 Marker 条带</b>，选分子量（还没标够 2 条：${esc(piecesText(todo))}）`; coachAct = () => startMarks(todo[0].b, todo[0].pc); }
+      else { msg = '第 4 步：每条膜条都标好了，点"下一步"'; coachAct = () => flash('next4'); }
+    } else {
+      const unnamedRows = vis.filter(r => !r.name), unnamedLanes = fl.filter(j => !st.lanes[j - 1].name);
+      const sat = vis.filter(r => { const e = App.rowExpo(r).find(x => x.id === r.img); return e && e.satFrac > 0.002; });
+      if (unnamedRows.length) { msg = `第 5 步：<b>输入蛋白名</b>（还差 ${unnamedRows.length} 行，回车跳下一个）`; coachAct = () => { const i = $('nameList').querySelector(`.name-item[data-id="${unnamedRows[0].id}"] input`); if (i) i.focus(); else openEd('rowname', unnamedRows[0].id); }; }
+      else if (unnamedLanes.length) { msg = `第 5 步：<b>输入泳道名</b>（成图上方灰色数字，还差 ${unnamedLanes.length} 条）`; coachAct = () => openEd('lane', unnamedLanes[0]); }
+      else if (sat.length) { msg = `「${esc(sat[0].name)}」所选曝光有过曝：<b>点这里</b>换一张更短的曝光`; coachAct = () => { openStep(3); selectRow(sat[0].id, true); }; }
+      else { msg = '可以导出了 —— 右上角<b>导出 PNG</b>；补充材料用"未裁切原图"'; ok = true; coachAct = () => flash('btnPNG'); }
+    }
     $('coachText').innerHTML = msg + (coachAct && !ok ? ' <span class="coach-go">→</span>' : '');
     $('coach').classList.toggle('done', ok); $('coach').classList.toggle('act', !!coachAct);
     $('imgCount').textContent = `${App.images.size} 张图 · 添加`;
-    // the steps
-    const steps = { secImages: true, secMarker: !ladderTodo && !markTodo,
-      secRows: vis.length > 0 && !unnamedRows.length && !sat.length, secLanes: fl.length > 0 && !unnamedLanes.length };
-    const cur = ['secMarker', 'secRows', 'secLanes'].find(id => !steps[id]);
-    Object.keys(steps).forEach(id => { $(id).classList.toggle('done', steps[id]); $(id).classList.toggle('todo', id === cur); });
   }
   $('coach').addEventListener('click', () => { if (coachAct) coachAct(); });
+  // the steps' look: open / done / waiting; the figure's placeholder until there are boxes
+  function renderSteps() {
+    const st = S(), cur = App.curStep || st.step;
+    Object.entries(STEP_SEC).forEach(([n, id]) => {
+      n = +n;
+      const el = $(id);
+      el.classList.toggle('cur', n === cur); el.classList.toggle('done', n < st.step); el.classList.toggle('reach', n === st.step && n !== cur); el.classList.toggle('locked', n > st.step);
+    });
+    // (a membrane added later goes through the steps again: the figure there is already stays)
+    $('figEmpty').classList.toggle('hidden', !!st.rows.length);
+    $('feSub').textContent = '按左边的步骤走，第 3 步之后成图出现在这里';
+    $('feSteps').querySelectorAll('li').forEach(li => { const s = +li.dataset.s; li.classList.toggle('done', s < cur); li.classList.toggle('cur', s === cur); });
+  }
 
   /* ---------- the first time: what the three columns are for ---------- */
   function showTour() {
@@ -980,6 +1155,7 @@
     const y = S().style;
     $('mmPerLane').value = y.mmPerLane; $('fontPt').value = y.fontPt; $('rowGap').value = y.rowGapPt; $('labelAngle').value = String(y.labelAngle);
     $('invert').checked = y.invert; $('showMW').checked = y.showMW; $('unitHeader').checked = y.unitHeader; $('border').checked = !!y.border; $('panelLetter').value = y.panelLetter || '';
+    $('mwSide').value = y.mwSide || 'left'; $('nameSide').value = y.nameSide || 'right';
     $('dpiTop').value = String(y.dpi);
     $('stLayout').textContent = `${y.mmPerLane} mm/泳道 · ${y.fontPt} pt`;
     $('btnUndo').disabled = App.hist.length < 2; $('btnRedo').disabled = !App.future.length;
@@ -1007,18 +1183,21 @@
   App.on(what => {
     if (!S()) return;
     if (what === 'loaded') {
-      $('emptyState').classList.add('hidden'); $('sections').classList.remove('hidden'); $('figEmpty').classList.add('hidden');
-      // a membrane without a white-light picture (or without exposures): perhaps a picture's kind was read wrong —
-      // the pictures shown, to change it
-      if (S().blots.some(b => !App.markersOf(b).length || !App.chemiOf(b).length)) imgsOpen = true;
+      $('emptyState').classList.add('hidden'); $('sections').classList.remove('hidden');
+      // the step to go on with (a membrane just added: its Marker picture first)
+      App.curStep = S().step;
+      if (App.curStep === 1) { const b = App.blot(App.viewBlot); if (b && b.marker) App.viewImg = b.marker; }
+      G.View.fitFull();               // (the membrane view drew before the step was known)
+      // (a project saved in step 2 or 4: back in that step's mode)
+      if (App.curStep === 2 || App.curStep === 4) setTimeout(() => openStep(App.curStep), 0);
       let seen = true; try { seen = !!localStorage.getItem('blotfig.tour'); } catch (e) { /* storage off */ }
       const dev = qs.get('demo') || qs.get('srcdir') || qs.get('demomove');     // (scripted runs: only with &tour=1)
       if (!seen && (!dev || qs.get('tour'))) setTimeout(showTour, 400);
     }
     if (what === 'refresh') { updatePreview(); return; }
-    if (what === 'select') { keepFocus(() => { renderBlots(); renderMarker(); renderRows(); }); showSelRow(); renderStageHead(); updatePreview(); G.View.draw(); return; }
-    keepFocus(() => { renderBlots(); renderMarker(); renderRows(); renderLanes(); renderAnno(); });
-    showSelRow(); renderStageHead(); syncLayout(); updateCoach(); updatePreview();
+    if (what === 'select') { keepFocus(() => { renderBlots(); renderPieces(); renderMarker(); renderRows(); }); showSelRow(); renderStageHead(); renderSteps(); updatePreview(); G.View.draw(); return; }
+    keepFocus(() => { renderBlots(); renderPieces(); renderMarker(); renderRows(); renderNames(); renderLanes(); renderAnno(); });
+    showSelRow(); renderStageHead(); syncLayout(); renderSteps(); updateCoach(); updatePreview();
   });
   window.addEventListener('resize', () => { if (S()) updatePreview(); });
 
@@ -1092,7 +1271,8 @@
     toast('已导出定量 CSV（用于参考；正式定量请用 ≥3 次独立实验）', 3600);
   }
 
-  G.UI = { toast, editRowName, openEd, markPicker, lastFig: () => lastFig };
+  G.UI = { toast, editRowName, openEd, markPicker, openStep, nextStep, lastFig: () => lastFig,
+    piecesChanged: () => { $('stPieces').textContent = '改过了：点"下一步"生效'; } };
 
   /* ---------- dev params ---------- */
   const qs = new URLSearchParams(location.search);
@@ -1128,7 +1308,15 @@
       await addFiles(files);
     } else await loadDemo();
     let st = S();
-    if (qs.get('ladder')) { st.blots.forEach(b => { b.ladderId = qs.get('ladder'); b.ladderAuto = false; }); App.commit(); }
+    // scripted runs go through the steps at once — the Marker pictures and pieces as found, the boxes made —
+    // and open the boxes' step (&step=1|2|3|4: stop at that step)
+    const stopAt = Math.max(1, Math.min(5, +qs.get('step') || 5));
+    if (stopAt >= 3) App.makeBoxes();
+    st.step = stopAt; App.curStep = Math.min(stopAt, 3);
+    if (stopAt === 1) { const b = st.blots[0]; if (b && b.marker) App.viewImg = b.marker; }
+    App.commit(); App.hist = App.hist.slice(-1);          // (undo starts from here)
+    if (stopAt === 2) openStep(2);
+    if (qs.get('ladder')) { st.blots.forEach(b => { b.ladderId = qs.get('ladder'); }); App.commit(); }
     if (qs.get('sel')) { const vis = st.rows.filter(r => !r.hidden), r = vis[+qs.get('sel')]; if (r) { App.selRow = r.id; App.viewBlot = r.blot; App.viewImg = r.img; App.emit('select'); } }
     if (qs.get('border') === '1') { st.style.border = true; App.commit(); }
     // &selpiece=B: of the selected row, the box on piece B gets the lane tools
@@ -1141,7 +1329,7 @@
     if (qs.get('scrollto') && $(qs.get('scrollto'))) $(qs.get('scrollto')).scrollIntoView({ block: 'center' });
     // &popimg=12: the ⋯ menu of the picture whose name starts so; &alignimg=12: aligning it by hand (&alignby=dx,dy,deg)
     const byStart = p => [...App.images.values()].find(r => r.name.startsWith(p));
-    if (qs.get('imgs') === '1' || qs.get('popimg')) { imgsOpen = true; renderBlots(); }
+    if (qs.get('popimg')) openStep(1);
     if (qs.get('popimg') && byStart(qs.get('popimg'))) {
       const rec = byStart(qs.get('popimg')), th = [...document.querySelectorAll('#blotList .thumb')].find(t => t.title.startsWith(rec.name));
       if (th) th.querySelector('.more').click();
@@ -1162,6 +1350,7 @@
     // scripted checks of the editing functions (tests): a log of every row's boxes (piece:first column:lane
     // roles), its figure columns and size after each step
     const scen = qs.get('scenario'), log = [];
+    if (scen) window.confirm = () => true;      // (scripted: every question answered yes — a headless browser blocks on them)
     const letter = id => (App.findPiece(id) || { pc: {} }).pc.letter;
     const segStr = r => r.segs.map(s => `${letter(s.piece)}:${s.c0}:${s.lanes.map(l => l.r).join('')}`).join('+');
     const snap = tag => log.push(`${tag} | ` + S().rows.map(r => `${segStr(r)}[${App.figLanes().filter(j => App.colSource(r, j)).join(',')}]${r.hidden ? 'h' : ''}~${Math.round(App.rowKda(r) || 0)}`).join(' '));
@@ -1197,10 +1386,12 @@
       el = imgOf(cr.id, cp); a = ctr(el); pull(el, [a[0] - 1.3 * L(), a[1]]); snap('C -1');
       el = imgOf(cr.id, cp); a = ctr(el); pull(el, [a[0] + 2.3 * L(), a[1]], { altKey: true }); snap('C box +2 (Alt)');
       App.undo(); snap('undo');
-      // D two columns past column 1: room is made on the left, lane names move along
+      // D two columns left: at column 1 already — nothing moves, no other row is pushed aside; C three columns
+      // left: as far as column 1 (two)
       S().lanes[0].name = 'L1'; App.commit();
       const dr = onPiece('D'), dp = dr.segs[0].piece;
       el = imgOf(dr.id, dp); a = ctr(el); pull(el, [a[0] - 2.3 * L(), a[1]]); order('D -2'); log.push('names ' + S().lanes.map(l => l.name || '.').join(','));
+      const c3 = onPiece('C'); el = imgOf(c3.id, c3.segs[0].piece); a = ctr(el); pull(el, [a[0] - 3.3 * L(), a[1]]); order('C -3');
       App.undo(); App.undo(); order('undo x2');
       // C's row dropped on D's: refused (stacked); the first row to the bottom by its tag
       el = imgOf(onPiece('C').id); const dRect = imgOf(onPiece('D').id).getBoundingClientRect();
@@ -1344,63 +1535,76 @@
       geo('drawn box');
     }
     if (scen === 'marks') {
+      // sizes from the user's marks alone: none at first, one mark is not enough, two give the rows on the piece
+      // theirs; a size changed; the membrane's marks cleared
       const b2 = S().blots[S().blots.length - 1], pc = b2.pieces[0], r = S().rows.find(r => r.segs.some(s => s.piece === pc.id));
       snap('start');
       const sg = r.segs.find(s => s.piece === pc.id), marks = App.manualMarks(b2, pc), u = App.ladderU(pc);
-      marks.push({ u, v: sg.vc - 30, kda: 100 }, { u, v: sg.vc + 30, kda: 55 });
-      App.commit(); snap('two marks');
+      marks.push({ u, v: sg.vc - 30, kda: 100 }); App.commit(); snap(`one mark ${App.markInfo(b2, pc).state}`);
+      marks.push({ u, v: sg.vc + 30, kda: 55 }); App.commit(); snap(`two marks ${App.markInfo(b2, pc).state}`);
       marks[0].kda = 130; App.commit(); snap('edit 100->130');
-      // the first blot's piece A: auto marks become editable, one is dragged
-      const b1 = S().blots[0], a = b1.pieces[0], m1 = App.manualMarks(b1, a);
-      snap(`materialized ${m1.map(m => m.kda).join('/')}`);
-      if (m1[0]) m1[0].v += 20; App.commit(); snap('dragged');
-      a.marks = null; App.commit(); snap('auto again');
+      App.clearMarks(b2); App.commit(); snap(`cleared ${App.markInfo(b2, pc).state}`);
     }
     if (scen === 'mark2') {
-      // marking with the mouse and keys: a piece's chip zooms to its marker lane; a mark dragged snaps onto a band
-      // (Alt: not); undo; a click on the lane adds a mark, its size picked; a mark clicked, nudged with ↓, deleted;
-      // a predicted size clicked in; all confirmed; back to automatic; the ladder picked is remembered
+      // marking with the mouse and keys, nothing read from the picture beforehand: the ladder picked (and kept for
+      // membranes loaded later); a piece's chip zooms to it; a click 3 px off a band puts a mark on the band, no
+      // size suggested for the first; the second gets the ladder's next size; only then the other sizes show
+      // where expected; a mark dragged snaps onto a band (Alt: not); "不加了"; a size typed in; a mark deleted
+      // from its picker; ↓ / Shift+↓ / Delete; a predicted size clicked in; on to step 5; the marks cleared
       // (canvas px: the canvas moves when the levels bar comes and goes)
       const B = () => S().blots[0], cv = $('editor');
       const ev = (type, [x, y], opt) => { const R = cv.getBoundingClientRect(); (type === 'mousedown' ? cv : window).dispatchEvent(new MouseEvent(type, Object.assign({ clientX: R.left + x, clientY: R.top + y, bubbles: true }, opt))); };
       const pull = (a, dy, opt) => { ev('mousedown', a, opt); ev('mousemove', [a[0], a[1] + dy / 2], opt); ev('mousemove', [a[0], a[1] + dy], opt); ev('mouseup', [a[0], a[1] + dy], opt); };
       const key = (k, opt) => $('editorBox').dispatchEvent(new KeyboardEvent('keydown', Object.assign({ key: k, bubbles: true }, opt)));
       const states = () => B().pieces.map(pc => `${pc.letter}:${App.markInfo(B(), pc).state}`).join(' ');
-      const pcId = (B().pieces.find(p => App.markInfo(B(), p).state === 'auto') || B().pieces[0]).id, P = () => App.piece(B(), pcId);
-      const mk = () => (P().marks ? P().marks.map(m => `${m.kda}@${Math.round(m.v)}`).join(',') : 'auto');
-      const coach = () => $('coachText').textContent.replace(/\s+/g, ' ').slice(0, 26);
+      const pcId = (B().pieces.find(p => p.ladderUs && p.ladderUs.length) || B().pieces[0]).id, P = () => App.piece(B(), pcId);
+      const mk = () => (P().marks && P().marks.length ? P().marks.map(m => `${m.kda}@${Math.round(m.v)}`).join(',') : 'none');
+      const coach = () => $('coachText').textContent.replace(/\s+/g, ' ').slice(0, 30);
+      const shown = () => { const ms = G.View.probeMarks(P()); return `${ms.filter(m => m.manual).length} set, predicted ${ms.filter(m => m.predicted).map(m => m.k).join('/') || '-'}`; };
+      const sugg = () => { const o = pop.querySelector('.kda-grid button.on'); return o ? o.dataset.k : '-'; };
+      openStep(4);
       log.push(`start | ${states()} | ${$('stMarker').textContent} | ${coach()}`);
+      const lsel = $('markerPanel').querySelector('.ladder-sel');
+      lsel.value = 'pr26619'; lsel.dispatchEvent(new Event('change', { bubbles: true }));
+      let saved = null; try { saved = localStorage.getItem('blotfig.ladder'); } catch (e) { /* storage off */ }
+      log.push(`ladder | blot ${B().ladderId} pref ${App.prefLadder} saved ${saved} | ${coach()}`);
       $('markerPanel').querySelector(`.mk-chip[data-pc="${pcId}"]`).click();
-      log.push(`chip ${P().letter} | mode ${App.mode} focus ${App.markFocus === pcId} white ${App.viewImg === B().marker} zoom ${G.View.probeScale().toFixed(2)} banner ${$('viewModeExtra').textContent}`);
-      const peaks = App.ladderPeaks(B(), P(), App.markLane(P())).map(p => Math.round(p.v));
-      let m0 = G.View.probeMarks(P()).find(m => !m.predicted);
-      pull(m0.pill, 9);
-      log.push(`drag ${m0.k} +9px | ${App.markInfo(B(), P()).state} ${mk()} | bands ${peaks.join(',')}`);
+      log.push(`chip ${P().letter} | mode ${App.mode} step ${App.curStep} focus ${App.markFocus === pcId} white ${App.viewImg === B().marker} zoom ${G.View.probeScale().toFixed(2)} | ${shown()}`);
+      const u = App.ladderU(P()), at = v => { const s = G.View.scrOf(P(), u, v); return [s.x, s.y]; }, click = v => { ev('mousedown', at(v)); ev('mouseup', at(v)); };
+      const peaks = App.ladderPeaks(B(), P(), u).filter(p => p.dark && p.prom > 0.3).map(p => p.v);
+      log.push(`bands ${peaks.map(Math.round).join(',')}`);
+      click(peaks[0] + 3);
+      log.push(`click 1 | picker ${popOpen} suggested ${sugg()} | ${mk()}`);
+      pop.querySelector('.kda-grid button[data-k="250"]').click();
+      log.push(`picked 250 | ${App.markInfo(B(), P()).state} ${mk()} | ${shown()}`);
+      click(peaks[1]);
+      const s2 = sugg();
+      pop.querySelector('#pKda').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      log.push(`click 2 suggested ${s2}, Enter | ${App.markInfo(B(), P()).state} ${mk()} | ${shown()}`);
+      // dragged 9 px: back onto its band; Alt: where let go
+      let m0 = G.View.probeMarks(P()).find(m => m.manual);
+      pull(m0.pill, 9); log.push(`drag ${m0.k} +9px | ${mk()}`);
       m0 = G.View.probeMarks(P()).find(m => m.manual);
-      pull(m0.pill, 7, { altKey: true });
-      log.push(`Alt drag +7px | ${mk()}`);
-      App.undo(); App.undo(); log.push(`undo x2 | ${mk()}`);
-      // a click on the lane between two marks, "不加了": the piece stays read automatically
-      const ms = G.View.probeMarks(P()).filter(m => !m.predicted).sort((a, c) => a.v - c.v), at = v => { const s = G.View.scrOf(P(), App.markLane(P()), v); return [s.x, s.y]; };
-      ev('mousedown', at((ms[0].v + ms[1].v) / 2)); ev('mouseup', at((ms[0].v + ms[1].v) / 2));
-      log.push(`click on the lane | picker ${popOpen} ${pop.querySelector('#pNo') ? 'has 不加了' : ''}`);
-      if (pop.querySelector('#pNo')) pop.querySelector('#pNo').click();
-      log.push(`not added | ${App.markInfo(B(), P()).state} ${mk()}`);
-      // again, a size typed in; undone
-      ev('mousedown', at((ms[0].v + ms[1].v) / 2)); ev('mouseup', at((ms[0].v + ms[1].v) / 2));
-      const sg0 = pop.querySelector('.kda-grid button.on'), inp = pop.querySelector('#pKda');
-      inp.value = '180'; inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      log.push(`typed 180 (suggested ${sg0 ? sg0.dataset.k : '-'}) | ${mk()} | picker ${popOpen}`);
+      pull(m0.pill, 7, { altKey: true }); log.push(`Alt drag +7px | ${mk()}`);
       App.undo(); log.push(`undo | ${mk()}`);
-      // the second mark clicked, deleted from its picker: its size is now predicted (dashed) from the others; a
-      // click 3 px off its band adds it there again, on the band
-      const m1 = G.View.probeMarks(P()).filter(m => !m.predicted).sort((a, c) => a.v - c.v)[1];
+      // a click between the two, "不加了"; again with a size typed in, undone
+      const ms = G.View.probeMarks(P()).filter(m => m.manual).sort((a, c) => a.v - c.v), mid = (ms[0].v + ms[1].v) / 2;
+      click(mid);
+      log.push(`click between | picker ${popOpen} suggested ${sugg()} ${pop.querySelector('#pNo') ? 'has 不加了' : ''}`);
+      if (pop.querySelector('#pNo')) pop.querySelector('#pNo').click();
+      log.push(`not added | ${mk()}`);
+      click(mid);
+      const inp = pop.querySelector('#pKda');
+      inp.value = '180'; inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      log.push(`typed 180 | ${mk()} | picker ${popOpen}`);
+      App.undo(); log.push(`undo | ${mk()}`);
+      // the second mark deleted from its picker: one left, nothing predicted; undone
+      const m1 = G.View.probeMarks(P()).filter(m => m.manual).sort((a, c) => a.v - c.v)[1];
       ev('mousedown', m1.pill); ev('mouseup', m1.pill);
       if (pop.querySelector('#pDelMark')) pop.querySelector('#pDelMark').click();
-      log.push(`deleted ${m1.k} from the picker | ${App.markInfo(B(), P()).state} ${mk()}`);
-      ev('mousedown', at(m1.v + 3)); ev('mouseup', at(m1.v + 3));
-      log.push(`click near its band | picker ${popOpen} | ${mk()} sel=${App.selMark ? App.selMark.i : '-'}`);
-      // the top mark clicked (its size picker), closed; ↓ twice, Shift+↓; Delete
+      log.push(`deleted ${m1.k} from the picker | ${App.markInfo(B(), P()).state} ${mk()} | ${shown()}`);
+      App.undo(); log.push(`undo | ${mk()}`);
+      // the top mark clicked (its size picker), closed; ↓ twice, Shift+↓; Delete; undone
       m0 = G.View.probeMarks(P()).filter(m => m.manual).sort((a, c) => a.v - c.v)[0];
       ev('mousedown', m0.pill); ev('mouseup', m0.pill);
       log.push(`clicked ${m0.k} | picker ${popOpen}`);
@@ -1408,22 +1612,17 @@
       key('ArrowDown'); key('ArrowDown'); key('ArrowDown', { shiftKey: true });
       log.push(`down 1+1+5 | ${mk()}`);
       key('Delete'); log.push(`Delete | ${mk()} sel=${App.selMark ? 'yes' : 'none'}`);
-      // its size now predicted (dashed) from the others: clicked, added at the band nearest it
-      const pr = G.View.probeMarks(P()).find(m => m.predicted && m.k === m0.k);
+      App.undo(); App.undo(); App.undo(); App.undo(); log.push(`undo x4 | ${mk()}`);
+      // a predicted size clicked: added at the band nearest it
+      const pr = G.View.probeMarks(P()).filter(m => m.predicted)[0];
       if (pr) { ev('mousedown', pr.pill); ev('mouseup', pr.pill); }
-      log.push(`predicted ${m0.k} ${pr ? 'clicked' : 'not shown'} | ${mk()}`);
-      // confirmed from the banner: every piece read automatically; then all back to automatic
-      const vc = $('vmConfirm');
-      if (vc) vc.click();
-      log.push(`confirm all | ${states()} | mode ${App.mode} | ${$('stMarker').textContent} | ${coach()}`);
-      const au = $('markerPanel').querySelector('.mk-auto');
-      if (au) au.click();
-      log.push(`auto again | ${states()} | ${$('stMarker').textContent}`);
-      // the ladder picked: kept for membranes loaded later
-      const sel = $('markerPanel').querySelector('.ladder-sel'), other = G.ProteinLadders.all().find(l => l.id !== B().ladderId);
-      sel.value = other.id; sel.dispatchEvent(new Event('change', { bubbles: true }));
-      let saved = null; try { saved = localStorage.getItem('blotfig.ladder'); } catch (e) { /* storage off */ }
-      log.push(`ladder ${other.id} | blot ${B().ladderId} from ${B().ladderFrom} | pref ${App.prefLadder} saved ${saved}`);
+      log.push(`predicted ${pr ? pr.k + ' clicked' : 'none shown'} | ${mk()} | ${$('stMarker').textContent} | ${coach()}`);
+      $('vmMkNext').click();
+      log.push(`next | step ${S().step} open ${App.curStep} mode ${App.mode} | ${coach()}`);
+      openStep(4);
+      const cl = $('markerPanel').querySelector('.mk-clear');
+      if (cl) cl.click();
+      log.push(`cleared | ${states()} | ${$('stMarker').textContent}`);
     }
     if (scen === 'edit2') {
       // boxes free of the pieces, lanes by their ends, pieces by hand (mouse events on the membrane view)
@@ -1474,7 +1673,7 @@
       $('editorBox').dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
       const R0 = cv.getBoundingClientRect(); pull([20, R0.height - 60], [120, R0.height - 20]);
       log.push(`editing | ${P().map(p => `${p.letter}${Math.round(p.w)}x${Math.round(p.h)}@${p.angle}`).join(' ')}`);
-      $('vmPcApply').click();
+      $('vmPcNext').click();
       await new Promise(r => setTimeout(r, 400));
       log.push(`applied | mode ${App.mode} | ${geo()} | userStrips ${B().userStrips.length} | rows ${rowsAt()}`);
       App.undo(); log.push(`undo | ${geo()} | userStrips ${B().userStrips ? B().userStrips.length : 'none'}`);
@@ -1483,9 +1682,11 @@
     if (scen === 'proj') {
       // a project saved and opened again: every row (boxes, lanes, columns, name, size, exposure), the marks,
       // the pieces by hand, the levels come back as they were
-      const r0 = vis()[0]; r0.name = 'GAPDH'; App.confirmMarks(S().blots[0]); App.commit();
+      const r0 = vis()[0], pc0 = S().blots[0].pieces[0]; r0.name = 'GAPDH'; App.manualMarks(S().blots[0], pc0).push({ u: 0, v: -50, kda: 100 }, { u: 0, v: 40, kda: 50 });
+      Object.assign(App.addArrow(r0, r0.segs[0].vc), { sym: '*', side: 'left' }); App.commit();
       const sig = () => JSON.stringify({ rows: S().rows.map(r => [r.name, r.img && App.images.get(r.img).name, Math.round(App.rowKda(r) || 0), r.segs.map(s => [(App.findPiece(s.piece) || { pc: {} }).pc.letter, Math.round(s.vc), Math.round(s.x0), Math.round(s.x1), s.c0, s.lanes.map(l => Math.round(l.u) + l.r).join('')])]),
-        marks: S().blots[0].pieces.map(p => p.letter + ':' + (p.marks || []).map(m => m.kda + '@' + Math.round(m.v)).join(',')), levels: S().levels, range: S().range });
+        marks: S().blots[0].pieces.map(p => p.letter + ':' + (p.marks || []).map(m => m.kda + '@' + Math.round(m.v)).join(',')), levels: S().levels, range: S().range,
+        arrows: S().arrows.map(a => [App.row(a.row) && App.row(a.row).name, a.db, a.sym, a.side]) });
       const before = sig(), t0 = performance.now();
       const blob = await App.saveProject();
       log.push(`saved ${(blob.size / 1048576).toFixed(1)} MB`);

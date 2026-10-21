@@ -11,7 +11,7 @@
   <div class="brand">BlotFigure</div>
   <label class="chip" title="添加更多图片（同一次实验的其他膜或曝光）"><span class="chip-dot"></span><span id="imgCount">添加图片</span>
     <input type="file" id="fileInput" multiple accept=".tif,.tiff,.png,.jpg,.jpeg,.bmp" hidden></label>
-  <div class="coach" id="coach"><span class="coach-dot"></span><span id="coachText">把一次实验的全部图片拖进窗口：各个曝光 + Marker 白光图</span></div>
+  <div class="coach" id="coach"><span class="coach-dot"></span><span id="coachText">把一次实验的全部图片拖进窗口：各个曝光 + 看得见 Marker 的图（白光或复合图）</span></div>
   <div class="topbar-right">
     <button class="icon-btn" id="btnUndo" title="撤销 (Ctrl+Z)">↺</button>
     <button class="icon-btn" id="btnRedo" title="重做 (Ctrl+Shift+Z)">↻</button>
@@ -42,72 +42,104 @@
     <div class="empty" id="emptyState">
       <div class="empty-icon">▤</div>
       <h2>把一次实验的图片全部拖进来</h2>
-      <p>每张膜的多个曝光（短 / 中 / 长）和 Marker 白光图一起拖入即可。<br>工具会自动：<br>· 把图片归到各自的膜<br>· 找出每个蛋白的条带行<br>· 每行挑最长且不过曝的曝光<br>· 识别 Ladder 并标 kDa<br>· 按泳道对齐拼成一张图</p>
+      <p>每张膜的各次曝光（短 / 中 / 长）和一张看得见 Marker 的图（白光图，或白光 + 化学发光的复合图）一起拖入。<br>然后按左边的 5 步走：确认 Marker 图 → 检查膜条 → 调整蛋白框 → 标 Marker → 填名称导出。</p>
       <label class="btn primary big">选择图片（可多选）<input type="file" id="fileInput2" multiple accept=".tif,.tiff,.png,.jpg,.jpeg,.bmp" hidden></label>
       <button class="btn big" id="btnDemo" title="3 次曝光的切开的膜 + 另一张斜放的膜">看看示例</button>
       <p class="privacy">图片只在本机浏览器处理，不会上传。<br>保存过的项目：右上角"文件 → 打开项目"。</p>
     </div>
 
     <div id="sections" class="hidden">
-      <section class="sec" id="secImages">
-        <div class="sec-head"><span class="sec-n">1</span>图片与膜<span class="sec-status" id="stBlots"></span></div>
-        <div id="blotList"></div>
-        <div class="img-toggle"><button class="link" id="btnImgs"></button><span class="hint" id="imgsHint"></span></div>
-      </section>
-
-      <section class="sec" id="secMarker">
-        <div class="sec-head"><span class="sec-n">2</span>Marker 与分子量<span class="sec-status" id="stMarker"></span></div>
-        <div id="markerPanel"></div>
-      </section>
-
-      <section class="sec" id="secRows">
-        <div class="sec-head"><span class="sec-n">3</span>蛋白（成图的行）<span class="sec-status" id="stRows"></span></div>
-        <p class="lead">每行一个蛋白。点一行展开：换曝光、调这一行的泳道。</p>
-        <div id="rowList"></div>
-        <div class="field inline add-row">
-          <button class="btn sm" id="btnAddRow">+ 在膜上框选添加</button>
-          <span class="inline-label">或按分子量 <input type="number" id="addKda" class="num" placeholder="kDa"> <button class="btn sm ghost" id="btnAddKda">添加</button></span>
+      <!-- the steps, in order: each works on what the one before established; the one open is .cur, done ones
+           fold to a line (a click opens them again), later ones wait (.locked) -->
+      <section class="sec step" id="secImages" data-step="1">
+        <div class="sec-head"><span class="sec-n">1</span>确认 Marker 图<span class="sec-status" id="stBlots"></span></div>
+        <div class="step-sum" id="sum1"></div>
+        <div class="step-body">
+          <p class="lead">每张膜要有一张<b>看得见 Marker 的图</b>：白光图，或白光 + 化学发光的复合图。后面靠它找膜条、标分子量。标着 <span class="mk-star">★ Marker 图</span> 的是猜的那张；不对就点对的那张下面的<b>"设为 Marker 图"</b>。其余的当作曝光图。</p>
+          <div id="blotList"></div>
+          <div class="step-next"><button class="btn primary big" id="next1">确认，下一步：检查膜条 →</button></div>
         </div>
       </section>
 
-      <section class="sec" id="secLanes">
-        <div class="sec-head"><span class="sec-n">4</span>泳道<span class="sec-status" id="stLanes"></span></div>
-        <div class="field inline range-row">成图用第 <select id="rangeA"></select> – <select id="rangeB"></select> 列 <button class="btn sm ghost" id="btnRangeAuto">自动</button></div>
-        <p class="lead">泳道名：在右侧成图上<b>点灰色泳道号</b>输入，回车跳下一条；或一次粘贴整行：</p>
-        <textarea id="laneBulk" rows="2" placeholder="Ctrl, siA#1, siA#2 …（逗号、Tab、换行均可）"></textarea>
-        <details class="adv"><summary>逐列剪除</summary><div id="laneList" class="list"></div>
-          <p class="hint">取消"显示" = 从成图剪除这一列，所有行同步剪除并留白间隔（图注需说明）。</p></details>
-      </section>
-
-      <section class="sec" id="secAnno">
-        <div class="sec-head"><span class="sec-n">5</span>标注 <span class="h3-note">可选</span></div>
-        <div class="tools">
-          <button class="tool" id="btnAddCond"><span class="ti">±</span>条件行<small>+ / − 矩阵</small></button>
-          <button class="tool" id="btnAddGroup"><span class="ti">⎴</span>分组横线<small>在成图上拖过泳道名</small></button>
+      <section class="sec step" id="secPieces" data-step="2">
+        <div class="sec-head"><span class="sec-n">2</span>检查膜条<span class="sec-status" id="stPieces"></span></div>
+        <div class="step-sum" id="sum2"></div>
+        <div class="step-body">
+          <p class="lead">中间 Marker 图上的<b>蓝框</b>是找到的膜条（一张膜剪成几条时每条一个框），要刚好框住每一条膜。不对就直接在图上改：</p>
+          <ul class="howto"><li><b>拖动蓝框</b>：移动</li><li><b>拖边、角</b>：改大小</li><li><b>拖上方的 ↻</b>：旋转</li><li><b>在空白处拖出</b>：加一条</li><li><b>选中后 Delete</b>：删掉</li></ul>
+          <div id="pieceList"></div>
+          <div class="step-next"><button class="btn primary big" id="next2">膜条对了，下一步：生成蛋白框 →</button></div>
         </div>
-        <div id="annoList" class="list"></div>
       </section>
 
-      <section class="sec">
-        <details class="adv flush">
-          <summary class="sec-head as-summary"><span class="sec-n">6</span>版式 <span class="h3-note" id="stLayout"></span></summary>
+      <section class="sec step" id="secRows" data-step="3">
+        <div class="sec-head"><span class="sec-n">3</span>调整蛋白框<span class="sec-status" id="stRows"></span></div>
+        <div class="step-sum" id="sum3"></div>
+        <div class="step-body">
+          <p class="lead">每个彩色框是一个蛋白在成图里的范围，右边就是成图。<b>点框</b>选中：拖边、角改大小，拖框内部移动，拖上方的 <b>↻</b> 旋转；泳道线没对准就把<b>最左、最右</b>两条拖到泳道中心。点下面的一行看曝光、泳道数和列。</p>
+          <div id="rowList"></div>
+          <div class="add-row"><button class="btn sm" id="btnAddRow">+ 添加一个蛋白框</button><span class="hint">点一下，再到膜上点一下放下（或拖出任意大小）</span></div>
+          <p class="hint"><button class="link" id="btnRedetect">全部重新识别</button>（按膜条重新找所有蛋白框，丢掉现在的框）</p>
+          <div class="step-next"><button class="btn primary big" id="next3">框都调好了，下一步：标 Marker →</button></div>
+        </div>
+      </section>
+
+      <section class="sec step" id="secMarker" data-step="4">
+        <div class="sec-head"><span class="sec-n">4</span>标 Marker（分子量）<span class="sec-status" id="stMarker"></span></div>
+        <div class="step-sum" id="sum4"></div>
+        <div class="step-body">
+          <div id="markerPanel"></div>
+          <div class="step-next"><button class="btn primary big" id="next4">标好了，下一步：填名称 →</button><button class="btn ghost" id="skip4" title="成图不显示分子量刻度（以后可以在第 4 步补标）">这次不标分子量</button></div>
+        </div>
+      </section>
+
+      <section class="sec step" id="secNames" data-step="5">
+        <div class="sec-head"><span class="sec-n">5</span>名称、泳道与导出<span class="sec-status" id="stLanes"></span></div>
+        <div class="step-sum" id="sum5"></div>
+        <div class="step-body">
+          <div class="sub-title">蛋白名 <span class="h3-note">回车跳下一个；也可以在右侧成图上点灰字</span></div>
+          <div id="nameList"></div>
+          <div class="sub-title">泳道名</div>
+          <p class="lead">在右侧成图上<b>点灰色泳道号</b>输入，回车跳下一条；或一次粘贴整行：</p>
+          <textarea id="laneBulk" rows="2" placeholder="Ctrl, siA#1, siA#2 …（逗号、Tab、换行均可）"></textarea>
+          <div class="field inline range-row">成图用第 <select id="rangeA"></select> – <select id="rangeB"></select> 列 <button class="btn sm ghost" id="btnRangeAuto">自动</button></div>
+          <details class="adv"><summary>逐列剪除</summary><div id="laneList" class="list"></div>
+            <p class="hint">取消"显示" = 从成图剪除这一列，所有行同步剪除并留白间隔（图注需说明）。</p></details>
+          <div class="sub-title">标注 <span class="h3-note">可选</span></div>
+          <div class="tools">
+            <button class="tool" id="btnAddArrow"><span class="ti">◀</span>目标条带<small>点成图上的条带，自动标分子量</small></button>
+            <button class="tool" id="btnAddCond"><span class="ti">±</span>条件行<small>+ / − 矩阵</small></button>
+            <button class="tool" id="btnAddGroup"><span class="ti">⎴</span>分组横线<small>在成图上拖过泳道名</small></button>
+          </div>
+          <div id="annoList" class="list"></div>
+          <div class="sub-title">版式</div>
           <div class="field inline">
-            <label class="inline-label">每泳道 <input type="number" id="mmPerLane" min="2" max="15" step="0.5" class="num"> mm</label>
-            <label class="inline-label">字号 <input type="number" id="fontPt" min="4" max="14" step="0.5" class="num"> pt</label>
+            <label class="inline-label">分子量刻度在</label>
+            <select id="mwSide" style="width:auto"><option value="left">左边</option><option value="right">右边</option></select>
+            <label class="inline-label">蛋白名在</label>
+            <select id="nameSide" style="width:auto"><option value="right">右边</option><option value="left">左边</option></select>
           </div>
-          <div class="field inline">
-            <label class="inline-label">泳道名角度</label>
-            <select id="labelAngle" style="width:auto"><option value="auto">自动</option><option value="0">0°</option><option value="45">45°</option><option value="90">90°</option></select>
-            <label class="inline-label">行距 <input type="number" id="rowGap" min="0" max="10" step="0.5" class="num"> pt</label>
-          </div>
-          <div class="field inline wrap">
-            <label class="switch"><input type="checkbox" id="invert"><span>白底黑带</span></label>
-            <label class="switch"><input type="checkbox" id="showMW"><span>分子量刻度</span></label>
-            <label class="switch"><input type="checkbox" id="unitHeader"><span>kDa 标题</span></label>
-            <label class="switch"><input type="checkbox" id="border"><span>条带加边框</span></label>
-            <label class="inline-label">面板字母 <input type="text" id="panelLetter" maxlength="2" class="num" placeholder="a"></label>
-          </div>
-        </details>
+          <details class="adv">
+            <summary class="sub-title as-summary">更多版式 <span class="h3-note" id="stLayout"></span></summary>
+            <div class="field inline">
+              <label class="inline-label">每泳道 <input type="number" id="mmPerLane" min="2" max="15" step="0.5" class="num"> mm</label>
+              <label class="inline-label">字号 <input type="number" id="fontPt" min="4" max="14" step="0.5" class="num"> pt</label>
+            </div>
+            <div class="field inline">
+              <label class="inline-label">泳道名角度</label>
+              <select id="labelAngle" style="width:auto"><option value="auto">自动</option><option value="0">0°</option><option value="45">45°</option><option value="90">90°</option></select>
+              <label class="inline-label">行距 <input type="number" id="rowGap" min="0" max="10" step="0.5" class="num"> pt</label>
+            </div>
+            <div class="field inline wrap">
+              <label class="switch"><input type="checkbox" id="invert"><span>白底黑带</span></label>
+              <label class="switch"><input type="checkbox" id="showMW"><span>分子量刻度</span></label>
+              <label class="switch"><input type="checkbox" id="unitHeader"><span>kDa 标题</span></label>
+              <label class="switch"><input type="checkbox" id="border"><span>条带加边框</span></label>
+              <label class="inline-label">面板字母 <input type="text" id="panelLetter" maxlength="2" class="num" placeholder="a"></label>
+            </div>
+          </details>
+          <p class="hint">好了就点右上角<b>导出 PNG</b>；补充材料用导出菜单里的"未裁切原图"。</p>
+        </div>
       </section>
       <div id="legendHints" class="legend"></div>
     </div>
@@ -134,19 +166,24 @@
         <canvas id="editor"></canvas>
         <div id="ladderCard" class="ladder-card hidden"></div>
         <div id="viewBanner" class="mode-banner hidden"><span id="viewModeText"></span><span id="viewModeExtra"></span><button id="viewModeCancel">取消 (Esc)</button></div>
-        <div id="dropHint"><div class="dh-icon">▤</div><div class="dh-text">把图片拖到这里</div><div class="dh-sub">多张一起拖：各曝光 + Marker 白光图</div></div>
+        <div id="dropHint"><div class="dh-icon">▤</div><div class="dh-text">把图片拖到这里</div><div class="dh-sub">多张一起拖：各次曝光 + 白光图（或复合图）</div></div>
       </div>
     </section>
     <section class="pane-col" id="figCol">
       <div class="col-head"><span class="col-title">成图</span><span class="col-sub">点文字直接编辑 · 点条带选中该行 · 上下拖条带排顺序、左右拖对齐泳道</span><span class="flex"></span><span class="zoomlabel" id="figSize"></span></div>
       <div id="previewBox"><div id="preview"></div>
         <div id="figEmpty" class="fig-empty">
-          <h3>三步出图</h3>
-          <ol>
-            <li><b>拖入图片</b>：一次实验的全部曝光 + Marker 白光图。工具自动归膜、找出每个蛋白的条带、挑最合适的曝光。</li>
-            <li><b>左边逐步检查</b>：Marker 型号和刻度 → 每个蛋白的框和曝光 → 泳道名。哪里不对，就在中间的膜上直接拖动修改。</li>
-            <li><b>右边就是成图</b>：点文字改名，拖条带排版，右上角导出。</li>
-          </ol>
+          <div class="fe-card">
+            <h3>成图会出现在这里</h3>
+            <p class="fe-sub" id="feSub">把一次实验的全部图片拖进来，然后按左边的步骤走</p>
+            <ol class="fe-steps" id="feSteps">
+              <li data-s="1"><b>确认 Marker 图</b><span>白光图或复合图，用来找膜条、标分子量</span></li>
+              <li data-s="2"><b>检查膜条</b><span>蓝框要刚好框住每条膜</span></li>
+              <li data-s="3"><b>调整蛋白框</b><span>从这一步起，右边就是成图</span></li>
+              <li data-s="4"><b>标 Marker</b><span>点 Marker 条带，选分子量</span></li>
+              <li data-s="5"><b>填名称，导出</b><span>蛋白名、泳道名，导出 PNG</span></li>
+            </ol>
+          </div>
         </div>
         <div id="modeBanner" class="mode-banner hidden"><span id="modeText"></span><button id="modeCancel">取消 (Esc)</button></div>
       </div>
@@ -162,30 +199,29 @@
 
 <div id="helpDlg" class="dlg hidden"><div class="dlg-body">
   <button class="dlg-x" id="btnHelpClose">×</button>
-  <h3>最快的出图方式</h3>
+  <h3>按左边的 5 步走（每一步确认后点"下一步"，做完的步骤可以随时点开再改）</h3>
   <ol>
-    <li>把这次实验<b>所有图片一次拖进来</b>：每张膜的各个曝光 + Marker 白光图（iBright 的 Chemi 与 Marker 通道）。</li>
-    <li>工具自动归膜、分出各条膜条、找出每个蛋白的条带（每个蛋白一个框，泳道只在框里识别）、每行挑最清楚又不过曝的曝光（★）、读出 Marker 条带。</li>
-    <li>左边第 2 步 <b>Marker</b>：选你用的 Marker 型号（只需选一次，下次自动用它）；点"在白光图上核对 / 标注 Marker"——自动读出的刻度只是建议，不对就拖到对准条带，都对就点"全部确认"。</li>
-    <li>在右侧成图上<b>点灰色的"蛋白名"</b>和<b>泳道号</b>输入名称（回车跳下一个）。</li>
-    <li>右上角导出 PNG；"未裁切原图"放补充材料。</li>
+    <li><b>确认 Marker 图</b>：把这次实验所有图片一次拖进来（各次曝光 + 看得见 Marker 的图：白光图，或白光 + 化学发光的复合图）。每张膜有一张标"★ Marker 图"，不对就点对的那张下面的"设为 Marker 图"；类型认错了在图片的 ⋯ 里改。怎么猜的：先看文件名（Marker / White / 白光 / Merge / 复合 → Marker 图；Chemi / ECL / 曝光 → 曝光图），看不出时看图：白光图是一大片亮的膜放在暗的托盘上。</li>
+    <li><b>检查膜条</b>：Marker 图上的蓝框是找到的膜条，要刚好框住每一条膜。拖动蓝框移动，拖边、角改大小，拖上方的 ↻ 旋转，在空白处拖出一条新的，选中后 Delete 删掉（方向键微调，[ ] 转 0.1°）。</li>
+    <li><b>调整蛋白框</b>：按膜条找出每个蛋白的条带，每个蛋白一个框，右边出现成图。点框选中：拖边、角改大小，拖框内部移动（可以拖到任何位置，成图里就是框住的部分），拖上方的 ↻ 或按 [ ] 微调倾斜（框会先按条带自动摆正）。缺了蛋白就"+ 添加一个蛋白框"，再到膜上点一下放下。</li>
+    <li><b>标 Marker</b>：选你用的 Marker 型号（下次自动用它），右边是它的官方条带示意（橙色 = 彩色 / 加粗的参考带）。在 Marker 图上点一条 Marker 带，选它的分子量；会自动吸附到条带上（按住 Alt 不吸附）。每条膜条标 2 条以上，就能算出各行分子量，之后其余大小的位置用虚线提示，点一下就加上。</li>
+    <li><b>名称、泳道与导出</b>：填蛋白名和泳道名（左边或右侧成图上点灰字，回车跳下一个），需要的话加目标条带箭头、条件、分组、改版式，然后右上角导出 PNG；"未裁切原图"放补充材料。</li>
   </ol>
   <h3>常见情况</h3>
   <ul>
-    <li><b>分子量不对</b>：先在左边"Marker"里确认型号。刻度对不上 Marker 带：点"在白光图上核对 / 标注 Marker"（或点某条膜条的小标签，直接放大到它的 Marker 道），膜上显示白光图和每条膜条的 Marker 刻度，右上角是这个型号的官方条带示意（橙色 = 彩色 / 加粗的参考带）——拖动刻度对准条带（会自动吸附到条带上，按住 Alt 不吸附），点空白处加一条刻度并选分子量，点刻度上的数字改分子量或删除，选中后 ↑↓ 微调、Delete 删除。每条膜条有 2 条刻度就能算出各行分子量；标过或确认过的膜条，成图左侧只画这些刻度。"全部恢复自动"丢掉手动标的和确认过的刻度。</li>
-    <li><b>某个蛋白在这张曝光里太亮 / 太暗</b>：在左边点这一行，展开后点别的曝光，红色 = 过曝像素。每张图只做整图线性调整，同一张图的所有行一起变。</li>
-    <li><b>某个蛋白漏了，或没曝出来</b>：点"在膜上框选添加"，在膜上拖一个框把它框住（只按框里的条带识别泳道）；没曝出来的就"按分子量添加"一行，再换长曝光。</li>
-    <li><b>框的范围不合适</b>：在中间的膜上点框选中这一行，拖框的边或四角自由缩放（左右边增减泳道）；拖框内部移动整个框，可以拖到任何位置，包括别的膜条上（按住 Shift 同时上下移动这一行在各条膜条上的框）。成图里显示的就是框住的部分，不受膜条边界限制。</li>
-    <li><b>泳道没对上</b>（和 GelFigure 一样的"首尾泳道等间距"）：在膜上把框里<b>最左、最右</b>两条泳道线拖到泳道中心，中间的泳道会均匀排开（按住 Alt 只动这一条）；条数不对就在左边展开这一行，改泳道数后点"首尾对齐"。边缘的条带被切掉一部分：把最左或最右的泳道线往外拖，泳道整体加宽。框上方数字是每一道在成图里的列（M = Marker 道，× = 不用，点数字切换）。多认了：点那根竖线后按 Delete；漏了：双击框内加一道，或把框边拖过去；列号错位：点 ‹ ›；整个框都不对：点"框内重新识别"。</li>
-    <li><b>膜条认错了</b>（两条合成一条、切歪了、漏了一条）：在左边膜卡片上点"调整膜条"——拖动膜条移动，拖边角改大小，拖上方的 ↻ 旋转，在空白处拖出一条新的，选中后 Delete 删掉，点"✓ 应用"。按调整后的膜条重新读 Marker 和条带，已经调好的框都留在原处；"恢复自动"回到自动识别。</li>
-    <li><b>图片类型认错了</b>（白光图当成了曝光图等）：点"查看 / 修改图片"，在图片右上角的 ⋯ 里改类型（某张膜没认出白光图时会自动展开并提示）。已经调好的框都保持不动，只更新分子量和对齐。怎么认的：先看文件名（Marker / White / 白光 / Chemi / 曝光…），没有的话看图：白光图是一大片亮的膜放在暗的托盘上，曝光图大部分是背景、只有条带亮。</li>
+    <li><b>给某条带标分子量</b>（目标条带，和 GelFigure 一样）：第 5 步"标注"里点"目标条带"，再在右侧成图上点那条带：箭头吸附到条带上，按第 4 步标的 Marker 自动标分子量。点箭头可以加名称（显示成"名称 (52 kDa)"）、换成 * # †（* 常用来标非特异条带）、放到左边或右边、删除。</li>
+    <li><b>Marker 刻度标错了</b>：拖动刻度对准条带；点刻度上的数字改分子量或删除；选中后 ↑↓ 微调、Delete 删除。点某条膜条的小标签，直接放大到它。</li>
+    <li><b>某个蛋白在这张曝光里太亮 / 太暗</b>：在第 3 步点这一行，展开后点别的曝光（红色 = 过曝像素）；或选中这一行后拖膜图上方的"暗部 / 亮部"，只调这一行（线性调整，图注会说明），切到"整张图"则这张图的所有行一起变。</li>
+    <li><b>某个蛋白漏了</b>：第 3 步"+ 添加一个蛋白框"，在膜上点一下放下（大小和其他框一样），或按住拖出任意大小。</li>
+    <li><b>泳道没对上</b>（和 GelFigure 一样的"首尾泳道等间距"）：把框里<b>最左、最右</b>两条泳道线拖到泳道中心，中间的泳道会均匀排开（按住 Alt 只动这一条）；条数不对就展开这一行，改泳道数后点"首尾对齐"。边缘条带被切掉一部分：把最外侧的泳道线往外拖，泳道整体加宽。框上方数字是每一道在成图里的列（M = Marker 道，× = 不用，点数字切换）。多认了：点那根竖线后 Delete；漏了：双击框内加一道，或把框左右边拖出去；列号错位：点 ‹ ›（最左只能到第 1 列，不会推动其他行；要让这一行更靠左，把其他行往右挪）。</li>
+    <li><b>改了前面的步骤</b>：比如回到第 2 步改膜条，已经调好的框、名字、刻度都留在原处。</li>
     <li><b>保存，下次接着做</b>："文件 → 保存项目"（Ctrl+S）把全部图片和框、名字、Marker 刻度、版式存成一个 .blotfig 文件；"文件 → 打开项目"接着做，换电脑也行。关闭页面前没保存会提醒。</li>
     <li><b>调整成图里各行的上下顺序</b>：在右侧成图上按住一行的条带上下拖到想要的位置（也可以拖成图左边的膜条标签，或左侧列表里每行前面的标签）；选中一行后 Alt+↑↓ 一次挪一位。</li>
-    <li><b>左右对齐泳道</b>（剪过的膜，比如膜条 A 的第 4–6 道要对准膜条 B 的第 1–3 道）：在成图上把一行的条带左右拖，按列吸附；这条膜条上的各行一起动（它们共用同一套泳道），按住 Alt 只挪这一个框。拖过第 1 列时左边自动补列，泳道名跟着挪。</li>
+    <li><b>左右对齐泳道</b>（剪过的膜，比如膜条 A 的第 4–6 道要对准膜条 B 的第 1–3 道）：在成图上把一行的条带左右拖，按列吸附；这条膜条上的各行一起动（它们共用同一套泳道），按住 Alt 只挪这一个框。最左到第 1 列为止；左边空出来的列会自动去掉。</li>
     <li><b>同一个蛋白在两条膜条上</b>（膜从中间竖着剪开）：通常会自动并成一行；没有的话，在成图上把一行拖到另一行上松开，两个框按左右顺序接成连续的列。"拆开"可以撤回。</li>
     <li><b>两次拍摄之间膜挪动过</b>（补过底物、膜条拿起来又放回去）：工具按白光图认出是同一张膜，把每张图对齐到同一位置（整张膜一起动，或每条膜条各自动），缩略图上标"已对齐"。不准的话点那张图的 ⋯ →"手动对齐…"：在膜图上拖动图片让条带落进框里，Shift+拖动或 [ ] 旋转，方向键微调；"不对齐"按原样使用。认错成同一张膜时，用 ⋯ 里的"移到"把图移走。</li>
-    <li><b>只出部分泳道 / 剪掉中间一列</b>：在"泳道"里选范围，或在逐列剪除里取消"显示"（自动留白分隔）。</li>
-    <li><b>条带要加边框</b>：在"版式"里勾选"条带加边框"。</li>
+    <li><b>只出部分泳道 / 剪掉中间一列</b>：在第 5 步选列范围，或在逐列剪除里取消"显示"（自动留白分隔）。</li>
+    <li><b>分子量刻度或蛋白名换到另一边</b>：第 5 步"版式"里选左边 / 右边；条带加边框、字号、每泳道宽度在"更多版式"里。</li>
   </ul>
   <h3>规范（期刊图像要求）</h3>
   <ul>
@@ -193,14 +229,14 @@
     <li>内参应与目标蛋白在同一张膜上，工具会检查并提示。</li>
     <li>过曝条带不可定量；导出未裁切原图作为补充材料（用拍摄的原图，不做对齐或旋转，框画在条带实际所在的位置），图注提示会自动生成。</li>
   </ul>
-  <p class="muted small">快捷键：Ctrl+Z 撤销 · 空格+拖动或右键拖动 平移 · 滚轮 缩放 · 选中行后 ↑↓ 移动框、Alt+↑↓ 调整在成图里的上下顺序、←→ 平移泳道、Alt+←→ 调间距、Delete 删除整行 · 选中竖线后 ←→ 微调、Delete 删掉这一道 · 双击框内 加一道 · 标 Marker 时选中刻度后 ↑↓ 微调、Delete 删除 · 调整膜条时选中后方向键移动、[ ] 旋转、Delete 删除 · Ctrl+S 保存项目 · Esc 取消</p>
+  <p class="muted small">快捷键：Ctrl+Z 撤销 · 空格+拖动或右键拖动 平移 · 滚轮 缩放 · 选中行后 ↑↓ 移动框、[ ] 转 0.1°（Shift 1°）、Alt+↑↓ 调整在成图里的上下顺序、←→ 平移泳道、Alt+←→ 调间距、Delete 删除整行 · 选中竖线后 ←→ 微调、Delete 删掉这一道 · 双击框内 加一道 · 标 Marker 时选中刻度后 ↑↓ 微调、Delete 删除 · 调整膜条时选中后方向键移动、[ ] 旋转、Delete 删除 · Ctrl+S 保存项目 · Esc 取消</p>
   <p class="muted small"><button class="link" id="btnTourAgain">再看一遍界面引导</button></p>
 </div></div>
 
 <div id="tour" class="tour hidden">
-  <div class="tour-card" data-at="panel"><b>① 左边：按步骤检查</b>图片 → Marker → 蛋白 → 泳道。标题前的圆点变绿 = 这一步已完成；顶栏写着下一步做什么，点它直接跳过去。</div>
-  <div class="tour-card" data-at="rawCol"><b>② 中间：膜</b>每个彩色框是一个蛋白在成图里的范围。点框选中，拖边角改范围，拖框移动；滚轮缩放，空格或右键拖动平移。</div>
-  <div class="tour-card" data-at="figCol"><b>③ 右边：成图</b>点灰色文字输入蛋白名、泳道名；上下拖条带排顺序，左右拖对齐泳道。</div>
+  <div class="tour-card" data-at="panel"><b>① 左边：一步一步来</b>每一步看一眼、需要就改，再点"下一步"。做完的步骤变绿，可以随时点开再改；顶栏写着现在该做什么。</div>
+  <div class="tour-card" data-at="rawCol"><b>② 中间：在图上直接改</b>第 2 步改膜条，第 3 步改蛋白框，第 4 步点 Marker 条带。滚轮缩放，空格或右键拖动平移。</div>
+  <div class="tour-card" data-at="figCol"><b>③ 右边：成图</b>第 3 步起出现。点灰色文字输入蛋白名、泳道名；上下拖条带排顺序，左右拖对齐泳道。</div>
   <button class="btn primary" id="tourOk">知道了</button>
 </div>
 

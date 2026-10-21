@@ -5,7 +5,7 @@
 ## 在一台新电脑上开始
 
 ```bash
-git clone https://github.com/poplarity/BlotFigure.git   # 私有仓库，需先登录 GitHub（gh auth login 或 GitHub Desktop）
+git clone https://github.com/poplarity/BlotFigure.git   # 公开仓库；推送到 main 就是更新 poplarity.github.io/BlotFigure
 cd BlotFigure
 # 双击 index.html 即可使用；之后更新用 git pull
 ```
@@ -20,6 +20,7 @@ cd BlotFigure
 |---|---|
 | `?demo=1` | 载入合成示例（一张切成 3 条的膜加一张斜放的膜） |
 | `?srcdir=<目录URL>&srcs=a.tif,b.tif,...` | 直接载入一组图片，跳过拖放 |
+| `&step=1` … `5` | 脚本运行时一次走到第几步（默认 5：Marker 图和膜条按识别的、生成蛋白框，打开第 3 步）；`1` 停在确认 Marker 图，`2` 停在检查膜条（调整膜条模式） |
 | `&ladder=br_pp` | 指定 Ladder 型号（id 见 `js/wbladders.js`；你的 Bio-Rad 1610374 是 `br_pp`） |
 | `&sel=0` | 选中第 n 个可见行，展开它的曝光对比 |
 | `&annot=1` | 填入示例蛋白名、泳道名和分组 |
@@ -28,17 +29,16 @@ cd BlotFigure
 | `&border=1` | 打开"条带加边框" |
 | `&selpiece=B` | 选中的行跨几条膜条时，泳道工具对准膜条 B 上的那个框（需同时用 `&sel=`） |
 | `&zoomsel=1` | 膜图放大到选中的行（截图用） |
-| `&mode=marks` / `&mode=addrow` / `&mode=pieces` | 进入"核对 / 标注 Marker"（`&markpiece=D`：放大到膜条 D 的 Marker 道） / 框选添加 / 调整膜条模式 |
-| `&imgs=1` | 展开左侧的图片缩略图（默认收起，只显示张数） |
+| `&mode=marks` / `&mode=addrow` / `&mode=pieces` | 进入标 Marker（`&markpiece=D`：放大到膜条 D） / 添加蛋白框 / 调整膜条模式 |
 | `&tour=1` | 脚本运行时也显示首次打开的三栏引导（平时只在 `localStorage` 没有 `blotfig.tour` 时显示一次） |
 | `&nochemi=1` | 认膜条切缝、找 Marker 道时不对照曝光图（对比用） |
 | `&pose=merge` / `align` / `order` | 在成图上停在拖动的半路（截图用）：把拆开的 B 行拖到 A 行上 / 把膜条 C 往右拖一列 / 把最下面一行往上拖 |
 | `&move=a.tif:2.5,140,85;b.tif:…` | 载入时把这些图里的膜当作挪动过（旋转度数、x、y 像素），模拟两次拍摄之间膜被挪动；用来测自动认膜和对齐 |
 | `&demomove=a,tx,ty,a2,tx2,ty2` | 示例膜再加一次"后来的拍摄"（一张曝光图和它的白光图）：整张膜挪动 `a,tx,ty`，中间那条膜条另外再挪 `a2,tx2,ty2`（膜条切出、其余挪动、膜条放到新位置）；测认出是同一张膜、单条膜条单独对齐 |
 | `&noalign=1` / `&dbg=1` | 不做对齐（各张图保持原样） / 标题 JSON 的 `dbg` 里记下认膜时的配准过程 |
-| `&popimg=12` / `&alignimg=12&alignby=dx,dy,度&alignhold=1` | 打开名字以 12 开头的图的 ⋯ 菜单 / 进入它的手动对齐并拖动（`alignhold` 停在拖动中，截图用） |
+| `&popimg=12` / `&alignimg=12&alignby=dx,dy,度&alignhold=1` | 打开第 1 步和名字以 12 开头的图的 ⋯ 菜单 / 进入它的手动对齐并拖动（`alignhold` 停在拖动中，截图用） |
 | `&scrollto=secRows` | 把左侧面板滚到某个元素（截图用；`&sel=` 选中的行会自动滚到能看见） |
-| `&scenario=…` | 脚本化地跑一遍编辑功能，每步状态记在标题 JSON 的 `scen` 里（每行：`膜条:起始列:泳道角色` 和成图列）：`lanes` 框的缩放、框内重新识别、均分、加减/切换泳道、挪列、拼接行跟随；`drag` 用鼠标/键盘事件在膜图上拖角柄、拖竖线、双击加道、Delete、移动框、框选添加；`detect` 每行的框在每张曝光里只按框内像素识别的结果（原框 t、整条膜条宽的框 l）；`stitch` 拆开与并成一行（`App.mergeRows`，叠放的膜条、同一膜条的两行应被拒绝）；`arrange` 用鼠标事件在成图上排列：上下拖行、拖到另一行上并排、按膜条左右拖（Alt 只挪一个框）、拖过第 1 列补列、拖标签、列表里拖、Alt+↑↓；`realign` 手动对齐曝光 12：拖动、[ ] 旋转、完成、撤销/重做、不对齐、恢复自动（每步记下对齐参数和像素签名）；`kind` 先改一个框和行名，再把 09 改成白光又改回、01 改成曝光图又改回、14 移到新膜又移回、重新对齐、移除 07，每步记下所有框（膜条字母、位置、范围、列）——调过的东西都应保持不变（加 `&dbgpcs=1` 还记下膜条和每条候选切缝的判定）；`marks` / `picker` 手动 Marker 的数据层；`mark2` 用鼠标和键盘标 Marker：点膜条标签放大、拖刻度吸附（Alt 不吸附）、撤销、点 Marker 道加一条再"不加了"（膜条应仍是自动）、输入分子量、从选择框删除、点虚线的推算刻度、↑↓、Delete、"全部确认"、"全部恢复自动"、选型号后记住；`focus` 在左侧列表里输入蛋白名（输入框不应丢焦点，回车跳到下一行）；`edit2` 在 C、D 两条膜条之间的缝上拖出一个框（成图应正好是框住的部分）、把它拖到 D 上（归到 D）、拖最右一条泳道线（中间均匀排开；Alt 只动这一条）、"首尾对齐"多一道，再调整膜条：C 右移、D 下边上移并旋转、删掉 E、画一条新的、应用，撤销 / 重做；`proj` 保存项目再打开，所有行、刻度、显示范围应与之前完全一样；`perf` 拖一个框的右边 20 次，记下每次鼠标移动和刷新成图的耗时（`window.__perfRun` 可以在性能分析器下再跑一遍）。`lanes` `drag` `detect` `stitch` `arrange` `realign` `kind` `edit2` `proj` `perf` 用真实样例（膜条 A–E），`marks` `picker` `mark2` `focus` 用示例（`demo=1`） |
+| `&scenario=…` | 脚本化地跑一遍编辑功能，每步状态记在标题 JSON 的 `scen` 里（每行：`膜条:起始列:泳道角色` 和成图列）：`lanes` 框的缩放、框内重新识别、均分、加减/切换泳道、挪列、拼接行跟随；`drag` 用鼠标/键盘事件在膜图上拖角柄、拖竖线、双击加道、Delete、移动框、框选添加；`detect` 每行的框在每张曝光里只按框内像素识别的结果（原框 t、整条膜条宽的框 l）；`stitch` 拆开与并成一行（`App.mergeRows`，叠放的膜条、同一膜条的两行应被拒绝）；`arrange` 用鼠标事件在成图上排列：上下拖行、拖到另一行上并排、按膜条左右拖（Alt 只挪一个框）、往左最多到第 1 列（已经在第 1 列的不动，也不推别的行；差几列的只挪到第 1 列）、拖标签、列表里拖、Alt+↑↓；`realign` 手动对齐曝光 12：拖动、[ ] 旋转、完成、撤销/重做、不对齐、恢复自动（每步记下对齐参数和像素签名）；`kind` 先改一个框和行名，再把 09 改成白光又改回、01 改成曝光图又改回、14 移到新膜又移回、重新对齐、移除 07，每步记下所有框（膜条字母、位置、范围、列）——调过的东西都应保持不变（加 `&dbgpcs=1` 还记下膜条和每条候选切缝的判定）；`marks` / `picker` 手动 Marker 的数据层（没标时没有分子量，1 条也没有，2 条才有；清除）/ 分子量选择框；`mark2` 用鼠标和键盘标 Marker：选型号后记住、点膜条标签放大（开始时一条刻度、一个推算位置都不显示）、在条带旁 3 px 点一下（吸附到带上，第一条不推荐大小）、第二条推荐型号里的下一个、标满 2 条后才出现虚线的推算位置、拖刻度吸附（Alt 不吸附）、"不加了"、输入分子量、从选择框删除、↑↓、Delete、点虚线的推算刻度、下一步、清除这张膜的刻度；`focus` 在左侧列表里输入蛋白名（输入框不应丢焦点，回车跳到下一行）；`edit2` 在 C、D 两条膜条之间的缝上拖出一个框（成图应正好是框住的部分）、把它拖到 D 上（归到 D）、拖最右一条泳道线（中间均匀排开；Alt 只动这一条）、"首尾对齐"多一道，再调整膜条：C 右移、D 下边上移并旋转、删掉 E、画一条新的、应用，撤销 / 重做；`proj` 保存项目再打开，所有行、刻度、显示范围应与之前完全一样；`perf` 拖一个框的右边 20 次，记下每次鼠标移动和刷新成图的耗时（`window.__perfRun` 可以在性能分析器下再跑一遍）。`lanes` `drag` `detect` `stitch` `arrange` `realign` `kind` `edit2` `proj` `perf` 用真实样例（膜条 A–E），`marks` `picker` `mark2` `focus` 用示例（`demo=1`） |
 
 载入完成后页面标题变成 `READY {...}`，里面是各张图的对齐（`align`：`grid` 网格基准图、`marker` 读膜条和 Ladder 的白光图、每张挪动过的图 `名=角度,tx,ty+单独对齐的膜条/依据`）、膜、膜条（`pieces`：分析得到的泳道格点与 Ladder 位置 `lad`）、行（`rowsGeo`：每个框 `膜条:vc:起始列:泳道角色`、框的范围 `box`、成图列 `cols`）、曝光、显示范围（`levels`）、警告等状态的 JSON，方便脚本检查。
 
@@ -65,20 +65,25 @@ msedge --headless=new --disable-gpu --user-data-dir=$env:TEMP\wb_dbg --allow-fil
   --virtual-time-budget=400000 --dump-dom "file:///.../BlotFigure/test/engine.html" > out.html
 ```
 
-注意：无界面模式下 `alert()` 会卡住；`File.arrayBuffer()` 也会卡，所以调试入口都用 `{name, buffer}` 载入。`--virtual-time-budget` 下时钟是虚拟的：`performance.now()` 量不出耗时，gzip 流（保存项目）也走不完，这类检查（`proj`、`perf`）用 Playwright 在真实时间里跑，例如借 GelFigure 的 `node_modules`：`chromium.launch({ args: ['--allow-file-access-from-files'] })`，打开带参数的页面，等标题变成 `READY`。每次运行用一个新的 `--user-data-dir`：页面在 `localStorage` 里记着上次选的 Marker 型号（`blotfig.ladder`）、看过引导（`blotfig.tour`）、图片缩略图展开与否（`blotfig.imgs`），沿用旧目录会改变结果。
+注意：无界面模式下 `alert()` 会卡住；`File.arrayBuffer()` 也会卡，所以调试入口都用 `{name, buffer}` 载入。`--virtual-time-budget` 下时钟是虚拟的：`performance.now()` 量不出耗时，gzip 流（保存项目）也走不完，这类检查（`proj`、`perf`）用 Playwright 在真实时间里跑，例如借 GelFigure 的 `node_modules`：`chromium.launch({ args: ['--allow-file-access-from-files'] })`，打开带参数的页面，等标题变成 `READY`。每次运行用一个新的 `--user-data-dir`：页面在 `localStorage` 里记着上次选的 Marker 型号（`blotfig.ladder`）、看过引导（`blotfig.tour`），沿用旧目录会改变结果。
 
 ## 数据模型（每个框有自己的泳道）
 
+- 5 步：`S.step` 是做到第几步（存在状态里，撤销跟着走；老项目没有它，打开时当作 5），`App.curStep` 是界面上打开的那一步。第 1 步确认每张膜的 Marker 图（`App.setMarkerImage`：任何一张都可以，曝光图会改成 Marker 类型；换了就按它重新找膜条）；第 2 步只看、改膜条（`'pieces'` 模式），这时还没有行；"下一步"先应用改过的膜条，再 `App.makeBoxes()` 给还没有行的膜生成行（`App.rowsFromAnalysis`），每个框 `App.levelBox` 摆正；第 4 步是 `'marks'` 模式。`App.addFiles` 不再生成行，`App.reanalyze` 只在 `S.step >= 3` 且一行都没有时（或 `{fresh: true}`）才生成。`wbui.js` 的 `openStep` / `nextStep` / `renderSteps` / `updateCoach` 管步骤的展开、完成和顶栏提示。
 - 膜（blot）里有若干膜条（`blot.pieces`），每条膜条有自己的坐标系（以膜条中心为原点，u 沿泳道方向，v 向下）。分析给每条膜条一套泳道格点（第 m 道在 `u0 + m*pitch`，`roles[m]` 为 `sample` / `ladder` / `skip`，样品道从 `col0` 列起，`App.pieceSlots`）和 Marker 白光图上 Ladder 所在的位置 `ladderUs`；这些只用来给新框定初始泳道和列号。
 - 行（一个蛋白）在它跨过的每条膜条上有一个框 `segs[{piece, vc, b0, b1, x0, x1, lanes, c0, p}]`：框横向 `x0..x1`、纵向 `vc-above … vc+below`（`above/below` 是整行共用的，各框一样高），条带 `b0..b1`（相对 vc）。`lanes [{u, r}]` 是框里的泳道（`r`：`s` 样品 / `m` Marker / `x` 不用），样品道依次放进成图的 `c0, c0+1, …` 列（`App.segCols`），`p` 是只剩一道时用的间距。
 - 框的编辑都在 `wbapp.js`：`App.setBox`（缩放/移动：框内的泳道不动，新地方按间距补，留下的泳道保持列号）、`App.redetectBox`（`WB.detectBoxLanes`，只看框里的像素）、`App.evenBox`、`App.addLane / removeLane / moveLane / cycleLane / nudgeLanes / scaleLanes`、`App.shiftCols`；包在 `App.editLanes` 里，拼接行里右边的框会跟着左边的框挪列。改完框后 `App.findBand`（`WB.bandInBox`）在框里重新找条带。
 - 成图的列、每行每列的来源、留白位置都由 `App.columns()` 算出（相邻两列不是同一个框里相邻的两道就留白）；`wbrender.js` 把同一个框里相邻的几道画成一张图（预览里带 `data-row` / `data-piece`，拖动排列靠它们找到行和膜条）。
-- 排列（成图怎么摆）和识别（每条膜条里有什么）分开：成图从上到下就是 `S.rows` 的顺序（`App.moveRow` / `moveRowBy`）；左右位置是每个框的 `c0`（`App.shiftAlign` 默认挪这条膜条上的所有框，因为它们共用泳道）；挪到第 1 列以左时 `App.makeRoom` 在左边补列（泳道名、条件、分组、范围一起挪）；`App.mergeRows` 把两行并成一行（不同膜、同一膜条、上下叠放的膜条都拒绝）。
-- `pc.marks`（手动 Marker 刻度 `{u, v, kda}`）存在时替代这条膜条的自动 Ladder 标定（`App.pieceCal`）。`null` = 用自动读出的（界面上是"待核对"的建议）；用户一动这条膜条的刻度（拖、加、改、删），`App.manualMarks` 先把自动读出的条带变成刻度再改；"全部确认"（`App.confirmMarks`）把还是自动的膜条照样定下来。`App.markInfo` 给出每条膜条的状态（`manual` 已确认 / `auto` 待核对 / `few` 只有 1 条且没有斜率 / `none`）；顶栏和第 2 步只数成图用到的膜条（`App.usedPieces`）。刻度吸附到白光图里这条 Marker 道的深色带（`App.ladderPeaks` / `App.snapMarkV`）。
-- Marker 型号：`blot.ladderId`，`blot.ladderAuto` 为真时是按条带猜的（要用户确认），`blot.ladderFrom` = `'pref'`（沿用上次选的）/ `'user'`；用户选过的型号存在 `App.prefLadder`（`localStorage` 的 `blotfig.ladder`），新载入的膜默认用它（`App.setLadder`）。
-- 框不受膜条边界限制：成图画的是框住的像素（`App.runRaster` 不再把膜条外的部分涂成背景）。框仍在某条膜条的坐标系里（它的角度、Marker、成图里的模块），移到另一条膜条上时（`App.rehomeSeg`，按框的中点）换算到那条膜条的坐标里，图上的位置不变。框选添加的框（`App.addRowBox`）保留画的范围，按框里识别出的泳道间距等分成几道（`App.evenBox`）。
+- 排列（成图怎么摆）和识别（每条膜条里有什么）分开：成图从上到下就是 `S.rows` 的顺序（`App.moveRow` / `moveRowBy`）；左右位置是每个框的 `c0`（`App.shiftAlign` 默认挪这条膜条上的所有框，因为它们共用泳道）；‹ / 往左拖最多到第 1 列（`App.shiftCols` / `shiftAlign` 夹在第 1 列，不再推着别的行往右），`App.commit` 里的 `trimLeft` 去掉左边没有框用、也没填名字的空列（泳道名、条件、分组、范围一起挪）；`App.mergeRows` 把两行并成一行（不同膜、同一膜条、上下叠放的膜条都拒绝）。
+- Marker 只有手动刻度：`pc.marks`（`{u, v, kda}`，`null` = 还没标）。分析不再按条带读 Ladder（`analyzeSession` 的 `opt.noCalib`），`App.pieceCal` 只用标了分子量的刻度，≥ 2 条才有标定。`App.markInfo`：`manual` 可算分子量（≥ 2 条）/ `few` 1 条 / `none`；顶栏和第 4 步只数成图用到的膜条（`App.usedPieces`）。点下去的位置吸附到 Marker 图这一道上最近的条带（`App.ladderPeaks`：深色和亮的带都算，复合图里条带是亮的；`App.snapMarkV`）；新刻度的分子量建议（`App.suggestKda`）：第 1 条没有，第 2 条是型号里点击那一侧的下一个，≥ 2 条后按标定推算（只推型号里还没标的大小）；推算的虚线位置也是 ≥ 2 条后才画（`wbview.js` 的 `marksOf`）。刻度所在的道是已有刻度的中位 u（`App.markLane`），没刻度时不猜。
+- Marker 型号：`blot.ladderId`；用户选过的型号存在 `App.prefLadder`（`localStorage` 的 `blotfig.ladder`），新载入的膜默认用它（`App.setLadder`）；第 4 步选型号时，其他还没选型号的膜一起用它。
+- 框可以单独倾斜：`sg.rot`（度，相对膜条，±15°）绕 `(sg.pu, sg.vc)` 转（`App.segFrame` 给出框自己的坐标系，成图、膜图、框内识别都用它）。`App.setSegRot` 转的时候保持框的中点在图上不动（先把转轴移到框的中点）；`App.levelBox` 按框里各道条带中心的 Theil–Sen 斜率摆正（≥ 3 道清楚的条带、残差小、0.15°–6° 才转）。框移到别的膜条上时 `rot` 按两条膜条的角度差换算。转过的框，它旁边的刻度和这一行的分子量都按框自己的坐标算（`marksIn` 把膜条上的刻度换到框的坐标里：框里水平的条带，对应的是沿框的倾斜方向、而不是沿膜条方向的那条 Marker 带）。
+- 每行单独的显示范围：`row.lv = {black, white}`（没有 = 用整张图的 `S.levels[imgId]`，`App.rowLevels` / `App.rowMapper`），`runRaster` 的缓存键里带着它。膜图上方的滑条在选中一行、且显示的是这一行的曝光时只改这一行（"改整张图"切回整张图）。
+- 分子量刻度和蛋白名的位置：`S.style.mwSide` / `S.style.nameSide`（`'left'` / `'right'`），`wbrender.js` 先排各行、量出刻度宽度，再从条带往外依次放：刻度、目标条带箭头、蛋白名（各在自己选的那一边）。
+- 目标条带箭头 `S.arrows [{row, db, sym, side, text, auto}]`：`db` 是相对这一行第一个框里条带中点（`vc + (b0 + b1) / 2`）的位置——框被拖动（`vc` 和 `b0/b1` 反向变化）、转动、换算到别的膜条上时条带中点都留在膜上原处，所以箭头不用跟着换算。`App.addArrow` 在点击处附近找条带吸附（`App.snapBandV`，`WB.bandInBox` 只看点击处上下一个条带高的范围）；`App.arrowSize` 用这个框坐标里的标定（`App.pieceCal(b, pc, sg)`），超出标过的刻度范围时加 ≈；`App.arrowLabel` = 名称 (大小)。`*` 在 `text()` 里是斜体标记，所以符号用 `symText` 原样画。`App.commit` 去掉指向已删除行的箭头。
+- 框不受膜条边界限制：成图画的是框住的像素（`App.runRaster` 不再把膜条外的部分涂成背景）。框仍在某条膜条的坐标系里（它的角度、Marker、成图里的模块），移到另一条膜条上时（`App.rehomeSeg`，按框的中点）换算到那条膜条的坐标里，图上的位置不变。添加的框（`App.addRowBox`）保留画的范围，按框里识别出的泳道间距等分成几道（`App.evenBox`），再摆正；在膜上点一下添加时框的大小取这条膜条上其他框的中位宽高（`App.defaultBox`，鼠标下先画出虚线预览）。
 - 泳道（GelFigure 的"首尾泳道等间距"）：拖最左 / 最右一条泳道线时中间的泳道均匀排开（`App.dragLane`，Alt 只动这一条），"首尾对齐"按泳道数在首尾两条之间等分（`App.evenEnds`）。框的左右边拖出第 1 列以左时 `sg.c0` 暂时 < 1，`App.commit` 里 `roomLeft` 给所有行在左边补列。
-- 膜条可以手动调整（`'pieces'` 模式，`wbview.js` 的 `pedit` 是工作副本，"应用"时才生效）：`App.setPieces(blot, list)` 把膜条存进 `blot.userStrips`（`{id, cx, cy, angle, w, h}`，网格坐标），之后的分析都用它们（`analyzeSession` 的 `opt.strips`，按顺序，id 跟着走），框按 id 换算、留在图上原处，删掉的膜条上的框交给最近的一条；`null` = 回到自动。撤销 / 重做后 `App.syncPieces` 发现分析用的膜条和状态里的不一致就重新分析。
+- 膜条可以手动调整（第 2 步的 `'pieces'` 模式，`wbview.js` 的 `pedit` 是工作副本，点"下一步"或离开第 2 步时才生效）：`App.setPieces(blot, list)` 把膜条存进 `blot.userStrips`（`{id, cx, cy, angle, w, h}`，网格坐标），之后的分析都用它们（`analyzeSession` 的 `opt.strips`，按顺序，id 跟着走），框按 id 换算、留在图上原处，删掉的膜条上的框交给最近的一条；`null` = 回到自动。撤销 / 重做后 `App.syncPieces` 发现分析用的膜条和状态里的不一致就重新分析。
 - 拖动时（`App.dragging`）成图跟着刷新，但不重新评分各张曝光、不重算警告；膜图上行标签的 ★ 用上次提交时的推荐曝光（`App.bestSeen`）。`WB.evalExposure` 用定长类型数组和原生排序（一个框可以有几十万像素）。
 - 项目文件（`App.saveProject` / `App.openProject`）：`'BLOTFIG1'` + 头的长度（u32）+ 头（JSON：状态 `S`、每张图的 id / 名字 / 类型 / 曝光时间 / 字节数）+ 各张图原样的文件字节，整体 gzip（浏览器支持 `CompressionStream` 时）。打开时按原 id 解码图片，套用 `S.align`，再分析每张膜（膜条 id 按位置对上，框、刻度原样）。`rec.src` 是载入时的文件（`File` 或 `{name, buffer}`），保存时才重新读。
 - Marker 型号列表（`wbladders.js`）与 GelFigure 的预染蛋白 Marker 一致（含 `ref` 参考带、`vendor` 分组），只去掉了在膜上看不见的非预染 Marker；老的 id（`br_pp` 等）不变。标 Marker 时右上角的参考图（`ladderCard`）按 log 分子量等距画。
@@ -91,18 +96,16 @@ msedge --headless=new --disable-gpu --user-data-dir=$env:TEMP\wb_dbg --allow-fil
 
 - `js/wbengine.js`（`G.WB`）：分类、归膜、膜条分割（`findStrips`）、Ladder 识别（`findLadders`）与标定（`calibrate` / `fitSeries`）、条带行（`detectRows`）、每条膜条的泳道格点（`pieceLattice` / `jointPitch`）、默认列号（`assignColumns`）、整体分析（`analyzeSession`）、框内识别泳道（`detectBoxLanes`）与条带（`bandInBox`）、曝光评分（`exposureScore`）、图与图的刚性配准（`registerRigid` / `registerPieces` / `regWarp`，FFT 相位相关）
 - `js/wbapp.js`（`G.BApp`）：状态、撤销、同一张膜各张图的对齐（`alignBlot` / `alignPieces` / `applyAlign`）、行与框、框里的泳道编辑、行的拼接与拆开、框选添加、手动 Marker、曝光与显示范围、规范检查
-- `js/wbrender.js`：排版成 SVG；`js/wbview.js`：中间膜图（框的 8 个角柄、泳道竖线与列号、双击加道、框选添加、标 Marker 的 `marks` 模式：`drawMarking` / `marksOf` / `markGeom`，手动对齐 `align` 模式；`fitFull` 放大到整张膜的膜条，`fitPiece` 放大到一条膜条的 Marker 道）；`js/wbui.js`：面板（第 2 步 Marker `renderMarker` 和刻度的分子量选择框 `markPicker`；选中一行展开的曝光与泳道工具 `rowDetail`）、顶栏的下一步 `updateCoach`（点它执行 `coachAct`）和各步的完成状态、首次引导 `showTour`、成图上的编辑与拖动排列（`rowRects` / `drawRowTags`，预览上的拖动在 `pdrag`，列表里的在 `ldrag`）、导出、调试参数
+- `js/wbrender.js`：排版成 SVG；`js/wbview.js`：中间膜图（框的 8 个角柄、泳道竖线与列号、双击加道、框选添加、标 Marker 的 `marks` 模式：`drawMarking` / `marksOf` / `markGeom`，手动对齐 `align` 模式；`fitFull` 放大到整张膜的膜条，`fitPiece` 放大到一条膜条的 Marker 道）；`js/wbui.js`：5 步面板（第 1 步 `renderBlots`、第 2 步 `renderPieces`、第 3 步 `renderRows` 和选中一行展开的曝光、泳道、倾斜工具 `rowDetail`、第 4 步 `renderMarker` / `ladderCard` 和刻度的分子量选择框 `markPicker`、第 5 步 `renderNames`；步骤切换 `openStep` / `nextStep` / `renderSteps`）、顶栏的提示 `updateCoach`（点它执行 `coachAct`）、首次引导 `showTour`、成图上的编辑与拖动排列（`rowRects` / `drawRowTags`，预览上的拖动在 `pdrag`，列表里的在 `ldrag`）、导出、调试参数
 - `js/tiff.js` `engine.js` `export.js`：与 GelFigure 共用，改动时注意两边同步
 
 ## 已知待办
 
-- 自动挑 Ladder 在样例上会挑错（只有 2–3 条可见的 Ladder 带时，几十种型号里总有拟合得更好的），需要在第 2 步手动选一次 Bio-Rad 1610374（`br_pp`），之后会记住。
 - 白光图的自动区分只在两套样例上验证过（iBright 的 14 张、合成示例）；别的成像仪导出的图认错时请收集样例。
 - iBright 文件名里没有曝光时间，图注里的曝光时间要手填。
-- 最上面那行贴着 250 kDa 条带（对齐后约 224 kDa，对齐前算成约 293 kDa），这一段 Ladder 条带稀疏，分子量误差较大。
 - 竖着剪开、又上下错位摆放的两半膜：同一个蛋白不会自动并成一行（高度差太大），需要在成图上把一行拖到另一行上。
 - 框内识别泳道用的是膜上各行一致的泳道间距：若某一行的样品隔一道才有带，识别结果会保留中间的空道；只在框里的条带比这个间距还宽时才改用框自己的间距。曝光里这一行几乎没信号或严重过曝拖尾时可能不准，此时用"均分 N 道"。
 - 不同膜（不同次拍摄）之间不能拼进同一行（期刊不允许一行混用不同图）。
-- 真实样例里膜在 7 次拍摄之间挪过：01+02 一个位置，03–10 转了约 0.94°，11–14 平移约 4 px（文件按拍摄成对：白光图和曝光图一一对应）。网格基准是 04，读膜条和 Ladder 用 01。对齐之前分析把 01 的膜条套在大多数是 03–10 位置的曝光图上，最上面一行分子量算成约 293 kDa；对齐后约 224 kDa。
+- 真实样例里膜在 7 次拍摄之间挪过：01+02 一个位置，03–10 转了约 0.94°，11–14 平移约 4 px（文件按拍摄成对：白光图和曝光图一一对应）。网格基准是 04，读膜条用 01（第 1 步的 Marker 图）。
 - 只有曝光图（没有白光图）的组不会自动并成一张膜；需要时用"移到"手动并。手动对齐只调整整张图（单独对齐的膜条保持相对整张图的偏移）。
 - 曝光图之间按单条膜条配准时精度约几个像素（不同曝光条带饱和、强弱不同），所以有白光图时曝光图沿用白光图的膜条变换。

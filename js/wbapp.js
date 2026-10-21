@@ -32,8 +32,10 @@
   try { App.prefLadder = localStorage.getItem('blotfig.ladder') || null; } catch (e) { App.prefLadder = null; }
 
   const defaultStyle = () => ({ mmPerLane: 5, fontPt: 7, lineWidthPt: 0.5, labelAngle: 'auto', rowGapPt: 2, blotGapPt: 5,
-    tickLenPt: 2.5, labelGapPt: 2.5, unitHeader: true, showMW: true, panelLetter: '', dpi: 600, invert: true, border: false });
-  const newState = () => ({ blots: [], rows: [], lanes: [], range: [1, 1], hiCol: 0, levels: {}, align: {}, conditions: [], groups: [], style: defaultStyle() });
+    tickLenPt: 2.5, labelGapPt: 2.5, unitHeader: true, showMW: true, panelLetter: '', dpi: 600, invert: true, border: false, mwSide: 'left', nameSide: 'right' });
+  /* step: how far the user has come (1 Marker picture confirmed → 2 pieces confirmed → 3 boxes → 4 marker →
+   * 5 names); each step works on what the one before established */
+  const newState = () => ({ step: 1, blots: [], rows: [], lanes: [], range: [1, 1], hiCol: 0, levels: {}, align: {}, conditions: [], groups: [], arrows: [], style: defaultStyle() });
 
   /* ---------- events / undo ---------- */
   App.on = fn => App.listeners.push(fn);
@@ -42,7 +44,8 @@
   App.refresh = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; App.emit('refresh'); }); };
   App.commit = function () {
     if (!App.S) return;
-    roomLeft();
+    roomLeft(); trimLeft();
+    if (App.S.arrows) App.S.arrows = App.S.arrows.filter(a => App.row(a.row));     // (a deleted row takes its arrows; undo brings both)
     App.fitLanes(false);
     App.refreshChoices();
     const snap = JSON.stringify(App.S);
@@ -123,14 +126,12 @@
     rec._disp = null;
   }
 
-  /* a membrane. Its ladder: the one the user chose last time (people keep one ladder; ladderFrom 'pref'), else
-   * guessed from the marker bands (ladderAuto: to be confirmed) */
-  const newBlot = (images, marker) => ({ id: uid('b'), name: '', images, marker, ladderId: App.prefLadder || null, ladderAuto: !App.prefLadder,
-    ladderFrom: App.prefLadder ? 'pref' : null, pieces: [] });
+  /* a membrane. Its ladder: the one the user chose last time (people keep one ladder), else none yet — it only
+   * lists the sizes to pick from when marking (nothing is read automatically) */
+  const newBlot = (images, marker) => ({ id: uid('b'), name: '', images, marker, ladderId: App.prefLadder || null, pieces: [] });
   // the ladder of a membrane chosen by the user: remembered for the next membranes
   App.setLadder = function (b, id) {
-    b.ladderAuto = !id; b.ladderFrom = id ? 'user' : null;
-    b.ladderId = id || (App.analysis[b.id] && App.analysis[b.id].autoLadderId) || null;
+    b.ladderId = id || null;
     if (id) { App.prefLadder = id; try { localStorage.setItem('blotfig.ladder', id); } catch (e) { /* storage off */ } }
   };
   // a marker photo saved at another resolution: resampled to the matching exposure
@@ -177,6 +178,8 @@
       matchSizes(recs);
       recs.forEach(r => { prepare(r); App.images.set(r.id, r); });
       App.S = head.S;
+      if (!App.S.step) App.S.step = 5;          // (projects saved before the steps: everything done)
+      if (!App.S.arrows) App.S.arrows = [];
       App.selRow = App.selSeg = App.selLane = App.selMark = null; App.mode = null;
       App.viewBlot = App.blot(head.viewBlot) ? head.viewBlot : (App.S.blots[0] || {}).id; App.viewImg = null;
       App.syncAlign();
@@ -245,10 +248,12 @@
       });
       for (const b of blots) {
         App.S.blots.push(b);
-        busy(true, `分析 ${App.blotName(b)}：对齐各张图、膜条、条带、泳道、Marker…`); await tick();
+        busy(true, `分析 ${App.blotName(b)}：对齐各张图、找膜条…`); await tick();
         alignAndAnalyze(b, init, false);
-        App.S.rows.push(...App.rowsFromAnalysis(b));
       }
+      // a membrane new to the figure goes through the steps: its Marker picture confirmed first (the boxes come
+      // once its pieces are)
+      if (blots.length) App.S.step = 1;
       for (const b of joined) { busy(true, `重新分析 ${App.blotName(b)}…`); await tick(); alignAndAnalyze(b, init, true); }
       App.fitLanes(first);
       if (!App.viewBlot || !App.blot(App.viewBlot)) App.viewBlot = App.S.blots[0] && App.S.blots[0].id;
@@ -514,13 +519,11 @@
     // the white-light photo as taken, with where it lies on the grid (strips and ladder are read from it unresampled)
     const al = mk && App.alignOf(mk.id), mPcs = al && al.pieces ? (blot.pieces || []).filter(p => al.pieces[p.id]).map(p => ({ cx: p.cx, cy: p.cy, angle: p.angle, w: p.w, h: p.h, T: al.pieces[p.id] })) : [];
     const A = WB.analyzeSession(ch.map(r => ({ id: r.id, img: r.img, exposure: r.exposure, cs: r.cs })), mk && { id: mk.id, img: (mk.raw || mk).img, T: al ? { a: al.a, tx: al.tx, ty: al.ty } : null, pieces: mPcs },
-      { ladderId: blot.ladderAuto ? null : blot.ladderId, prefLadder: App.prefLadder, noChemiCheck: !!App.devNoChemi, strips: blot.userStrips || null });
+      { noCalib: true, noChemiCheck: !!App.devNoChemi, strips: blot.userStrips || null });
     A.chemiIds = ch.map(r => r.id);
     A.H = ch[0].img.h;
     A._strips = JSON.stringify(blot.userStrips || null);
     App.analysis[blot.id] = A;
-    if (blot.ladderAuto || !blot.ladderId) blot.ladderId = A.ladderId;
-    A._calLadder = A.ladderId;
     // pieces, in analysis order; a piece found again at the same place (each old piece once, nearest first)
     // keeps its id and the marker bands set by hand, moved along with it
     const old = blot.pieces || [];
@@ -593,7 +596,8 @@
     const oldPcs = (blot.pieces || []).map(p => JSON.parse(JSON.stringify(p)));
     App.analyze(blot);
     if (!App.analysis[blot.id]) { App.S.rows = App.S.rows.filter(r => r.blot !== blot.id); return; }
-    if (!rows.length || (opt && opt.fresh)) {
+    // (before the pieces are confirmed (step 3) there are no boxes yet)
+    if ((!rows.length && App.S.step >= 3) || (opt && opt.fresh)) {
       const fresh = App.rowsFromAnalysis(blot), at = App.S.rows.findIndex(r => r.blot === blot.id);
       App.S.rows = App.S.rows.filter(r => r.blot !== blot.id);
       App.S.rows.splice(at < 0 ? App.S.rows.length : at, 0, ...fresh);
@@ -615,6 +619,9 @@
         if (!np) { np = Object.assign(JSON.parse(JSON.stringify(op)), { strip: -1 }); pcs.push(np); }
         const at = (u, v) => carry(op, np, u, v), m = at((sg.x0 + sg.x1) / 2, sg.vc), du = m.u - (sg.x0 + sg.x1) / 2;
         const t = Object.assign({}, sg, { piece: np.id, vc: m.v, x0: sg.x0 + du, x1: sg.x1 + du, lanes: sg.lanes.map(l => ({ u: at(l.u, sg.vc).u, r: l.r })) });
+        // (a box's own tilt on the picture stays)
+        if (sg.pu != null) t.pu = at(sg.pu, sg.vc).u;
+        if (sg.rot || op.angle !== np.angle) t.rot = Math.round(((sg.rot || 0) + op.angle - np.angle) * 100) / 100;
         // a ladder lane found only now (a white-light picture added): the lanes on it are marker lanes
         if (!hadLadder.get(op.id) && (np.ladderUs || []).length) {
           const p = App.segPitch(t);
@@ -645,47 +652,32 @@
   };
   // after undo / redo: a membrane whose pieces set by hand differ from what was analysed is analysed again
   App.syncPieces = () => App.S.blots.forEach(b => { const A = App.analysis[b.id]; if (A && A._strips !== JSON.stringify(b.userStrips || null)) App.analyze(b); });
-  // automatic ladder calibration of a membrane (all its pieces)
-  App.calibFor = function (blot) {
-    const A = App.analysis[blot.id];
-    if (!A) return null;
-    if (A._calLadder !== blot.ladderId) {
-      const lad = G.ProteinLadders.get(blot.ladderId);
-      const cal = lad ? WB.calibrate(A.ladderStrips, A.strips, lad.sizes, A.H) : null;
-      A.calib = cal && cal.pinned ? cal : null;
-      A._calLadder = blot.ladderId;
-    }
-    return A.calib;
+  // a piece's marks with sizes, their heights v in the frame of box sg on it (a turned box: a band level in the box
+  // matches the marker band along the box's tilt, not along the piece's), else of the piece
+  function marksIn(pc, sg) {
+    const ms = (pc.marks || []).filter(m => m.kda > 0);
+    if (!sg || !sg.rot) return ms.map(m => ({ v: m.v, kda: m.kda }));
+    const F = pFrame(pc), B = App.segFrame(pc, sg);
+    return ms.map(m => ({ v: WB.toFrame(B, ...WB.toImg(F, m.u, m.v))[1], kda: m.kda }));
+  }
+  /* size <-> position on one piece (sg: in that box's frame), from the marker bands the user marked on it —
+   * nothing is read automatically (prestained ladders on real membranes are too varied for that).
+   * {manual, c, knots: [{v, lk}]} for WB.kdaAtK / WB.vAtK; null below 2 marks */
+  App.pieceCal = function (b, pc, sg) {
+    if (!pc || !pc.marks) return null;
+    const K = marksIn(pc, sg).map(m => ({ v: m.v, lk: Math.log(m.kda) })).sort((a, c) => a.v - c.v);
+    if (K.length < 2) return null;
+    const ml = K.reduce((s, k) => s + k.lk, 0) / K.length, mv = K.reduce((s, k) => s + k.v, 0) / K.length;
+    let num = 0, den = 0; K.forEach(k => { num += (k.lk - ml) * (k.v - mv); den += (k.lk - ml) ** 2; });
+    const c = den ? num / den : null;
+    return { manual: true, c: c < 0 ? c : null, knots: K };
   };
-  /* size <-> position on one piece: the marks set by hand when there are any, else the automatic
-   * calibration. {manual, c, knots: [{v, lk}]} for WB.kdaAtK / WB.vAtK */
-  App.pieceCal = function (b, pc) {
-    if (!pc) return null;
-    if (pc.marks && pc.marks.length) {
-      const K = pc.marks.filter(m => m.kda > 0).map(m => ({ v: m.v, lk: Math.log(m.kda) })).sort((a, c) => a.v - c.v);
-      let c = null;
-      if (K.length >= 2) {
-        const ml = K.reduce((s, k) => s + k.lk, 0) / K.length, mv = K.reduce((s, k) => s + k.v, 0) / K.length;
-        let num = 0, den = 0; K.forEach(k => { num += (k.lk - ml) * (k.v - mv); den += (k.lk - ml) ** 2; });
-        c = den ? num / den : null;
-      }
-      if (!(c < 0)) { const ac = App.calibFor(b); c = ac && ac.c < 0 ? ac.c : null; }
-      return { manual: true, c, knots: K };
-    }
-    const cal = App.calibFor(b), cs = cal && pc.strip >= 0 ? cal.strips[pc.strip] : null;
-    return cs ? { manual: false, c: cal.c, a: cs.a, knots: cs.knots || [], bands: cs.bands || [] } : null;
-  };
-  // kDa ticks a piece can show: the hand-set marks, or every ladder size of the automatic calibration
-  App.pieceTicks = function (b, pc) {
-    const pcal = App.pieceCal(b, pc); if (!pcal) return [];
-    if (pcal.manual) return pc.marks.filter(m => m.kda > 0).map(m => ({ v: m.v, k: m.kda }));
-    const lad = G.ProteinLadders.get(b.ladderId); if (!lad) return [];
-    return lad.sizes.map(k => ({ v: WB.vAtK(pcal, k), k })).filter(t => t.v != null && Math.abs(t.v) <= pc.h / 2);
-  };
+  // kDa ticks a piece shows: its marks (sg: heights in that box's frame)
+  App.pieceTicks = (b, pc, sg) => (pc && pc.marks ? marksIn(pc, sg).map(m => ({ v: m.v, k: m.kda })) : []);
   App.rowKda = function (row) {
     const b = App.blot(row.blot); if (!b) return null;
     for (const sg of row.segs) {
-      const pcal = App.pieceCal(b, App.piece(b, sg.piece));
+      const pcal = App.pieceCal(b, App.piece(b, sg.piece), sg);
       const k = pcal && WB.kdaAtK(pcal, sg.vc + (sg.b0 + sg.b1) / 2);
       if (k) return k;
     }
@@ -700,6 +692,42 @@
     return Math.max(4, g[g.length >> 1]);
   };
   App.segPitch = sg => spacing(sg.lanes, sg.p);
+  /* the frame of a box: its piece's, turned by sg.rot degrees (a band not quite level on its piece) about the
+   * point (sg.pu, sg.vc) of the piece frame. Box coordinates — lanes u, x0..x1, vc — are numbers of this frame. */
+  App.segFrame = function (pc, sg) {
+    const F = pFrame(pc);
+    if (!sg || !sg.rot) return F;
+    const pu = sg.pu != null ? sg.pu : (sg.x0 + sg.x1) / 2, [px, py] = WB.toImg(F, pu, sg.vc), R = WB.frame(0, 0, pc.angle + sg.rot), [qx, qy] = WB.toImg(R, pu, sg.vc);
+    return { ox: px - qx, oy: py - qy, c: R.c, s: R.s };
+  };
+  // a box turned to rot degrees (relative to its piece) about its middle: it stays where it is on the picture
+  App.setSegRot = function (pc, sg, rot) {
+    const uc = (sg.x0 + sg.x1) / 2, [cx, cy] = WB.toImg(App.segFrame(pc, sg), uc, sg.vc), [u2, v2] = WB.toFrame(pFrame(pc), cx, cy), du = u2 - uc;
+    sg.x0 += du; sg.x1 += du; sg.lanes.forEach(l => { l.u += du; });
+    sg.vc = v2; sg.pu = u2; sg.rot = Math.round(Math.max(-15, Math.min(15, rot)) * 100) / 100;
+  };
+  /* a band not quite level on its piece: the box turned to run along it — from the band's middle in each sample
+   * lane of the row's picture, when 3 lanes or more show it clearly and agree on a line. The angle added
+   * (degrees), or null. */
+  App.levelBox = function (row, sg) {
+    const pc = App.pieceOf(row, sg), rec = App.images.get(row.img);
+    if (!pc || !rec || rec.kind !== 'chemi') return null;
+    const F = App.segFrame(pc, sg), p = App.segPitch(sg), vT = sg.vc - row.above, vB = sg.vc + row.below, was = sg.vc + (sg.b0 + sg.b1) / 2;
+    const found = sg.lanes.filter(l => l.r === 's').map(l => ({ u: l.u, bd: WB.bandInBox(sigOf(rec), F, [l.u], p * 0.25, vT, vB, was) })).filter(x => x.bd);
+    const top = Math.max(0, ...found.map(x => x.bd.rel)), pts = found.filter(x => x.bd.rel >= top * 0.35 && Math.abs(x.bd.v - was) < (row.above + row.below) * 0.35);
+    if (pts.length < 3) return null;
+    // the median of the slopes between every two lanes (one odd lane does not tilt the box)
+    const sl = [];
+    for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) sl.push((pts[j].bd.v - pts[i].bd.v) / (pts[j].u - pts[i].u));
+    sl.sort((a, c) => a - c);
+    const k = sl[sl.length >> 1], mu = pts.reduce((s, x) => s + x.u, 0) / pts.length, mv = pts.reduce((s, x) => s + x.bd.v, 0) / pts.length;
+    const res = pts.map(x => Math.abs(x.bd.v - (mv + k * (x.u - mu)))).sort((a, c) => a - c);
+    const deg = Math.atan(k) * 180 / Math.PI;
+    if (res[res.length >> 1] > Math.max(3, (sg.b1 - sg.b0) * 0.3) || Math.abs(deg) < 0.15 || Math.abs(deg) > 6) return null;
+    App.setSegRot(pc, sg, (sg.rot || 0) + deg);
+    App.findBand(row, sg);
+    return deg;
+  };
   // edges of lane i: half-way to its neighbours, half a spacing out at the ends
   App.laneLeft = (sg, i) => { const L = sg.lanes; return i > 0 ? (L[i - 1].u + L[i].u) / 2 : L[i].u - App.segPitch(sg) / 2; };
   App.laneRight = (sg, i) => { const L = sg.lanes; return i < L.length - 1 ? (L[i].u + L[i + 1].u) / 2 : L[i].u + App.segPitch(sg) / 2; };
@@ -774,7 +802,7 @@
     const x0 = sg.x0 != null ? sg.x0 : -pc.w / 2, x1 = sg.x1 != null ? sg.x1 : pc.w / 2;
     let res = null;
     for (const rec of recs) {
-      res = WB.detectBoxLanes(sigOf(rec), pFrame(pc), x0, x1, sg.vc - row.above, sg.vc + row.below, { pitch: pc.pitch || App.segPitch(sg) });
+      res = WB.detectBoxLanes(sigOf(rec), App.segFrame(pc, sg), x0, x1, sg.vc - row.above, sg.vc + row.below, { pitch: pc.pitch || App.segPitch(sg) });
       if (res.lanes.length) break;
     }
     if (!res || !res.lanes.length) return 0;
@@ -842,12 +870,16 @@
     L.forEach(l => { l.u = mid + (l.u - mid) * k; });
     sg.p = p * k;
   };
-  // figure columns of a segment (and the segments after it in the row) moved by d
+  /* figure columns of a segment (and the segments after it in the row) moved by d — not left of column 1 (the
+   * other rows are never pushed aside: to have this box further left, move the others right). Returns whether
+   * anything moved. */
   App.shiftCols = function (row, sg, d) {
     const i = row.segs.indexOf(sg);
     if (i < 0) return false;
-    row.segs.slice(i).forEach(t => { t.c0 += d; });
-    roomLeft();
+    const segs = row.segs.slice(i);
+    d = Math.max(d, 1 - Math.min(...segs.map(t => t.c0)));
+    if (!d) return false;
+    segs.forEach(t => { t.c0 += d; });
     return true;
   };
 
@@ -866,17 +898,39 @@
     S.range = [S.range[0] <= 1 ? 1 : S.range[0] + s, S.range[1] + s];
     S.hiCol += s;
   };
+  // first figure column of every box with sample lanes
+  const firstCols = () => App.S.rows.flatMap(r => r.segs.filter(s => App.nSample(s)).map(s => s.c0));
+  // a box widened past column 1 (lanes gained on its left): room on the left for it
   function roomLeft() {
-    const lo = Math.min(...App.S.rows.flatMap(r => r.segs.map(s => s.c0)));
+    const lo = Math.min(...firstCols());
     if (lo < 1) App.makeRoom(1 - lo);
   }
-  // the figure columns of everything on the piece of box sg moved by d (a piece's rows share its lanes), or
-  // with onlyBox just that box; left of column 1 makes room on the left. Returns the number of boxes moved.
+  // columns on the left that no box fills and nothing was typed for: gone, everything moves left (a box moved
+  // right and back again leaves no blank column behind)
+  function trimLeft() {
+    const S = App.S, cols = firstCols();
+    if (!cols.length) return;
+    const k = Math.min(...cols) - 1;
+    const blank = n => { const l = S.lanes[n - 1]; return !l || (!l.name && !l.hidden && S.conditions.every(c => !c.values[n - 1]) && S.groups.every(g => Math.min(g.from, g.to) > n)); };
+    let s = 0; while (s < k && blank(s + 1)) s++;
+    if (!s) return;
+    S.rows.forEach(r => r.segs.forEach(sg => { sg.c0 -= s; }));
+    S.lanes.splice(0, s);
+    S.conditions.forEach(c => c.values.splice(0, s));
+    S.groups.forEach(g => { g.from -= s; g.to -= s; });
+    S.range = [Math.max(1, S.range[0] - s), Math.max(1, S.range[1] - s)];
+    S.hiCol = Math.max(0, S.hiCol - s);
+  }
+  /* the figure columns of everything on the piece of box sg moved by d (a piece's rows share its lanes), or with
+   * onlyBox just that box — not left of column 1 (the other pieces are never pushed aside). Returns {n: boxes
+   * moved, d: columns they moved} (n 0: already at column 1). */
   App.shiftAlign = function (row, sg, d, onlyBox) {
-    const segs = onlyBox ? [sg] : App.S.rows.flatMap(r => r.segs.filter(s => s.piece === sg.piece));
+    const segs = (onlyBox ? [sg] : App.S.rows.flatMap(r => r.segs.filter(s => s.piece === sg.piece))).filter(s => App.nSample(s));
+    if (!segs.length) return { n: 0, d: 0 };
+    d = Math.max(d, 1 - Math.min(...segs.map(s => s.c0)));
+    if (!d) return { n: 0, d: 0 };
     segs.forEach(s => { s.c0 += d; });
-    roomLeft();
-    return segs.length;
+    return { n: segs.length, d };
   };
   // a row put before the row now at index `to` of S.rows (S.rows.length: at the end); the figure stacks rows
   // in this order. Returns whether anything moved.
@@ -918,8 +972,41 @@
     if (!pc || !rec || rec.kind !== 'chemi') return;
     const us = sg.lanes.filter(l => l.r === 's').map(l => l.u), vT = sg.vc - row.above, vB = sg.vc + row.below;
     const was = sg.vc + (sg.b0 + sg.b1) / 2;
-    const bd = WB.bandInBox(sigOf(rec), pFrame(pc), us, App.segPitch(sg) * 0.3, vT, vB, was > vT && was < vB ? was : null);
+    const bd = WB.bandInBox(sigOf(rec), App.segFrame(pc, sg), us, App.segPitch(sg) * 0.3, vT, vB, was > vT && was < vB ? was : null);
     if (bd) { sg.b0 = bd.v0 - sg.vc; sg.b1 = bd.v1 - sg.vc; }
+  };
+
+  /* ---------- target bands: an arrow at one band of a row, with its size ----------
+   * S.arrows [{row, db, sym: '◀' | '*' | '#' | '†', side, text, auto}]: db = where it points, from the middle of
+   * the band of the row's first box (that stays where it is on the membrane when the box is moved, turned or
+   * carried onto other pieces); auto: the arrowhead's size from the marks */
+  const bandMid = row => { const sg = row.segs[0]; return sg.vc + (sg.b0 + sg.b1) / 2; };
+  App.arrowV = a => { const row = App.row(a.row); return row ? bandMid(row) + a.db : null; };
+  // the band nearest v (within about a band height) in the row's picture, else v
+  App.snapBandV = function (row, v) {
+    const sg = row.segs[0], pc = sg && App.pieceOf(row, sg), rec = App.images.get(row.img);
+    if (!pc || !rec || rec.kind !== 'chemi') return v;
+    const us = sg.lanes.filter(l => l.r === 's').map(l => l.u), tol = Math.max(10, (sg.b1 - sg.b0) * 0.8);
+    const bd = WB.bandInBox(sigOf(rec), App.segFrame(pc, sg), us, App.segPitch(sg) * 0.3, Math.max(sg.vc - row.above, v - 2 * tol), Math.min(sg.vc + row.below, v + 2 * tol), v);
+    return bd && Math.abs(bd.v - v) <= tol ? bd.v : v;
+  };
+  App.addArrow = function (row, v) {
+    const a = { row: row.id, db: Math.round((App.snapBandV(row, v) - bandMid(row)) * 10) / 10, sym: '◀', side: App.S.style.nameSide === 'left' ? 'left' : 'right', text: '', auto: true };
+    (App.S.arrows = App.S.arrows || []).push(a);
+    return a;
+  };
+  // an arrow's size from the marks of its row's first box ('≈' beyond the marked bands); '' without 2 marks
+  App.arrowSize = function (a) {
+    const row = App.row(a.row), sg = row && row.segs[0], b = row && App.blot(row.blot), pcal = sg && App.pieceCal(b, App.piece(b, sg.piece), sg);
+    const v = row && App.arrowV(a), k = pcal && WB.kdaAtK(pcal, v);
+    if (!k) return '';
+    const vs = pcal.knots.map(t => t.v), out = v < Math.min(...vs) - 2 || v > Math.max(...vs) + 2;
+    return `${out ? '≈' : ''}${k < 10 ? k.toFixed(1) : Math.round(k)} kDa`;
+  };
+  // the text beside an arrow: its name, its size (in brackets after a name)
+  App.arrowLabel = function (a) {
+    const sz = a.auto && a.sym === '◀' ? App.arrowSize(a) : '';
+    return a.text && sz ? `${a.text} (${sz})` : a.text || sz;
   };
   // lanes for a new box on a piece: those of the nearest other row on it (the user may have fixed them),
   // else the piece's lattice over the figure's columns
@@ -998,7 +1085,7 @@
       const pc = App.piece(b, sg.piece); if (!pc || !sg.lanes.length) return;
       const cs = App.segCols(sg).filter(s => s.col != null && (all || vis.has(s.col)));
       if (!cs.length) return;
-      parts.push({ F: pFrame(pc), u0: App.laneLeft(sg, cs[0].i), u1: App.laneRight(sg, cs[cs.length - 1].i),
+      parts.push({ F: App.segFrame(pc, sg), u0: App.laneLeft(sg, cs[0].i), u1: App.laneRight(sg, cs[cs.length - 1].i),
         vTop: sg.vc - row.above, vBot: sg.vc + row.below, b0: sg.vc + sg.b0, b1: sg.vc + sg.b1, sg, pc });
     });
     return parts.length || all ? parts : App.rowParts(row, true);
@@ -1056,23 +1143,26 @@
   App.levelsOf = id => App.S.levels[id] || { black: 0, white: 1 };
 
   /* grey value for display: dark bands on light background when style.invert */
-  App.mapper = function (id) {
-    const lv = App.levelsOf(id), inv = App.S.style.invert, sc = 1 / Math.max(1e-6, lv.white - lv.black);
+  App.mapper = function (id, own) {
+    const lv = own || App.levelsOf(id), inv = App.S.style.invert, sc = 1 / Math.max(1e-6, lv.white - lv.black);
     return v => { let t = (v - lv.black) * sc; t = t < 0 ? 0 : t > 1 ? 1 : t; return Math.round((inv ? 1 - t : t) * 255); };
   };
 
+  // the display levels of a row: its own when set (adjusted for this crop alone), else its picture's
+  App.rowLevels = row => row.lv || App.levelsOf(row.img);
+  App.rowMapper = row => App.mapper(row.img, row.lv);
   // straightened crop of lanes iA..iB of one box for a row, rendered to a canvas
   const rasterCache = new Map();
   App.runRaster = function (row, sg, pc, iA, iB, step) {
-    const rec = App.images.get(row.img), lv = App.levelsOf(row.img);
+    const rec = App.images.get(row.img), lv = App.rowLevels(row);
     const u0 = App.laneLeft(sg, iA), u1 = App.laneRight(sg, iB), v0 = sg.vc - row.above, v1 = sg.vc + row.below;
-    const key = [row.img, lv.black, lv.white, App.S.style.invert, pc.cx, pc.cy, pc.angle, pc.w, pc.h, u0, u1, v0, v1, step.toFixed(3)].join('|');
+    const key = [row.img, lv.black, lv.white, App.S.style.invert, pc.cx, pc.cy, pc.angle, pc.w, pc.h, sg.rot || 0, sg.pu, u0, u1, v0, v1, step.toFixed(3)].join('|');
     if (rasterCache.has(key)) return rasterCache.get(key);
-    const F = pFrame(pc);
+    const F = App.segFrame(pc, sg);
     const win = WB.sampleWindow(sigOf(rec), F, u0, u1, v0, v1, step);
     const cv = document.createElement('canvas'); cv.width = win.w; cv.height = win.h;
     // what the box covers, wherever it lies (the pieces found are only a guess; outside the picture: background)
-    const ctx = cv.getContext('2d'), id = ctx.createImageData(win.w, win.h), map = App.mapper(row.img);
+    const ctx = cv.getContext('2d'), id = ctx.createImageData(win.w, win.h), map = App.rowMapper(row);
     for (let k = 0; k < win.w * win.h; k++) { const val = map(win.data[k]); id.data[k * 4] = id.data[k * 4 + 1] = id.data[k * 4 + 2] = val; id.data[k * 4 + 3] = 255; }
     ctx.putImageData(id, 0, 0);
     const out = { href: cv.toDataURL('image/png'), w: win.w, h: win.h };
@@ -1173,6 +1263,7 @@
     App.rehomeSeg(row, sg);
     App.alignSeg(row, sg);
     App.findBand(row, sg);
+    App.levelBox(row, sg);
     insertRow(row);
     return row;
   };
@@ -1185,19 +1276,11 @@
     if (!hit || hit.pc === op || row.segs.some(s => s !== sg && s.piece === hit.pc.id)) return null;
     const np = hit.pc, vc0 = sg.vc, m = carry(op, np, mid, vc0), du = m.u - mid;
     sg.lanes = sg.lanes.map(l => ({ u: carry(op, np, l.u, vc0).u, r: l.r }));
+    if (sg.pu != null) sg.pu = carry(op, np, sg.pu, vc0).u;
+    // (its own tilt on the picture stays: relative to the new piece's)
+    if (sg.rot || op.angle !== np.angle) sg.rot = Math.round(((sg.rot || 0) + op.angle - np.angle) * 100) / 100;
     sg.x0 += du; sg.x1 += du; sg.vc = m.v; sg.piece = np.id;
     return np;
-  };
-  // place a row where a given molecular weight runs (on a piece that covers it)
-  App.addRowAtKda = function (kda, prefBlot) {
-    const order = App.S.blots.slice().sort((a, c) => (a.id === prefBlot ? -1 : c.id === prefBlot ? 1 : 0));
-    for (const b of order) for (const pc of b.pieces || []) {
-      const pcal = App.pieceCal(b, pc), v = pcal && WB.vAtK(pcal, kda);
-      if (v == null || Math.abs(v) > pc.h / 2 - 8) continue;
-      const [x, y] = WB.toImg(pFrame(pc), 0, v);
-      return App.addRowAt(b.id, x, y);
-    }
-    return null;
   };
   const xRange = pc => { const a = Math.abs(pc.angle) * Math.PI / 180, hw = (pc.w * Math.cos(a) + pc.h * Math.sin(a)) / 2; return [pc.cx - hw, pc.cx + hw]; };
   const sideBySide = (p, q) => { const A = xRange(p), B = xRange(q), ov = Math.min(A[1], B[1]) - Math.max(A[0], B[0]); return ov < 0.25 * Math.min(A[1] - A[0], B[1] - B[0]); };
@@ -1257,29 +1340,33 @@
     const s = App.pieceSlots(pc).find(x => x.role === 'ladder');
     return s ? s.u : ((pc.roles || []).length ? pc.u0 - pc.pitch * 0.5 : -pc.w / 2 + 30);
   };
-  // the piece's marks as editable values; the first edit starts from what was detected automatically
-  App.manualMarks = function (b, pc) {
-    if (pc.marks) return pc.marks;
-    const pcal = App.pieceCal(b, pc), u = App.ladderU(pc);
-    pc.marks = pcal ? pcal.knots.filter(k => Math.abs(k.v) <= pc.h / 2).map(k => ({ u, v: k.v, kda: +Math.exp(k.lk).toPrecision(3) })) : [];
-    return pc.marks;
-  };
-  // a size suggestion for a new mark at v: the ladder size nearest to what the piece's sizes predict, preferring
-  // one the piece has no mark for yet (when it is not much further off)
+  // the piece's marks, editable (none yet: an empty list)
+  App.manualMarks = (b, pc) => pc.marks || (pc.marks = []);
+  /* a size suggestion for a new mark at v: with 2 marks or more, the ladder size the piece's marks predict there
+   * (the nearest one it has no mark for yet; none when even that is far off — a click between two bands); with
+   * one, the ladder's next size on the side clicked (below it: the next smaller); none for the first */
   App.suggestKda = function (b, pc, v) {
-    const pcal = App.pieceCal(b, pc), k = pcal && WB.kdaAtK(pcal, v), lad = G.ProteinLadders.get(b.ladderId);
-    if (!k) return null;
-    if (!lad) return Math.round(k);
-    const taken = (pc.marks || []).map(m => m.kda), off = s => Math.abs(Math.log(s / k));
-    const free = lad.sizes.filter(s => !taken.some(t => Math.abs(Math.log(t / s)) < 0.01) && off(s) < 0.25);
-    return (free.length ? free : lad.sizes).slice().sort((p, q) => off(p) - off(q))[0];
+    const lad = G.ProteinLadders.get(b.ladderId), ms = (pc.marks || []).filter(m => m.kda > 0), pcal = App.pieceCal(b, pc);
+    if (pcal) {
+      const k = WB.kdaAtK(pcal, v);
+      if (!k) return null;
+      if (!lad) return Math.round(k);
+      const off = s => Math.abs(Math.log(s / k)), free = lad.sizes.filter(s => !ms.some(m => Math.abs(Math.log(m.kda / s)) < 0.01)).sort((p, q) => off(p) - off(q));
+      return free.length && off(free[0]) < 0.5 ? free[0] : null;
+    }
+    if (ms.length === 1 && lad) {
+      const i = lad.sizes.findIndex(s => Math.abs(Math.log(s / ms[0].kda)) < 0.01), j = v > ms[0].v ? i + 1 : i - 1;
+      return i >= 0 && lad.sizes[j] != null ? lad.sizes[j] : null;
+    }
+    return null;
   };
-  // the white-light picture a membrane's marker is read from
+  // the picture a membrane's marker is marked on (white light, or white light and chemiluminescence in one)
   App.markerRec = b => (b && b.marker && App.images.get(b.marker)) || null;
-  // the lane a piece's marks sit on: their own, else the piece's (first) ladder lane
-  App.markLane = pc => { const ms = (pc.marks || []).map(m => m.u).sort((a, c) => a - c); return ms.length ? ms[ms.length >> 1] : App.ladderU(pc); };
-  /* dark bands down lane u of a piece in the white-light picture (piece frame v, top to bottom): where a mark
-   * snaps to. Darkness against the lane's own brightness around it (a closing over about ±24 px). */
+  // the lane a piece's marks sit on (their middle one); none before the first mark
+  App.markLane = pc => { const ms = (pc.marks || []).map(m => m.u).sort((a, c) => a - c); return ms.length ? ms[ms.length >> 1] : null; };
+  /* bands down lane u of a piece in the marker picture (piece frame v, top to bottom): where a mark snaps to.
+   * Prestained bands are dark in white light; in a picture with the chemiluminescence laid over, a band can be
+   * bright — both count, each against the lane's own level around it (a closing / opening over ±24 px). */
   const peakCache = new Map();
   App.ladderPeaks = function (b, pc, u) {
     const rec = App.markerRec(b);
@@ -1293,45 +1380,64 @@
       for (let du = -hw; du <= hw; du += 2) { const [x, y] = WB.toImg(F, u + du, v0 + k), val = WB.bilinear(rec.img, x, y); if (!isNaN(val)) { s += val; c++; } }
       prof[k] = c ? s / c : 0;
     }
-    const E = G.Engine, sm = E.gaussSmooth(prof, 1.2), r = 24, bg = E.slide(E.slide(sm, r, true), r, false), dark = new Float32Array(n);
-    let mx = 0; for (let k = 0; k < n; k++) { dark[k] = Math.max(0, bg[k] - sm[k]); mx = Math.max(mx, dark[k]); }
-    const out = mx > 0 ? E.findPeaks(dark, 5, mx * 0.12).map(p => ({ v: v0 + p.i, prom: p.prom / mx })).sort((a, c) => a.v - c.v) : [];
+    const E = G.Engine, sm = E.gaussSmooth(prof, 1.2), r = 24, out = [];
+    [[E.slide(E.slide(sm, r, true), r, false), 1], [E.slide(E.slide(sm, r, false), r, true), -1]].forEach(([bg, sign]) => {
+      const d = new Float32Array(n);
+      let mx = 0; for (let k = 0; k < n; k++) { d[k] = Math.max(0, sign * (bg[k] - sm[k])); mx = Math.max(mx, d[k]); }
+      if (mx > 0) E.findPeaks(d, 5, mx * 0.12).forEach(p => out.push({ v: v0 + p.i, prom: p.prom / mx, dark: sign > 0 }));
+    });
+    out.sort((a, c) => a.v - c.v);
     if (peakCache.size > 200) peakCache.clear();
     peakCache.set(key, out);
     return out;
   };
-  // the dark band nearest to v within tol (piece frame px), else v itself
+  // the band nearest to v within tol (piece frame px), else v itself
   App.snapMarkV = function (b, pc, u, v, tol) {
     let best = null;
     App.ladderPeaks(b, pc, u).forEach(p => { const d = Math.abs(p.v - v); if (d <= tol && (!best || d < best.d)) best = { v: p.v, d }; });
     return best ? best.v : v;
   };
-  /* a piece's marker for the panel: 'manual' (marks set or confirmed by hand; 'few': one mark and no slope to
-   * size with), 'auto' (read automatically, not checked yet), 'none'; and the sizes it shows */
+  // a piece's marker for the panel: 'manual' (2 marks or more: sizes known), 'few' (one), 'none'; its sizes
   App.markInfo = function (b, pc) {
-    if (pc.marks && pc.marks.length) {
-      const ks = pc.marks.filter(m => m.kda > 0).map(m => m.kda).sort((a, c) => c - a), pcal = App.pieceCal(b, pc);
-      return { state: ks.length >= 2 || (ks.length && pcal && pcal.c < 0) ? 'manual' : 'few', ks };
-    }
-    const ks = App.pieceTicks(b, pc).map(t => t.k);
-    return ks.length ? { state: 'auto', ks } : { state: 'none', ks: [] };
+    const ks = App.pieceTicks(b, pc).map(t => t.k).sort((a, c) => c - a);
+    return { state: ks.length >= 2 ? 'manual' : ks.length ? 'few' : 'none', ks };
   };
-  // marks of every piece of a membrane back to the automatic reading
-  App.autoMarks = b => (b.pieces || []).forEach(pc => { pc.marks = null; });
-  /* the sizes read automatically, checked by the user: every such piece's marks set by hand from now on (the
-   * bands seen; a piece where none was seen keeps the sizes as shown). The number of pieces confirmed. */
-  App.confirmMarks = function (b) {
-    let n = 0;
-    (b.pieces || []).forEach(pc => {
-      if (App.markInfo(b, pc).state !== 'auto') return;
-      const ticks = App.pieceTicks(b, pc), u = App.ladderU(pc);
-      if (!App.manualMarks(b, pc).length) pc.marks = ticks.map(t => ({ u, v: t.v, kda: t.k }));
-      n++;
-    });
-    return n;
-  };
+  // every mark of a membrane taken away
+  App.clearMarks = b => (b.pieces || []).forEach(pc => { pc.marks = null; });
   // pieces whose sizes the figure uses (a shown row runs across them)
   App.usedPieces = b => (b.pieces || []).filter(pc => App.S.rows.some(r => !r.hidden && r.blot === b.id && r.segs.some(s => s.piece === pc.id)));
+
+  /* ---------- the steps ---------- */
+  // step 1: the picture a membrane's pieces are found in and its marker is marked on, chosen by the user (a white-
+  // light picture, or white light and chemiluminescence in one); the membrane is analysed on it again
+  App.setMarkerImage = function (b, id) {
+    const rec = App.images.get(id);
+    if (!rec || !b.images.includes(id)) return;
+    if (rec.kind !== 'marker') { delete App.S.align[id]; App.applyAlign(rec); rec._reg = null; rec.kind = 'marker'; prepare(rec); }
+    b.marker = id;
+    alignAndAnalyze(b, null, true);
+  };
+  // step 2 → 3: the boxes of every membrane that has none yet, read on its confirmed pieces, each turned along
+  // its band
+  App.makeBoxes = function () {
+    App.S.step = Math.max(App.S.step, 3);
+    App.S.blots.forEach(b => {
+      if (App.S.rows.some(r => r.blot === b.id) || !App.analysis[b.id]) return;
+      const rows = App.rowsFromAnalysis(b);
+      App.S.rows.push(...rows);
+      rows.forEach(r => r.segs.forEach(sg => App.levelBox(r, sg)));
+    });
+  };
+  // the box a click on the membrane adds (step 3), in the frame of piece pc: as wide and high as the other boxes on
+  // that piece (else about six lanes and a band with room around it), centred at (u, v)
+  App.defaultBox = function (b, pc, u, v) {
+    const segs = App.S.rows.filter(r => r.blot === b.id).flatMap(r => r.segs.map(s => ({ s, h: r.above + r.below })));
+    const mine = segs.filter(x => x.s.piece === pc.id), use = mine.length ? mine : segs;
+    const med = a => a.sort((p, q) => p - q)[a.length >> 1];
+    const w = use.length ? med(use.map(x => x.s.x1 - x.s.x0)) : Math.min(pc.w, 6 * (pc.pitch || 100));
+    const h = use.length ? med(use.map(x => x.h)) : Math.min(pc.h, Math.max(40, (pc.pitch || 100) * 0.6));
+    return { u0: u - w / 2, u1: u + w / 2, v0: v - h / 2, v1: v + h / 2 };
+  };
 
   /* ---------- membranes: moving pictures between them ---------- */
   App.moveImage = function (imgId, toBlotId) {
@@ -1378,26 +1484,29 @@
   App.checks = function () {
     const S = App.S, warn = [], legend = [];
     const vis = S.rows.filter(r => !r.hidden);
-    const label = r => r.name || `≈${Math.round(App.rowKda(r) || 0) || '?'} kDa 行`;
+    // a row in words: its name, else its size, else the pieces it comes from
+    const label = r => r.name || (App.rowKda(r) ? `≈${Math.round(App.rowKda(r))} kDa 行` : `${S.blots.length > 1 ? App.blotName(App.blot(r.blot)) + ' ' : ''}膜条 ${App.rowPieces(r).map(pc => pc.letter).join('+')} 的行`);
     const C = App.columns();
     vis.forEach(r => {
       const e = App.rowExpo(r).find(x => x.id === r.img);
       if (e && e.satFrac > 0.002) warn.push(`「${label(r)}」所选曝光中条带有过曝像素，定量不可靠，建议换短曝光`);
-      if (App.rowClash(r).length) warn.push(`「${label(r)}」的几个框占了相同的列：选中这一行，在"泳道"里把右边那个框往后挪（›）`);
-      if (!C.vis.some(j => App.colSource(r, j))) warn.push(`「${label(r)}」的泳道都不在成图的列范围里：在"泳道"里调整范围，或把这一行的列挪过来（‹ ›）`);
+      if (App.rowClash(r).length) warn.push(`「${label(r)}」的几个框占了相同的列：在第 3 步选中这一行，把右边那个框往后挪（›）`);
+      if (!C.vis.some(j => App.colSource(r, j))) warn.push(`「${label(r)}」的泳道都不在成图的列范围里：在第 5 步调整列范围，或在第 3 步把这一行的列挪过来（‹ ›）`);
     });
     const blotsUsed = [...new Set(vis.map(r => r.blot))];
     if (blotsUsed.length > 1) {
       legend.push('Bands shown in separate rows were detected on different membranes processed in parallel; each row is an individual crop.');
       const loadBlots = new Set(vis.filter(App.isLoading).map(r => r.blot));
       if (loadBlots.size) blotsUsed.forEach(bid => {
-        if (!loadBlots.has(bid) && vis.some(r => r.blot === bid)) warn.push(`${App.blotName(App.blot(bid))}上的蛋白没有同膜内参（期刊要求内参与目标蛋白在同一张膜上）`);
+        if (!loadBlots.has(bid) && vis.some(r => r.blot === bid)) warn.push(`${App.blotName(App.blot(bid))} 上的蛋白没有同膜内参（期刊要求内参与目标蛋白在同一张膜上）`);
       });
     }
+    // membranes whose figure rows show sizes
+    const sized = new Set(blotsUsed.filter(bid => S.style.showMW && vis.some(r => r.blot === bid && App.rowPieces(r).some(pc => App.pieceCal(App.blot(bid), pc)))));
     blotsUsed.forEach(bid => {
       const b = App.blot(bid);
-      if (S.style.showMW && !vis.some(r => r.blot === bid && App.rowPieces(r).some(pc => App.pieceCal(b, pc)))) {
-        warn.push(`${App.blotName(b)}${b.marker ? '的 Marker 条带没能自动识别' : '没有 Marker 图'}，未标 kDa：在左侧第 2 步点"在白光图上核对 / 标注 Marker"，标出 2 条 Marker 带`);
+      if (S.style.showMW && S.step >= 5 && !sized.has(bid)) {
+        warn.push(`${App.blotName(b)} 还没标 Marker，成图没有分子量：在第 4 步每条膜条标 2 条 Marker 带（不需要的话在第 5 步"更多版式"里关掉"分子量刻度"）`);
       }
       (b.pieces || []).forEach(pc => {
         const ms = (pc.marks || []).filter(m => m.kda > 0).sort((p, q) => p.v - q.v);
@@ -1407,7 +1516,9 @@
     });
     if (C.gapAfter.size) legend.push('Non-adjacent lanes, or lanes from different pieces of a membrane, are separated by white space.');
     if (S.style.invert) legend.push('Chemiluminescence images are shown inverted (dark bands on a light background) with linear whole-image contrast.');
-    const lads = [...new Set(blotsUsed.map(bid => App.blot(bid).ladderId).filter(Boolean))].map(id => G.ProteinLadders.get(id)).filter(Boolean);
+    if (vis.some(r => r.lv)) legend.push('Brightness and contrast were adjusted linearly for each cropped panel as a whole.');
+    if ((S.arrows || []).some(a => a.sym === '*' && vis.some(r => r.id === a.row))) legend.push('Asterisks (*) indicate non-specific bands.');
+    const lads = [...new Set([...sized].map(bid => App.blot(bid).ladderId).filter(Boolean))].map(id => G.ProteinLadders.get(id)).filter(Boolean);
     if (lads.length) legend.push(`Molecular weights (kDa) from ${lads.map(l => l.name.replace(/\s*\(.*\)|\*/g, '')).join(' / ')}.`);
     const ex = [...new Set(vis.map(r => App.images.get(r.img)).filter(Boolean).map(rec => App.expoLabel(rec)))];
     if (ex.length) legend.push(`Exposure: ${vis.map(r => `${r.name || '?'} ${App.expoLabel(App.images.get(r.img))}`).join('; ')}.`);

@@ -1,7 +1,7 @@
 /* Figure layout: state -> SVG (pt units). Figure columns on a common grid across rows, white gaps where
  * neighbouring columns are not neighbouring lanes of one box; each row is drawn from its boxes as
- * straightened crops scaled so the lane spacing matches the grid. kDa ticks on the left, protein names on
- * the right, lane labels / conditions / groups on top. */
+ * straightened crops scaled so the lane spacing matches the grid. Beside the bands, each on the side chosen:
+ * kDa ticks, target-band arrows, protein names; lane labels / conditions / groups on top. */
 (function (G) {
   'use strict';
   const App = G.BApp, WB = G.WB, MM = 72 / 25.4;
@@ -15,6 +15,9 @@
   const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const f = v => (Math.round(v * 100) / 100).toString();
   const text = (t, x, y, pt, anchor, extra) => `<text x="${f(x)}" y="${f(y)}" font-size="${f(pt)}" text-anchor="${anchor}"${extra || ''}>${runs(t).map(r => r.it ? `<tspan font-style="italic">${esc(r.t)}</tspan>` : esc(r.t)).join('')}</text>`;
+  // a symbol as it is (in text() a * starts italics)
+  const symText = (t, x, y, pt, anchor) => `<text x="${f(x)}" y="${f(y)}" font-size="${f(pt)}" text-anchor="${anchor}">${esc(t)}</text>`;
+  const symWidth = (t, pt) => { mctx.font = `${pt * 4}px Arial`; return mctx.measureText(t).width / 4; };
   const line = (x1, y1, x2, y2, lw) => `<line x1="${f(x1)}" y1="${f(y1)}" x2="${f(x2)}" y2="${f(y2)}" stroke="#000" stroke-width="${f(lw)}"/>`;
 
   function build(preview) {
@@ -33,8 +36,10 @@
     if (!lanes.length) return { svg: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>', w: 10, h: 10, warnings, angle: 0 };
 
     /* ---- rows ---- */
-    const rows = C.rows;
-    let y = 0, prevBlot = null, maxLeft = 0, maxRight = 0;
+    // (protein names and the kDa scale each on the left or the right; on the same side the names go outside)
+    const mwRight = st.mwSide === 'right', nameLeft = st.nameSide === 'left';
+    const rows = C.rows, rowNames = [], ticksOut = [], arrowsOut = [];
+    let y = 0, prevBlot = null, maxLeft = 0, maxRight = 0, tickLabW = 0;
     const rowBoxes = [], placedTicks = [{ y: -pt * 0.6 }];   // the kDa header sits just above the first row
     rows.forEach((row, ri) => {
       if (prevBlot !== null) y += row.blot === prevBlot ? st.rowGapPt : st.blotGapPt;
@@ -63,20 +68,22 @@
         flush();
       });
       if (P && App.selRow === row.id) els.push(`<rect x="-1" y="${f(y - 1)}" width="${f(W + 2)}" height="${f(h + 2)}" fill="none" stroke="#2f6feb" stroke-width="1.2" pointer-events="none"/>`);
-      // protein name on the right
+      // protein name (placed once the width of the kDa scale is known)
       const nm = row.name || (P ? '蛋白名' : '');
       const kdaHint = App.rowKda(row);
-      if (nm) {
-        const t = ed(`data-edit="rowname" data-row="${row.id}"`, text(nm, W + 3, y + h / 2 + pt * 0.35, pt, 'start', row.name ? '' : ph));
-        els.push(t); maxRight = Math.max(maxRight, 3 + measure(nm, pt));
-      }
-      if (!row.name && P && kdaHint) { const t = `≈${Math.round(kdaHint)} kDa`; els.push(text(t, W + 3, y + h / 2 + pt * 1.35, pt * 0.8, 'start', ph)); maxRight = Math.max(maxRight, 3 + measure(t, pt * 0.8)); }
-      // kDa ticks on the left, from the leftmost piece of the row that has marker sizes
+      rowNames.push({ row, nm, y: y + h / 2, hint: !row.name && P && kdaHint ? `≈${Math.round(kdaHint)} kDa` : '' });
+      // target-band arrows of the row, at their band (placed once the widths beside the bands are known)
+      (S.arrows || []).forEach((a, k) => {
+        if (a.row !== row.id) return;
+        const ya = y + (App.arrowV(a) - (row.segs[0].vc - row.above)) * sc, lab = App.arrowLabel(a), wait = !lab && P && a.sym === '◀' && a.auto;
+        if (ya >= y - 0.5 && ya <= y + h + 0.5) arrowsOut.push({ a, k, y: ya, label: lab || (wait ? '? kDa' : ''), wait });
+      });
+      // kDa ticks, from the leftmost piece of the row that has marker sizes
       const b = App.blot(row.blot);
       const tsg = st.showMW ? row.segs.find(sg => App.pieceTicks(b, App.piece(b, sg.piece)).length) : null;
       if (tsg) {
         const top = tsg.vc - row.above;
-        const ticks = App.pieceTicks(b, App.piece(b, tsg.piece)).filter(t => t.v > top + 1 && t.v < tsg.vc + row.below - 1)
+        const ticks = App.pieceTicks(b, App.piece(b, tsg.piece), tsg).filter(t => t.v > top + 1 && t.v < tsg.vc + row.below - 1)
           .map(t => ({ k: t.k, y: y + (t.v - top) * sc })).sort((a, c) => a.y - c.y);
         const kept = [], yBand = y + (row.above + (tsg.b0 + tsg.b1) / 2) * sc;
         // too close to fit both: the tick nearest the band wins (it tells the size best);
@@ -86,16 +93,59 @@
         kept.sort((a, c) => a.y - c.y);
         placedTicks.push(...kept);
         kept.forEach(t => {
-          els.push(line(-st.tickLenPt - 1, t.y, -1, t.y, lw));
-          els.push(text(String(t.k), -st.tickLenPt - 2.5, t.y + pt * 0.35, pt, 'end'));
-          maxLeft = Math.max(maxLeft, st.tickLenPt + 2.5 + measure(String(t.k), pt));
+          if (mwRight) { els.push(line(W + 1, t.y, W + st.tickLenPt + 1, t.y, lw)); els.push(text(String(t.k), W + st.tickLenPt + 2.5, t.y + pt * 0.35, pt, 'start')); }
+          else { els.push(line(-st.tickLenPt - 1, t.y, -1, t.y, lw)); els.push(text(String(t.k), -st.tickLenPt - 2.5, t.y + pt * 0.35, pt, 'end')); }
+          tickLabW = Math.max(tickLabW, measure(String(t.k), pt));
+          ticksOut.push(t);
         });
-        if (!kept.length) warnings.push(`「${row.name || '某行'}」的裁切范围里没有 Marker 条带，无法标分子量（可在原图上把该行上下边界拉大）`);
+        // (said once the piece's marks are done — 2 of them — not while they are being set)
+        if (!kept.length && App.pieceCal(b, App.piece(b, tsg.piece))) warnings.push(`「${row.name || '膜条 ' + App.rowPieces(row).map(pc => pc.letter).join('+') + ' 的行'}」的框里没有标过的 Marker 带，旁边不画分子量刻度：在第 4 步标出这一高度附近的 Marker 带，或把框的上下边拉大`);
       }
       rowBoxes.push({ id: row.id, y, h });
       y += h;
     });
     const H = y;
+    // beside the bands, outwards: the kDa scale, the target-band arrows, the names (each on its own side)
+    const scaleW = ticksOut.length ? st.tickLenPt + 2.5 + tickLabW : 0;
+    if (mwRight) maxRight = scaleW; else maxLeft = scaleW;
+    const scaleOn = right => (right === mwRight && scaleW ? scaleW + 2 : 0), AS = pt * 0.8, arrowW = { left: 0, right: 0 };
+    arrowsOut.forEach(t => {
+      t.right = t.a.side !== 'left';
+      t.w = (t.a.sym === '◀' ? AS : symWidth(t.a.sym, pt)) + (t.label ? 2 + measure(t.label, pt) : 0);
+      arrowW[t.right ? 'right' : 'left'] = Math.max(arrowW[t.right ? 'right' : 'left'], t.w);
+    });
+    arrowsOut.forEach(t => {
+      // an arrowhead pointing at the band (or a symbol: *, #, †) and its text
+      const dir = t.right ? 1 : -1, x0 = (t.right ? W : 0) + dir * (2 + scaleOn(t.right)), anchor = t.right ? 'start' : 'end';
+      let g;
+      if (t.a.sym === '◀') {
+        const b = x0 + dir * AS;
+        g = `<path d="M${f(x0)} ${f(t.y)}L${f(b)} ${f(t.y - AS * 0.55)}L${f(b)} ${f(t.y + AS * 0.55)}Z"/>` + (t.label ? text(t.label, b + dir * 2, t.y + pt * 0.35, pt, anchor, t.wait ? ph : '') : '');
+      } else {
+        // (an asterisk sits high in its line: lowered onto the band)
+        const sw = symWidth(t.a.sym, pt);
+        g = symText(t.a.sym, x0, t.y + pt * (t.a.sym === '*' ? 0.55 : 0.35), pt, anchor) + (t.label ? text(t.label, x0 + dir * (sw + 2), t.y + pt * 0.35, pt, anchor) : '');
+      }
+      const hit = P ? `<rect x="${f(Math.min(x0, x0 + dir * t.w))}" y="${f(t.y - pt * 0.7)}" width="${f(t.w)}" height="${f(pt * 1.4)}" fill="transparent"/>` : '';
+      els.push(ed(`data-edit="arrow" data-k="${t.k}"`, hit + g));
+    });
+    if (arrowW.right) maxRight = Math.max(maxRight, 2 + scaleOn(true) + arrowW.right);
+    if (arrowW.left) maxLeft = Math.max(maxLeft, 2 + scaleOn(false) + arrowW.left);
+    const sideW = nameLeft ? arrowW.left : arrowW.right;
+    const off = 3 + ((nameLeft ? !mwRight : mwRight) && scaleW ? scaleW + 2 : 0) + (sideW ? sideW + 4 : 0);
+    rowNames.forEach(n => {
+      const x = nameLeft ? -off : W + off, anchor = nameLeft ? 'end' : 'start';
+      if (n.nm) {
+        els.push(ed(`data-edit="rowname" data-row="${n.row.id}"`, text(n.nm, x, n.y + pt * 0.35, pt, anchor, n.row.name ? '' : ph)));
+        const w = off + measure(n.nm, pt);
+        if (nameLeft) maxLeft = Math.max(maxLeft, w); else maxRight = Math.max(maxRight, w);
+      }
+      if (n.hint) {
+        els.push(text(n.hint, x, n.y + pt * 1.35, pt * 0.8, anchor, ph));
+        const w = off + measure(n.hint, pt * 0.8);
+        if (nameLeft) maxLeft = Math.max(maxLeft, w); else maxRight = Math.max(maxRight, w);
+      }
+    });
     grow(-maxLeft, 0, W + maxRight, H);
 
     /* ---- top stack ---- */
@@ -134,7 +184,10 @@
       yTop -= angle === 0 ? pt * 1.3 : hMax + pt * 0.35;
     }
     // kDa header aligned with the lane-label row
-    if (st.showMW && st.unitHeader && maxLeft > 0) { els.push(text('kDa', -st.tickLenPt - 2.5, unitY, pt, 'end')); grow(-st.tickLenPt - 2.5 - measure('kDa', pt), unitY - pt, 0, unitY); }
+    if (st.showMW && st.unitHeader && scaleW > 0) {
+      if (mwRight) { els.push(text('kDa', W + st.tickLenPt + 2.5, unitY, pt, 'start')); grow(W, unitY - pt, W + st.tickLenPt + 2.5 + measure('kDa', pt), unitY); }
+      else { els.push(text('kDa', -st.tickLenPt - 2.5, unitY, pt, 'end')); grow(-st.tickLenPt - 2.5 - measure('kDa', pt), unitY - pt, 0, unitY); }
+    }
     // groups
     const groups = S.groups.map((g, k) => Object.assign({ k }, g)).filter(g => lanes.some(j => j >= Math.min(g.from, g.to) && j <= Math.max(g.from, g.to)));
     if (groups.length) {

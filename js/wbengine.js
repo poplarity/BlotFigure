@@ -138,13 +138,15 @@
     const v = parseFloat(m[1]), u = m[2].toLowerCase();
     return u.startsWith('ms') ? v / 1000 : u.startsWith('m') ? v * 60 : v;
   }
-  const isMarkerName = n => /marker|white|light|colou?r|ladder|visible|epi|trans|rgb|bright|白光|marker/i.test(n);
+  // (a white-light picture, or white light and chemiluminescence in one — a composite, merge or overlay)
+  const isMarkerName = n => /marker|white|light|colou?r|ladder|visible|epi|trans|rgb|bright|merge|overlay|composite|combin|白光|复合|叠加|合并/i.test(n);
   const isChemiName = n => /chemi|ecl|lumi|signal|exposure|曝光/i.test(n);
 
   /* classify: 'marker' (white-light photo of the membrane) or 'chemi'. RGB photos are markers.
    * A marker photo has large bright membrane areas on a darker tray: strong large-scale structure. */
   function classify(img, meta) {
     const name = (meta && meta.name) || '';
+    if (/merge|overlay|composite|combin|复合|叠加|合并/i.test(name)) return 'marker';      // (chemiluminescence over white light: the marker shows)
     if (isMarkerName(name) && !isChemiName(name)) return 'marker';
     if (isChemiName(name)) return 'chemi';
     // A white-light photo shows the whole membrane: a large mid/bright area on a dark tray.
@@ -181,7 +183,7 @@
   /* ---------- session grouping ---------- */
   function stem(name) {
     return String(name).toLowerCase().replace(/\.[a-z]+$/, '').replace(/(\d+(\.\d+)?)\s*(ms|msec|s|sec|secs|seconds|min|mins|m)(?![a-z])/g, '')
-      .replace(/chemi|ecl|lumi|marker|white|light|colou?r|ladder|visible|rgb|exposure|曝光|白光|[_\-\s]+|\d{1,2}$/g, '');
+      .replace(/chemi|ecl|lumi|marker|white|light|colou?r|ladder|visible|rgb|exposure|merge|overlay|composite|曝光|白光|复合|叠加|[_\-\s]+|\d{1,2}$/g, '');
   }
   function ncc(a, b) {
     let ma = 0, mb = 0; const n = a.length;
@@ -911,9 +913,10 @@
     }
     // --- ladder choice + calibration (shared slope across strips): every ladder ranked by how well it fits; the
     // one the user named (opt.ladderId) is used whenever it fits at all
+    // (opt.noCalib: sizes come from the user's marks alone — no ranking, no calibration)
     let calib = null, ladderId = opt.ladderId || null, ladderRank = [];
     const stripBands = ladderStrips.map(l => (l ? l.bands : []));
-    if (stripBands.some(b => b.length)) {
+    if (stripBands.some(b => b.length) && !opt.noCalib) {
       const named = opt.ladderId && G.ProteinLadders.get(opt.ladderId);
       const cands = G.ProteinLadders.all().filter(l => !l.chemi || l === named);
       ladderRank = cands.map(l => {

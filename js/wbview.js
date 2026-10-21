@@ -4,14 +4,15 @@
  * handles: drag an edge or a corner to resize a box — its lanes stay where they are and new room gets lanes
  * at the same spacing; drag inside to move it (Shift: all the row's boxes up/down); drag a lane line to move
  * that lane; double-click inside to add a lane; click a label to switch sample / left out / marker.
- * Modes: 'addrow' click adds a row at that height, or drag out a box: a row from that box alone; 'marks' the
- * white-light picture with every piece's marker lane: a click on a piece adds a mark at the dark band nearest
- * it (its size to pick), a mark's label or line drags it (snapping onto the lane's dark bands; Alt: free), a
- * click on it changes its size or deletes it, a dashed predicted size is added by a click; the selected mark
- * ↑↓ / Delete / Enter; 'align' the picture as taken is dragged / turned until its bands sit in the boxes (the
- * membrane had moved); 'pieces' the pieces' outlines by hand. The right or middle button pans in every mode.
- * Boxes go anywhere on the picture (dropped on another piece, a box belongs to it); dragging the first or last
- * lane spreads the lanes between evenly (Alt: that lane alone). */
+ * The dot above the selected box turns it (also [ ]). Modes: 'addrow' a click puts a box down where it is (as
+ * big as the other boxes), or drag one out; 'marks' the Marker picture: a click on a piece adds a mark at the
+ * band nearest it (its size to pick), a mark's label or line drags it (snapping onto the lane's bands; Alt:
+ * free), a click on it changes its size or deletes it; with 2 marks the other sizes show where they are
+ * expected (dashed, a click adds one); the selected mark ↑↓ / Delete / Enter; 'align' the picture as taken is
+ * dragged / turned until its bands sit in the boxes (the membrane had moved); 'pieces' the pieces' outlines by
+ * hand. The right or middle button pans in every mode. Boxes go anywhere on the picture (dropped on another
+ * piece, a box belongs to it); dragging the first or last lane spreads the lanes between evenly (Alt: that lane
+ * alone). */
 (function (G) {
   'use strict';
   const App = G.BApp, WB = G.WB;
@@ -83,7 +84,7 @@
     const rec = App.S && curImage(); if (!rec) return;
     const r = box.getBoundingClientRect(), pad = 24, b = App.blot(App.viewBlot);
     if (r.width < 10) return;
-    const pts = App.mode === 'align' || !b ? [] : (b.pieces || []).flatMap(corners);
+    const pts = App.mode === 'align' || !b || App.curStep === 1 ? [] : (b.pieces || []).flatMap(corners);
     if (pts.length) {
       const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
       // (marking: room on the right for the ladder's reference card)
@@ -116,7 +117,7 @@
   function fitPiece(pc) {
     const r = box.getBoundingClientRect();
     if (!pc || r.width < 10) return;
-    const ys = corners(pc).map(p => p[1]), y0 = Math.min(...ys), y1 = Math.max(...ys), cx = WB.toImg(pFrame(pc), App.markLane(pc), 0)[0], T = 64, B = 24;
+    const lane = App.markLane(pc), ys = corners(pc).map(p => p[1]), y0 = Math.min(...ys), y1 = Math.max(...ys), cx = WB.toImg(pFrame(pc), lane != null ? lane : App.ladderU(pc), 0)[0], T = 64, B = 24;
     view.s = Math.min((r.height - T - B) / (y1 - y0), (r.width - 100) / (5 * (pc.pitch || 60)), 2);
     view.ox = r.width * 0.42 - cx * view.s;
     view.oy = T + (r.height - T - B - (y1 - y0) * view.s) / 2 - y0 * view.s;
@@ -126,13 +127,19 @@
 
   /* ---------- geometry on screen ---------- */
   function letterTag(pc) { const [x, y] = WB.toImg(pFrame(pc), -pc.w / 2, -pc.h / 2); const p = toScr(x, y); return { x: p.x + 4, y: p.y + 4, w: 18, h: 16 }; }
-  // a row's box on one piece: edges in the piece frame, corners in image coordinates
+  // a row's box on one piece: edges in the box's frame (its piece's, turned by its own tilt), corners in image
+  // coordinates
   function segBox(row, sg, pc) {
-    const F = pFrame(pc), vTop = sg.vc - row.above, vBot = sg.vc + row.below, x0 = sg.x0, x1 = sg.x1;
+    const F = App.segFrame(pc, sg), vTop = sg.vc - row.above, vBot = sg.vc + row.below, x0 = sg.x0, x1 = sg.x1;
     return { F, x0, x1, vTop, vBot, pts: [[x0, vTop], [x1, vTop], [x1, vBot], [x0, vBot]].map(([u, v]) => WB.toImg(F, u, v)) };
   }
   const HANDLES = [['nw', 0, 0], ['n', 0.5, 0], ['ne', 1, 0], ['e', 1, 0.5], ['se', 1, 1], ['s', 0.5, 1], ['sw', 0, 1], ['w', 0, 0.5]];
   const handles = bx => HANDLES.map(([k, a, c]) => { const [x, y] = WB.toImg(bx.F, bx.x0 + (bx.x1 - bx.x0) * a, bx.vTop + (bx.vBot - bx.vTop) * c); return Object.assign({ k }, toScr(x, y)); });
+  // the turning dot of a selected box: above the middle of its top edge, clear of the lane labels
+  function rotHandle(bx) {
+    const top = toScr(...WB.toImg(bx.F, (bx.x0 + bx.x1) / 2, bx.vTop)), up = toScr(...WB.toImg(bx.F, (bx.x0 + bx.x1) / 2, bx.vTop - 1)), d = Math.hypot(up.x - top.x, up.y - top.y) || 1;
+    return { x: top.x + (up.x - top.x) / d * 36, y: top.y + (up.y - top.y) / d * 36, top };
+  }
   // labels above a box's lanes (screen): the figure column, M or ×
   const labelsFit = sg => App.segPitch(sg) * view.s >= 15;
   function laneChips(sg, bx) {
@@ -141,17 +148,15 @@
       return { s, txt, x: p.x, y: p.y - 10, w: Math.max(16, txt.length * 7 + 6), h: 14 };
     });
   }
-  /* marker bands of a piece as drawn: hand-set marks (manual), or the sizes read automatically (seen = a band
-   * detected there; else interpolated). While marking, also the ladder sizes the marks predict where none is set
-   * yet (predicted: dashed, a click adds it). */
+  /* marker bands of a piece as drawn: the user's marks. While marking, once 2 are set, also the ladder sizes they
+   * predict where none is set yet (predicted: dashed, a click adds it) — never before: nothing is guessed from
+   * the picture alone. */
   function marksOf(b, pc) {
-    const pcal = App.pieceCal(b, pc), lad = G.ProteinLadders.get(b.ladderId), u = App.markLane(pc);
-    const predicted = have => (App.mode === 'marks' && pcal && lad ? lad.sizes.filter(k => !have.some(h => Math.abs(Math.log(h / k)) < 0.02))
-      .map(k => ({ u, v: WB.vAtK(pcal, k), k, predicted: true })).filter(t => t.v != null && Math.abs(t.v) <= pc.h / 2 - 2) : []);
-    if (pc.marks) return pc.marks.map((m, i) => ({ u: m.u, v: m.v, k: m.kda, i, seen: true, manual: true })).concat(pcal && pcal.knots.length >= 2 ? predicted(pc.marks.map(m => m.kda)) : []);
-    if (!pcal) return [];
-    const bands = pcal.bands || [];
-    return App.pieceTicks(b, pc).map(t => ({ u, v: t.v, k: t.k, seen: bands.some(x => Math.abs(x.v - t.v) < 4) }));
+    if (!pc.marks || !pc.marks.length) return [];
+    const pcal = App.pieceCal(b, pc), lad = G.ProteinLadders.get(b.ladderId), u = App.markLane(pc), have = pc.marks.map(m => m.kda);
+    const predicted = App.mode === 'marks' && pcal && lad ? lad.sizes.filter(k => !have.some(h => Math.abs(Math.log(h / k)) < 0.02))
+      .map(k => ({ u, v: WB.vAtK(pcal, k), k, predicted: true })).filter(t => t.v != null && Math.abs(t.v) <= pc.h / 2 - 2) : [];
+    return pc.marks.map((m, i) => ({ u: m.u, v: m.v, k: m.kda, i, seen: true, manual: true })).concat(predicted);
   }
   const fmtK = k => (k > 0 ? String(+(+k).toPrecision(3)) : '?');
   // half the width of a piece's marker lane (piece px)
@@ -189,8 +194,8 @@
     ctx.restore();
     const line = (pts, close) => { ctx.beginPath(); pts.forEach(([x, y], i) => { const p = toScr(x, y); if (i) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y); }); if (close) ctx.closePath(); };
     const marking = App.mode === 'marks', pcsEd = editing();
-    // pieces: outline and letter (being edited: drawn by drawPieceEdit)
-    (pcsEd ? [] : b.pieces || []).forEach(pc => {
+    // pieces: outline and letter (being edited: drawn by drawPieceEdit; step 1: not looked at yet)
+    (pcsEd || App.curStep === 1 ? [] : b.pieces || []).forEach(pc => {
       const F = pFrame(pc);
       const pts = [[-pc.w / 2, -pc.h / 2], [pc.w / 2, -pc.h / 2], [pc.w / 2, pc.h / 2], [-pc.w / 2, pc.h / 2]].map(([u, v]) => WB.toImg(F, u, v));
       ctx.strokeStyle = 'rgba(120,130,145,.7)'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
@@ -242,11 +247,15 @@
       }
       ctx.globalAlpha = 1;
     });
-    // the selected row's handles, on top
+    // the selected row's handles, on top: edges, corners and the turning dot
     if (selRow && selRow.blot === b.id && !App.mode) selRow.segs.forEach(sg => {
       const pc = App.piece(b, sg.piece); if (!pc || sg.x0 == null) return;
-      const col = App.rowColor(selRow);
-      handles(segBox(selRow, sg, pc)).forEach(hd => {
+      const col = App.rowColor(selRow), bx = segBox(selRow, sg, pc), r = rotHandle(bx);
+      ctx.strokeStyle = col; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(r.top.x, r.top.y); ctx.lineTo(r.x, r.y); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(r.x, r.y, 6.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = col; ctx.font = `700 10px ${FONT}`; ctx.textAlign = 'center'; ctx.fillText('↻', r.x, r.y + 3.5);
+      if (sg.rot) { ctx.font = `600 10.5px ${FONT}`; ctx.textAlign = 'left'; ctx.fillText(`${sg.rot > 0 ? '+' : ''}${sg.rot.toFixed(1)}°`, r.x + 10, r.y + 4); }
+      handles(bx).forEach(hd => {
         ctx.fillStyle = '#fff'; ctx.strokeStyle = col; ctx.lineWidth = 1.5;
         roundRect(hd.x - 4.5, hd.y - 4.5, 9, 9, 2); ctx.fill(); ctx.stroke();
       });
@@ -260,15 +269,23 @@
       ctx.fillStyle = 'rgba(47,111,235,.08)'; line(pts, true); ctx.fill();
       ctx.strokeStyle = '#2f6feb'; ctx.lineWidth = 1.6; ctx.setLineDash([5, 4]); line(pts, true); ctx.stroke(); ctx.setLineDash([]);
     } else if (App.mode === 'addrow' && hover && hover.p) {
-      ctx.strokeStyle = '#2f6feb'; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.5;
-      const hit = App.pieceAt(b, hover.p.x, hover.p.y, 0);
-      if (hit) {
-        const F = pFrame(hit.pc);
-        line([WB.toImg(F, -hit.pc.w / 2, hit.v), WB.toImg(F, hit.pc.w / 2, hit.v)]); ctx.stroke();
+      // the box a click puts down, under the pointer (the size of the other boxes; dragging draws one instead)
+      const g = ghostBox(b, hover.p);
+      if (g) {
+        const pts = [[g.u0, g.v0], [g.u1, g.v0], [g.u1, g.v1], [g.u0, g.v1]].map(([u, v]) => WB.toImg(g.F, u, v));
+        ctx.fillStyle = 'rgba(47,111,235,.10)'; line(pts, true); ctx.fill();
+        ctx.strokeStyle = '#2f6feb'; ctx.lineWidth = 1.6; ctx.setLineDash([5, 4]); line(pts, true); ctx.stroke(); ctx.setLineDash([]);
+        const t = toScr(...WB.toImg(g.F, g.u1, g.v0));
+        ctx.fillStyle = '#2f6feb'; ctx.font = `600 11px ${FONT}`; ctx.textAlign = 'left'; ctx.fillText('点一下放在这里', t.x + 6, t.y + 4);
       }
-      ctx.setLineDash([]);
     }
     document.getElementById('zoomLabel').textContent = Math.round(view.s * 100) + '%';
+  }
+  // adding a row: the box a click puts down — in the frame of the nearest piece, centred at p, as big as the
+  // other boxes there
+  function ghostBox(b, p) {
+    const hit = App.pieceAt(b, p.x, p.y);
+    return hit ? Object.assign({ F: pFrame(hit.pc), pc: hit.pc }, App.defaultBox(b, hit.pc, hit.u, hit.v)) : null;
   }
   // lanes of one box: full lines and labels for the selected row, short ticks along the top edge otherwise
   function drawLanes(row, sg, bx, sel, col, line) {
@@ -298,15 +315,16 @@
   }
   function roundRect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
 
-  /* marking: every piece's marker lane highlighted and its marks as handles with their sizes (set by hand:
-   * filled; read automatically: outlined, dashed where interpolated; predicted from the marks: faint, "?") */
+  /* marking: the lane of each piece's marks highlighted and the marks as handles with their sizes (filled);
+   * once a piece has 2, the ladder's other sizes where they predict them (faint, dashed, "?") */
   function drawMarking(b, line) {
     const sm = selMark(b), hov = hover && hover.type === 'mark' ? hover : null;
     (b.pieces || []).forEach(pc => {
       const F = pFrame(pc), h = laneHalf(pc);
       // the piece picked in the panel
       if (App.markFocus === pc.id) { ctx.strokeStyle = '#e0a800'; ctx.lineWidth = 2; line(corners(pc), true); ctx.stroke(); }
-      const lanes = [...new Set((pc.ladderUs && pc.ladderUs.length ? pc.ladderUs : []).concat([App.markLane(pc)]).map(Math.round))];
+      // the lane the user's marks are on (nothing before the first mark: no lane is guessed)
+      const lane = App.markLane(pc), lanes = lane != null ? [lane] : [];
       lanes.forEach(u => {
         const pts = [[u - h, -pc.h / 2], [u + h, -pc.h / 2], [u + h, pc.h / 2], [u - h, pc.h / 2]].map(([x, y]) => WB.toImg(F, x, y));
         ctx.fillStyle = 'rgba(255,190,0,.10)'; line(pts, true); ctx.fill();
@@ -327,20 +345,21 @@
         ctx.fillText(g.txt, g.pill.x + g.pill.w / 2, g.pill.y + 12);
       });
     });
-    // where a click adds a mark: across the lane, at the height it snaps to
+    // where a click adds a mark: across the lane under the pointer, at the band it snaps to
     if (hover && hover.type === 'newmark' && !drag) {
       const pc = hover.pc, u = newMarkU(pc, hover.u), v = App.snapMarkV(b, pc, u, hover.v, 10 / view.s), F = pFrame(pc), h = laneHalf(pc);
+      const pts = [[u - h, -pc.h / 2], [u + h, -pc.h / 2], [u + h, pc.h / 2], [u - h, pc.h / 2]].map(([x, y]) => WB.toImg(F, x, y));
+      ctx.fillStyle = 'rgba(255,190,0,.07)'; line(pts, true); ctx.fill();
       const a = toScr(...WB.toImg(F, u - h, v)), c = toScr(...WB.toImg(F, u + h, v));
       ctx.strokeStyle = '#e0a800'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(c.x, c.y); ctx.stroke(); ctx.setLineDash([]);
       ctx.fillStyle = '#c58f00'; ctx.font = `700 14px ${FONT}`; ctx.textAlign = 'left'; ctx.fillText('+', c.x + 5, c.y + 5);
     }
   }
-  // the lane a new mark goes on: the piece's marker lane when the click is within about a lane of it, else
-  // where clicked (the ladder may run in a lane the automatic reading missed)
+  // the lane a new mark goes on: the lane of the piece's marks when the click is within about a lane of it,
+  // else where clicked
   function newMarkU(pc, u) {
-    const lanes = (pc.ladderUs || []).concat(pc.marks && pc.marks.length ? [App.markLane(pc)] : []);
-    const near = lanes.sort((p, q) => Math.abs(p - u) - Math.abs(q - u))[0];
-    return near != null && Math.abs(near - u) < (pc.pitch || 60) * 1.2 ? near : u;
+    const lane = App.markLane(pc);
+    return lane != null && Math.abs(lane - u) < (pc.pitch || 60) * 0.8 ? lane : u;
   }
 
   /* ---------- the pieces of the membrane by hand ('pieces' mode): a working copy of their outlines — drag one
@@ -396,8 +415,9 @@
     const pc = d.h.pc, o = d.orig;
     if (d.h.type === 'pcmove') { pc.cx = o.cx + p.x - d.p0.x; pc.cy = o.cy + p.y - d.p0.y; }
     else if (d.h.type === 'pcrot') {
-      const deg = (Math.atan2(p.y - o.cy, p.x - o.cx) - Math.atan2(d.p0.y - o.cy, d.p0.x - o.cx)) * 180 / Math.PI;
-      pc.angle = Math.round((o.angle + deg) * 20) / 20;
+      // the dot moved along the piece as if on a lever half the piece long (pieces lie tilted by a degree or two)
+      const F = pFrame(o), du = WB.toFrame(F, p.x, p.y)[0] - WB.toFrame(F, d.p0.x, d.p0.y)[0];
+      pc.angle = Math.round((o.angle + Math.atan2(du, Math.max(o.w / 2, 80 / view.s)) * 180 / Math.PI) * 20) / 20;
     } else if (d.h.type === 'pcsize') {
       // the opposite edge stays where it is
       const F = pFrame(o), [u, v] = WB.toFrame(F, p.x, p.y), [u0, v0] = WB.toFrame(F, d.p0.x, d.p0.y), du = u - u0, dv = v - v0, k = d.h.k;
@@ -464,6 +484,8 @@
     if (selRow && selRow.blot === b.id) for (const sg of selRow.segs) {
       const pc = App.piece(b, sg.piece); if (!pc || sg.x0 == null) continue;
       const bx = segBox(selRow, sg, pc);
+      const rh = rotHandle(bx);
+      if (Math.hypot(sx - rh.x, sy - rh.y) <= 9) return { type: 'rotate', row: selRow, sg, pc };
       for (const hd of handles(bx)) if (Math.abs(sx - hd.x) <= 7 && Math.abs(sy - hd.y) <= 7) return { type: 'resize', k: hd.k, row: selRow, sg, pc };
       if (labelsFit(sg)) for (const ch of laneChips(sg, bx)) if (Math.abs(sx - ch.x) <= ch.w / 2 && Math.abs(sy - ch.y) <= ch.h / 2 + 1) return { type: 'lanechip', row: selRow, sg, pc, i: ch.s.i };
       const [u, v] = WB.toFrame(bx.F, p.x, p.y);
@@ -486,7 +508,7 @@
   }
   const CURSORS = { nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize', n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize' };
   const cursorFor = h => (!h ? 'default' : h.type === 'resize' || h.type === 'pcsize' ? CURSORS[h.k] : h.type === 'mark' ? 'ns-resize' : h.type === 'lane' ? 'ew-resize'
-    : h.type === 'move' || h.type === 'align' || h.type === 'pcmove' ? 'move' : h.type === 'lanechip' || h.type === 'pcrot' ? 'pointer'
+    : h.type === 'move' || h.type === 'align' || h.type === 'pcmove' ? 'move' : h.type === 'lanechip' || h.type === 'pcrot' || h.type === 'rotate' ? 'pointer'
     : h.type === 'newmark' || h.type === 'mode' || h.type === 'pcnew' ? 'crosshair' : App.mode ? 'crosshair' : 'grab');
 
   cv.addEventListener('mousedown', e => {
@@ -499,7 +521,7 @@
     if (App.mode === 'addrow') {
       // anywhere on the picture: the frame (its tilt) of the nearest piece
       const hit = App.pieceAt(b, p.x, p.y);
-      if (!hit) { G.UI.toast('这张膜还没有膜条：先在"图片与膜"里点"调整膜条"画一条'); return; }
+      if (!hit) { G.UI.toast('这张膜还没有膜条：先回到第 2 步在图上拖出一条'); return; }
       drag = { h: { type: 'newbox', pc: hit.pc }, sx, sy, p0: p, moved: false, F: pFrame(hit.pc), a: [hit.u, hit.v] };
       e.preventDefault();
       return;
@@ -517,8 +539,8 @@
       return;
     }
     if (h.type === 'newmark') {
-      // a mark on the marker lane at the band nearest the click (Alt: exactly there), its size to pick (a size
-      // the piece has no mark for; the piece's marks read automatically come back if none is picked)
+      // a mark on the marker lane at the band nearest the click (Alt: exactly there), its size to pick (the
+      // size suggested from the marks there are; none picked: the mark goes again)
       const was = h.pc.marks, u = newMarkU(h.pc, h.u), v = e.altKey ? h.v : App.snapMarkV(b, h.pc, u, h.v, 10 / view.s);
       const marks = App.manualMarks(b, h.pc), mark = { u, v, kda: App.suggestKda(b, h.pc, v) || 0 };
       marks.push(mark); App.selMark = { pc: h.pc.id, i: marks.length - 1 }; draw();
@@ -528,8 +550,7 @@
     drag = { h, sx, sy, p0: p, view0: Object.assign({}, view), moved: false };
     if (h.type === 'align') { drag.T0 = Object.assign({}, align.T); drag.turn = e.shiftKey; drag.pivot = App.membraneCentre(b); }
     if (h.type === 'mark') {
-      // touched, the piece's marks are set by hand from then on (starting from what was read automatically); a
-      // predicted size becomes a mark at the band nearest it
+      // a mark grabbed to drag (a click: its size picker); a predicted size becomes a mark at the band nearest it
       drag.was = h.pc.marks;
       const marks = App.manualMarks(b, h.pc);
       if (h.m.predicted) { drag.mark = { u: h.m.u, v: App.snapMarkV(b, h.pc, h.m.u, h.m.v, 14 / view.s), kda: h.m.k }; marks.push(drag.mark); drag.added = true; }
@@ -545,6 +566,8 @@
       if (h.type === 'lane') App.selLane = h.i; else if (h.type === 'move') App.selLane = null;
       drag.geo0 = JSON.parse(JSON.stringify({ segs: h.row.segs, above: h.row.above, below: h.row.below }));
       drag.k = h.row.segs.indexOf(h.sg);
+      // (moves in the box's own frame; turning: about its middle)
+      drag.F = App.segFrame(h.pc, h.sg);
       App.dragging = true;          // (the figure follows the drag; checks and scores wait for the release)
       App.emit('select');
     }
@@ -575,7 +598,18 @@
       draw();
       return;
     }
-    const F = pFrame(h.pc), [u, v] = WB.toFrame(F, p.x, p.y), [u0, v0] = WB.toFrame(F, drag.p0.x, drag.p0.y), du = u - u0, dv = v - v0;
+    const F = drag.F || pFrame(h.pc), [u, v] = WB.toFrame(F, p.x, p.y), [u0, v0] = WB.toFrame(F, drag.p0.x, drag.p0.y), du = u - u0, dv = v - v0;
+    if (h.type === 'rotate') {
+      // turned about its middle, from where it was (0.05° steps): the dot moved along the box as if on a lever
+      // half the box long — a band tilts by a degree or two, and a short lever would make that a twitch
+      if (!drag.moved) return;
+      const s0 = drag.geo0.segs[drag.k], sg = h.row.segs[drag.k], arm = Math.max((s0.x1 - s0.x0) / 2, 80 / view.s);
+      const deg = Math.atan2(du, arm) * 180 / Math.PI;
+      Object.assign(sg, JSON.parse(JSON.stringify(s0)));
+      App.setSegRot(h.pc, sg, Math.round(((s0.rot || 0) + deg) * 20) / 20);
+      draw(); App.refresh();
+      return;
+    }
     if (h.type === 'mark') {
       // follows the pointer, snapping onto a dark band of the lane within reach (Alt: no snapping)
       if (drag.mark && drag.moved) { const b = App.blot(App.viewBlot); drag.mark.v = e.altKey ? drag.v0 + dv : App.snapMarkV(b, h.pc, drag.mark.u, drag.v0 + dv, 10 / view.s); draw(); App.refresh(); }
@@ -612,13 +646,16 @@
       if (d.moved && d.cur) {
         const [ua, va] = d.a, [ub, vb] = WB.toFrame(d.F, d.cur.x, d.cur.y);
         if (Math.abs(ub - ua) * view.s >= 8 && Math.abs(vb - va) * view.s >= 6) row = App.addRowBox(b.id, d.h.pc.id, Math.min(ua, ub), Math.max(ua, ub), Math.min(va, vb), Math.max(va, vb));
-      } else row = App.addRowAt(b.id, d.p0.x, d.p0.y);
+      } else {
+        // a click: the box shown under the pointer, put down there
+        const g = ghostBox(b, d.p0);
+        if (g) row = App.addRowBox(b.id, g.pc.id, g.u0, g.u1, g.v0, g.v1);
+      }
       App.setMode(null);
       if (row) {
         App.selRow = row.id; App.selSeg = row.segs[0].piece; App.selLane = null; App.commit();
-        G.UI.toast(d.moved ? `已按框添加一行（${App.nSample(row.segs[0])} 道，成图里就是框住的部分）：泳道线没对准的话，把最左、最右两条拖到泳道中心，中间的会均匀排开` : '已添加一行：在右侧成图上点"蛋白名"输入名称；选不同曝光看看', 4200);
-        G.UI.editRowName(row.id);
-      } else { G.UI.toast('点在膜条上蛋白所在的高度，或在任意位置拖出一个框'); draw(); }
+        G.UI.toast(`已添加一个框（${App.nSample(row.segs[0])} 道，成图里就是框住的部分）：拖边角调大小；泳道线没对准就把最左、最右两条拖到泳道中心`, 4600);
+      } else draw();
       return;
     }
     if (d.h.type === 'align') { if (d.moved) alignCommit(); return; }
@@ -707,6 +744,13 @@
     const row = App.selRow && App.row(App.selRow), sg = App.curSeg(row), st = e.shiftKey ? 5 : 1;
     if (!row || !sg) return;
     if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) return;     // Alt+↑↓ reorders the figure (wbui)
+    // [ ] turn the box 0.1° (Shift: 1°)
+    if (e.key === '[' || e.key === ']' || e.key === '{' || e.key === '}') {
+      const pc = App.pieceOf(row, sg); if (!pc) return;
+      App.setSegRot(pc, sg, (sg.rot || 0) + (e.key === '[' || e.key === '{' ? -1 : 1) * (e.shiftKey ? 1 : 0.1));
+      App.findBand(row, sg); App.commit(); e.preventDefault();
+      return;
+    }
     const sideways = e.key === 'ArrowLeft' || e.key === 'ArrowRight', d = e.key === 'ArrowLeft' ? -1 : 1;
     if (App.selLane != null && sg.lanes[App.selLane]) {
       if (sideways) { const i = App.selLane; App.editLanes(row, sg, () => App.moveLane(sg, i, sg.lanes[i].u + d * st)); App.commit(); e.preventDefault(); return; }
