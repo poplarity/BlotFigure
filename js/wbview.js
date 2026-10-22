@@ -131,7 +131,7 @@
   // a row's box on one piece: edges in the box's frame (its piece's, turned by its own tilt), corners in image
   // coordinates
   function segBox(row, sg, pc) {
-    const F = App.segFrame(pc, sg), vTop = sg.vc - row.above, vBot = sg.vc + row.below, x0 = sg.x0, x1 = sg.x1;
+    const F = App.segFrame(pc, sg), vTop = sg.vc - App.boxAbove(row, sg), vBot = sg.vc + App.boxBelow(row, sg), x0 = sg.x0, x1 = sg.x1;
     return { F, x0, x1, vTop, vBot, pts: [[x0, vTop], [x1, vTop], [x1, vBot], [x0, vBot]].map(([u, v]) => WB.toImg(F, u, v)) };
   }
   const HANDLES = [['nw', 0, 0], ['n', 0.5, 0], ['ne', 1, 0], ['e', 1, 0.5], ['se', 1, 1], ['s', 0.5, 1], ['sw', 0, 1], ['w', 0, 0.5]];
@@ -234,6 +234,10 @@
         line(bx.pts, true); ctx.stroke(); ctx.setLineDash([]);
         if (sel) { ctx.fillStyle = col + '12'; line(bx.pts, true); ctx.fill(); }
         drawLanes(row, sg, bx, sel, col, line);
+        if (!marking && !pcsEd && (!row.hidden || sel)) {
+          const tag = toScr(...bx.pts[0]); ctx.fillStyle = col; ctx.font = `600 10px ${FONT}`; ctx.textAlign = 'left';
+          ctx.fillText(App.boxLabel(sg), tag.x + 4, tag.y + 13);
+        }
         if (!last || bx.pts[1][0] > last[0]) last = bx.pts[1];
       });
       // (a hidden row keeps its faint box but no label, unless it is selected; marking: no labels)
@@ -536,7 +540,7 @@
     }
     if (h.type === 'lanechip') {
       App.editLanes(h.row, h.sg, () => App.cycleLane(h.sg, h.i));
-      App.selSeg = h.sg.piece; App.selLane = h.i; App.commit();
+      App.selSeg = App.boxId(h.sg); App.selLane = h.i; App.commit();
       return;
     }
     if (h.type === 'newmark') {
@@ -562,8 +566,8 @@
       draw();
     }
     if (h.row) {
-      if (App.selRow !== h.row.id || App.selSeg !== h.sg.piece) App.selLane = null;
-      App.selRow = h.row.id; App.selSeg = h.sg.piece;
+      if (App.selRow !== h.row.id || App.selSeg !== App.boxId(h.sg)) App.selLane = null;
+      App.selRow = h.row.id; App.selSeg = App.boxId(h.sg);
       if (h.type === 'lane') App.selLane = h.i; else if (h.type === 'move') App.selLane = null;
       drag.geo0 = JSON.parse(JSON.stringify({ segs: h.row.segs, above: h.row.above, below: h.row.below }));
       drag.k = h.row.segs.indexOf(h.sg);
@@ -621,8 +625,10 @@
     // an end lane spreads the lanes between it and the other end (Alt: this lane alone)
     if (h.type === 'lane') { if (e.altKey) App.moveLane(sg, h.i, s0.lanes[h.i].u + du); else App.dragLane(sg, h.i, s0.lanes[h.i].u + du, s0); }
     else if (h.type === 'resize') {
-      if (h.k.includes('n')) row.above = Math.max(2, 6 - g0.below, g0.above - dv);
-      if (h.k.includes('s')) row.below = Math.max(2, 6 - g0.above, g0.below + dv);
+      row.segs.forEach((s,i) => { s.above = App.boxAbove(g0,g0.segs[i]); s.below = App.boxBelow(g0,g0.segs[i]); });
+      if (h.k.includes('n')) sg.above = Math.max(2, 6 - App.boxBelow(g0,s0), App.boxAbove(g0,s0) - dv);
+      if (h.k.includes('s')) sg.below = Math.max(2, 6 - App.boxAbove(g0,s0), App.boxBelow(g0,s0) + dv);
+      App.fitRowHeight(row);
       if (h.k.includes('w') || h.k.includes('e')) {
         const x0 = h.k.includes('w') ? Math.min(s0.x0 + du, s0.x1 - 4) : s0.x0, x1 = h.k.includes('e') ? Math.max(s0.x1 + du, s0.x0 + 4) : s0.x1;
         App.setBox(row, sg, x0, x1, s0);
@@ -654,7 +660,7 @@
       }
       App.setMode(null);
       if (row) {
-        App.selRow = row.id; App.selSeg = row.segs[0].piece; App.selLane = null; App.commit();
+        App.selRow = row.id; App.selSeg = App.boxId(row.segs[0]); App.selLane = null; App.commit();
         const n = App.nSample(row.segs[0]);
         G.UI.toast(L(`已添加一个框（${n} 道，成图里就是框住的部分）：拖边角调大小；泳道线没对准就把最左、最右两条拖到泳道中心`,
           `Box added (${n} lane${n === 1 ? '' : 's'}; the figure shows what it frames): drag its edges or corners to resize it; if the lane lines are off, drag the leftmost and rightmost ones onto the lane centres`), 4600);
@@ -677,7 +683,7 @@
       });
       if (d.h.type === 'resize' && (d.h.k.includes('n') || d.h.k.includes('s'))) row.segs.forEach(t => App.findBand(row, t));
       // moved onto another piece: the box belongs to it now
-      if (d.h.type === 'move') { const np = App.rehomeSeg(row, d.h.sg); if (np) { App.selSeg = d.h.sg.piece; G.UI.toast(L(`这个框移到了膜条 ${np.letter} 上（分子量按膜条 ${np.letter} 的 Marker 算）`, `This box is now on strip ${np.letter} (molecular weights from strip ${np.letter}'s marker)`)); } }
+      if (d.h.type === 'move') { const np = App.rehomeSeg(row, d.h.sg); if (np) { App.selSeg = App.boxId(d.h.sg); G.UI.toast(L(`这个框移到了膜条 ${np.letter} 上（分子量按膜条 ${np.letter} 的 Marker 算）`, `This box is now on strip ${np.letter} (molecular weights from strip ${np.letter}'s marker)`)); } }
       App.commit();
     }
     cv.style.cursor = cursorFor(hover);
@@ -694,7 +700,7 @@
       if (u < bx.x0 - tol || u > bx.x1 + tol || v < bx.vTop || v > bx.vBot) continue;
       if (sg.lanes.some(l => Math.abs(l.u - u) < App.segPitch(sg) * 0.3)) { G.UI.toast(L('这里已经有一道：拖动它可以微调，选中后按 Delete 删除', 'There is a lane here already: drag it to fine-tune; select it and press Delete to remove it')); return; }
       const i = App.editLanes(row, sg, () => App.addLane(row, sg, u));
-      App.selSeg = sg.piece; App.selLane = i; App.commit();
+      App.selSeg = App.boxId(sg); App.selLane = i; App.commit();
       G.UI.toast(L('已加一道：拖动竖线微调，选中后按 Delete 删除', 'Lane added: drag its line to fine-tune; select it and press Delete to remove it'));
       return;
     }

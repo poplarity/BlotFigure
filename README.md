@@ -4,7 +4,7 @@
 
 **Turn the raw pictures of a Western blot experiment into a publication-ready figure — in your browser, offline.**
 
-[**Download the single HTML file**](https://github.com/poplarity/BlotFigure/releases/download/v0.8.0/BlotFigure-v0.8.0.html) · [Use online](https://poplarity.github.io/BlotFigure/) · [中文说明](README.zh-CN.md)
+[**Download the single HTML file**](https://github.com/poplarity/BlotFigure/releases/download/v0.8.1/BlotFigure-v0.8.1.html) · [Use online](https://poplarity.github.io/BlotFigure/) · [中文说明](README.zh-CN.md)
 
 [![CI](https://github.com/poplarity/BlotFigure/actions/workflows/ci.yml/badge.svg)](https://github.com/poplarity/BlotFigure/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -17,13 +17,13 @@
 
 **Download one file, open it in your browser, and start making your figure. No installation, ZIP extraction or GitHub account is needed.**
 
-1. **[Download BlotFigure-v0.8.0.html](https://github.com/poplarity/BlotFigure/releases/download/v0.8.0/BlotFigure-v0.8.0.html)** (about 690 KB). Save it to your Desktop or Downloads folder.
+1. **[Download BlotFigure-v0.8.1.html](https://github.com/poplarity/BlotFigure/releases/download/v0.8.1/BlotFigure-v0.8.1.html)** (about 710 KB). Save it to your Desktop or Downloads folder.
 2. **Double-click the downloaded file.** It opens in your browser. If a text editor opens instead, right-click → **Open with** → Firefox, Chrome, Edge or Safari.
 3. **Drop in all pictures of one experiment**: every exposure of each membrane plus a picture that shows the marker (the white-light picture, or white light merged with chemiluminescence). Then follow the 5 steps on the left and choose **Export PNG**.
 
 That one HTML file is the complete tool. Keep it on your computer or send the same file to a colleague. Once downloaded, it works without an internet connection.
 
-**Get the right file:** choose the release attachment named **BlotFigure-v0.8.0.html**, not the repository's **index.html**, **Source code (zip)** or **Source code (tar.gz)**. If you reach the [release page](https://github.com/poplarity/BlotFigure/releases/latest), expand **Assets** and click the file ending in **.html**.
+**Get the right file:** choose the release attachment named **BlotFigure-v0.8.1.html**, not the repository's **index.html**, **Source code (zip)** or **Source code (tar.gz)**. If you reach the [release page](https://github.com/poplarity/BlotFigure/releases/latest), expand **Assets** and click the file ending in **.html**.
 
 **Keep your work:** use **File → Save project** (Ctrl+S) before closing. Your **.blotfig** file contains all the pictures and every adjustment; reopen it in BlotFigure to continue, on any computer.
 
@@ -61,8 +61,8 @@ Drop in everything the imager saved for one experiment. BlotFigure tells exposur
 - **Membranes moved between captures** (substrate added, strips lifted and put back) are recognised as one membrane and aligned, as a whole or strip by strip, and can be adjusted by hand.
 - **The best exposure per row**: every protein row gets its own exposure (no saturated pixels in the band, enough signal, clean background), with a side-by-side comparison of all exposures and saturated pixels in red.
 - **Boxes you can put anywhere**: resize, move, tilt; the figure shows exactly what a box covers. Lanes as in GelFigure: drag the first and last lane onto their lanes and the others spread evenly.
-- **Arrange by mouse**: drag rows up and down to set their order, left and right to line up the lanes of cut strips; one protein across two strips joins into one row.
-- **Marker by hand, in a few clicks**: choose the ladder once (40 prestained ladders with their reference bands), click two bands per strip, and the remaining sizes appear where they are expected.
+- **Arrange independent boxes**: drag rows up and down; drag each box left or right without moving other boxes on its membrane. Separate crops from the same strip can be joined into one row using a single exposure.
+- **Marker by hand, in a few clicks**: choose the ladder once (40 prestained ladders with their reference bands), click the bands you can see. One mark displays a tick; two or more enable size estimates and hints for the remaining bands.
 - **Edit on the figure**: click a lane or protein name and type, Enter jumps to the next; group lines, +/− condition rows, target-band arrows with estimated sizes, side brackets for IP / Input groups or (Ub)n smears, `*` / `#` / `†` marks.
 - **Flexible labels**: group labels wrap, shrink or stay on one line; every label can have its own font size; protein names and molecular weights can each go on the left or right.
 - **Pre-flight check before export**: unnamed rows, saturated exposures, tiny fonts, effective resolution below 300 dpi, a figure wider than a double column, with one-click fixes.
@@ -76,12 +76,12 @@ The panel on the left opens one step at a time; look, fix what needs fixing, and
 1. **Marker picture** — each membrane needs one picture that shows the marker. The guess is marked ★; if it is wrong, click "Use as marker picture" under the right one.
 2. **Strips** — the blue boxes are the strips found on the marker picture. Move, resize, rotate, draw or delete them right on the picture.
 3. **Protein boxes** — one box per protein, and the figure appears on the right. Resize, move or tilt a box; drag the leftmost and rightmost lane lines onto the lanes; add a box for a protein that was missed.
-4. **Marker** — choose your ladder and click its bands on the marker picture (they snap); two marks per strip give every row its molecular weight.
+4. **Marker** — choose your ladder and click its bands on the marker picture (they snap); one mark displays its known size; two or more allow estimates for the other bands.
 5. **Names, lanes and export** — protein and lane names (on the figure or pasted as a row), annotations, layout; then **Export PNG**, TIFF or SVG.
 
 ## Versions
 
-The current version is **0.8.0**: an English interface, the single-file offline download and tests in three browser engines. 0.7.0 brought everything from GelFigure 0.6.5 a blot figure needs (file menu with drafts and style files, pre-flight check, PNG / TIFF metadata, processing log, journal widths, side brackets). See the [changelog](CHANGELOG.md).
+The current version is **0.8.1**: faster import and image organisation, independent protein boxes, and single-band marker annotation. The bilingual interface and single-file offline download from 0.8.0 are included. 0.7.0 brought everything from GelFigure 0.6.5 a blot figure needs (file menu with drafts and style files, pre-flight check, PNG / TIFF metadata, processing log, journal widths, side brackets). See the [changelog](CHANGELOG.md).
 
 ## Privacy
 
@@ -98,6 +98,16 @@ The page carries a [Content Security Policy](index.html) that **forbids it from 
 | `.blotfig` | BlotFigure project file. |
 
 Exposures are recognised by their file names (`Chemi`, `ECL`, `_30s`, `2min` …) or, failing that, by the picture itself; marker pictures by names such as `Marker`, `White`, `Merge`, `Overlay`, or by a large bright membrane on a dark tray.
+
+## Fast image organisation and independent crops
+
+- Step 1 reads and groups pictures first. Alignment and strip analysis wait until you confirm the groups.
+- Drag thumbnails between membrane groups (select several to move them together), or drop on **New membrane group**. Each thumbnail has a remove button; **Remove selected** works in bulk. Ctrl+Z restores removed pictures.
+- Every protein box has its own **B1, B2, …** ID. It moves independently, including when several crops share one physical strip. Rows can be joined without merging their source boxes or changing their individual crop heights.
+- Weak detected rows stay visible. Hide them explicitly if unwanted; hidden rows have a **Show** button and **Show all hidden boxes** restores them together.
+- An excluded internal marker lane produces separate editable source boxes. Their splice gap appears only in that row. **Include middle lanes; restore continuous box** undoes a mistaken exclusion.
+- Set the lane count directly, then drag the two end lane lines. No extra spacing button is needed; automatic detection is still available as a fallback.
+- A single manual marker mark is sufficient to display that tick. Other molecular weights are estimated only after two marks. Crowded ticks use additional label columns instead of disappearing.
 
 ## What is detected automatically
 

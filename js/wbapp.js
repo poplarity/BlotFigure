@@ -4,7 +4,7 @@
  * (columns), levels, annotations.
  * A row has a segment on each piece it runs across. Every segment is a box in its piece's frame (u along the
  * lanes, v down) — anywhere on the picture, not bound by the piece's outline; the piece gives its tilt, its
- * marker sizes and its module in the figure: x0..x1 across, vc-above … vc+below down (band b0..b1 around vc), and it has
+ * marker sizes; each box has its own id, label and figure position: x0..x1 across, vc-above … vc+below down (band b0..b1 around vc), and it has
  * lanes of its own — sg.lanes [{u, r}] with r 's' sample | 'm' marker | 'x' left out. The sample lanes fill
  * figure columns sg.c0, sg.c0+1, … in order. Lanes come from the analysis (the piece's lattice), from the
  * box's own pixels (WB.detectBoxLanes) or from the user; resizing a box keeps the lanes inside it and
@@ -30,7 +30,22 @@
   }
 
   const App = { images: new Map(), analysis: {}, S: null, hist: [], future: [], listeners: [], selRow: null, selSeg: null, selLane: null, viewBlot: null, viewImg: null, mode: null };
-  App.VERSION = '0.8.0';
+  App.VERSION = '0.8.1';
+  const retiredImages = new Map(); // reversible removal; only active images are saved/exported
+  App.activeImageIds = () => new Set((App.S ? App.S.blots : []).flatMap(b => b.images));
+  App.syncImages = () => {
+    const active = App.activeImageIds();
+    App.images.forEach((r, id) => { if (!active.has(id)) { retiredImages.set(id, r); App.images.delete(id); } });
+    active.forEach(id => { if (!App.images.has(id) && retiredImages.has(id)) { App.images.set(id, retiredImages.get(id)); retiredImages.delete(id); } });
+  };
+  App.boxId = sg => sg.id || (sg.id = uid('box'));
+  App.boxLabel = sg => {
+    if (!sg.label) sg.label = 'B' + (1 + Math.max(0, ...(App.S ? App.S.rows : []).flatMap(r => r.segs.map(s => +(s.label || '').slice(1) || 0))));
+    return sg.label;
+  };
+  App.boxAbove = (r, s) => s.above == null ? r.above : s.above;
+  App.boxBelow = (r, s) => s.below == null ? r.below : s.below;
+  App.fitRowHeight = r => { r.above = Math.max(...r.segs.map(s => App.boxAbove(r, s))); r.below = Math.max(...r.segs.map(s => App.boxBelow(r, s))); };
   App.prefLadder = G.PrefStorage.getItem('blotfig.ladder') || null;
 
   /* ---------- file fingerprints (as GelFigure): every picture's SHA-256, in the project, the processing log and
@@ -85,6 +100,7 @@
   App.refresh = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; App.emit('refresh'); }); };
   App.commit = function () {
     if (!App.S) return;
+    App.S.rows.forEach(r => r.segs.forEach(s => { App.boxId(s); App.boxLabel(s); }));
     roomLeft(); trimLeft();
     if (App.S.arrows) App.S.arrows = App.S.arrows.filter(a => App.row(a.row));     // (a deleted row takes its arrows; undo brings both)
     if (App.S.brackets) App.S.brackets = App.S.brackets.filter(k => App.row(k.r0) && App.row(k.r1));
@@ -100,6 +116,7 @@
   function swapState(json) {
     if (App.onSwap) App.onSwap();
     App.S = JSON.parse(json);
+    App.syncImages();
     App.selLane = null; App.selMark = null;
     if (App.selRow && !App.row(App.selRow)) { App.selRow = null; App.selSeg = null; }
     App.syncPieces(); App.syncAlign(); App.saveDraftSoon(); App.emit('change');
@@ -121,7 +138,7 @@
   App.pieceOf = (row, sg) => App.piece(App.blot(row.blot), sg.piece);
   App.findPiece = id => { for (const b of App.S.blots) { const p = App.piece(b, id); if (p) return { b, pc: p }; } return null; };
   // the selected row's segment the lane tools work on (the one clicked last, else the first)
-  App.curSeg = row => (row ? row.segs.find(s => s.piece === App.selSeg) || row.segs[0] : null);
+  App.curSeg = row => (row ? row.segs.find(s => s.id === App.selSeg) || row.segs.find(s => s.piece === App.selSeg) || row.segs[0] : null);
   // shortest first: by exposure time when known, else by the estimated relative exposure
   App.chemiOf = blot => blot.images.map(id => App.images.get(id)).filter(r => r && r.kind === 'chemi')
     .sort((a, b) => (a.exposure != null && b.exposure != null ? a.exposure - b.exposure : (a.factor || 0) - (b.factor || 0)));
@@ -174,6 +191,7 @@
     return { w: d.w, h: d.h, data: m };
   }
   function prepare(rec) {
+    rec._defaultLevels = null;
     rec.cs = rec.kind === 'chemi' ? WB.chemiSignal(rec.img) : null;
     rec.thumb = thumbOf(rec);
     rec._disp = null;
@@ -241,7 +259,7 @@
         sha256: sha, bytes: b.byteLength, dpi: d.dpi || 0 });
     }
     if (App.onSwap) App.onSwap();
-    App.images.clear(); App.analysis = {};
+    App.images.clear(); retiredImages.clear(); App.analysis = {};
     matchSizes(recs);
     recs.forEach(r => { prepare(r); App.images.set(r.id, r); });
     App.S = head.S;
@@ -254,7 +272,7 @@
     App.loadWarnings = [];
     App.syncAlign();
     busy(true, L(`${what}：分析各张膜…`, `${what}: analysing the membranes…`)); await tick();
-    App.S.blots.forEach(b => App.analyze(b));
+    App.S.blots.forEach(b => { if (!b.dirty) App.analyze(b); });
     App.hist = []; App.future = [];
     App.commit();
     App.saved = App.hist[App.hist.length - 1];
@@ -386,13 +404,13 @@
       });
       for (const b of blots) {
         App.S.blots.push(b);
-        busy(true, L(`分析 ${App.blotName(b)}：对齐各张图、找膜条…`, `Analysing ${App.blotName(b)}: aligning the pictures, finding strips…`)); await tick();
-        alignAndAnalyze(b, init, false);
+        b.dirty = true;
+        b.pendingInit = Object.fromEntries(b.images.filter(id => init.has(id)).map(id => [id, init.get(id)]));
       }
       // a membrane new to the figure goes through the steps: its Marker picture confirmed first (the boxes come
       // once its pieces are)
       if (blots.length) App.S.step = 1;
-      for (const b of joined) { busy(true, L(`重新分析 ${App.blotName(b)}…`, `Re-analysing ${App.blotName(b)}…`)); await tick(); alignAndAnalyze(b, init, true); }
+      for (const b of joined) { b.dirty = true; b.pendingInit = Object.assign(b.pendingInit || {}, Object.fromEntries(b.images.filter(id => init.has(id)).map(id => [id, init.get(id)]))); }
       App.fitLanes(first);
       if (!App.viewBlot || !App.blot(App.viewBlot)) App.viewBlot = App.S.blots[0] && App.S.blots[0].id;
       App.refreshChoices(true);
@@ -575,8 +593,18 @@
     if (!App.devNoAlign) App.alignBlot(b, init);       // (tests: &noalign=1 leaves every picture as taken)
     if (again) App.reanalyze(b); else App.analyze(b);
     if (!App.devNoAlign && App.alignPieces(b)) { if (again) App.reanalyze(b); else App.analyze(b); }
+    delete b.dirty; delete b.pendingInit;
   }
   App.alignAndAnalyze = alignAndAnalyze;
+  App.ensurePrepared = async function () {
+    try {
+      for (const b of App.S.blots) if (b.dirty || !App.analysis[b.id]) {
+        busy(true, L(`分析 ${App.blotName(b)}：对齐图片、检查膜条…`, `Preparing ${App.blotName(b)}: aligning pictures and finding strips…`));
+        await tick();
+        alignAndAnalyze(b, new Map(Object.entries(b.pendingInit || {})), true);
+      }
+    } finally { busy(false); }
+  };
   /* a picture resampled onto the reference grid as S.align says (none: as taken). Returns whether it changed. */
   App.applyAlign = function (rec) {
     const S = App.S, al = S && S.align && S.align[rec.id], b = al && S.blots.find(x => x.images.includes(rec.id));
@@ -657,13 +685,13 @@
     if (blot.marker && (!blot.images.includes(blot.marker) || (App.images.get(blot.marker) || {}).kind !== 'marker')) blot.marker = null;
     if (!blot.marker) { const m = App.markersOf(blot)[0]; blot.marker = m ? m.id : null; }
     const mk = blot.marker ? App.images.get(blot.marker) : null;
-    if (!ch.length) { App.analysis[blot.id] = null; blot.pieces = []; return null; }
+    if (!ch.length && !mk) { App.analysis[blot.id] = null; return null; }
     // the white-light photo as taken, with where it lies on the grid (strips and ladder are read from it unresampled)
     const al = mk && App.alignOf(mk.id), mPcs = al && al.pieces ? (blot.pieces || []).filter(p => al.pieces[p.id]).map(p => ({ cx: p.cx, cy: p.cy, angle: p.angle, w: p.w, h: p.h, T: al.pieces[p.id] })) : [];
     const A = WB.analyzeSession(ch.map(r => ({ id: r.id, img: r.img, exposure: r.exposure, cs: r.cs })), mk && { id: mk.id, img: (mk.raw || mk).img, T: al ? { a: al.a, tx: al.tx, ty: al.ty } : null, pieces: mPcs },
-      { noCalib: true, noChemiCheck: !!App.devNoChemi, strips: blot.userStrips || null });
+      { noCalib: true, outlinesOnly: App.S.step < 3 && !App.S.rows.some(r => r.blot === blot.id), noChemiCheck: !!App.devNoChemi, strips: blot.userStrips || null });
     A.chemiIds = ch.map(r => r.id);
-    A.H = ch[0].img.h;
+    A.H = (ch[0] || mk).img.h;
     A._strips = JSON.stringify(blot.userStrips || null);
     App.analysis[blot.id] = A;
     // pieces, in analysis order; a piece found again at the same place (each old piece once, nearest first)
@@ -716,7 +744,7 @@
     if (vis.length >= 3) { while (a < z && (cnt.get(a) || 0) < need) a++; while (z > a && (cnt.get(z) || 0) < need) z--; }
     return A.rows.map(r => {
       const isWeak = weak(r);
-      const row = { id: uid('r'), blot: blot.id, name: '', img: A.chemiIds[r.choice], auto: true, hidden: isWeak, weak: isWeak, segs: [], above: r.above, below: r.below };
+      const row = { id: uid('r'), blot: blot.id, name: '', img: A.chemiIds[r.choice], auto: true, hidden: false, weak: isWeak, segs: [], above: r.above, below: r.below };
       r.segs.forEach(s => {
         const pc = pcs[s.region], lat = latticeLanes(pc, a, z);
         const sg = { piece: pc.id, vc: s.vc, b0: s.b0, b1: s.b1, lanes: lat.lanes, c0: lat.c0, p: lat.p, x0: -pc.w / 2, x1: pc.w / 2 };
@@ -725,6 +753,7 @@
         App.snapBox(sg);
         row.segs.push(sg);
       });
+      App.splitExcluded(row);
       return row;
     });
   };
@@ -761,6 +790,7 @@
         if (!np) { np = Object.assign(JSON.parse(JSON.stringify(op)), { strip: -1 }); pcs.push(np); }
         const at = (u, v) => carry(op, np, u, v), m = at((sg.x0 + sg.x1) / 2, sg.vc), du = m.u - (sg.x0 + sg.x1) / 2;
         const t = Object.assign({}, sg, { piece: np.id, vc: m.v, x0: sg.x0 + du, x1: sg.x1 + du, lanes: sg.lanes.map(l => ({ u: at(l.u, sg.vc).u, r: l.r })) });
+        if (sg.cut) t.cut = { ...sg.cut, lanes: sg.cut.lanes.map(l => ({ u: at(l.u, sg.vc).u, r: l.r })) };
         // (a box's own tilt on the picture stays)
         if (sg.pu != null) t.pu = at(sg.pu, sg.vc).u;
         if (sg.rot || op.angle !== np.angle) t.rot = Math.round(((sg.rot || 0) + op.angle - np.angle) * 100) / 100;
@@ -769,18 +799,12 @@
           const p = App.segPitch(t);
           t.lanes.forEach(l => { if (l.r === 's' && App.roleAt(np, l.u, p) === 'm') l.r = 'm'; });
         }
-        // two boxes of the row now on one piece: one box over both
-        const same = out.find(s => s.piece === np.id);
-        if (same) {
-          const p = App.segPitch(same);
-          t.lanes.forEach(l => { if (!same.lanes.some(k => Math.abs(k.u - l.u) < p * 0.3)) same.lanes.push(l); });
-          same.lanes.sort((a, c) => a.u - c.u);
-          same.x0 = Math.min(same.x0, t.x0); same.x1 = Math.max(same.x1, t.x1);
-        } else out.push(t);
+        out.push(t); // independent crops stay independent even when they share a membrane strip
       });
       row.segs = out;
       if (out.length === before.length) App.keepJoined(row, out[0], before);
       out.forEach(App.snapBox);
+      App.splitExcluded(row);
     });
     App.S.rows = App.S.rows.filter(r => r.blot !== blot.id || r.segs.length);
     letterPieces(blot);
@@ -854,7 +878,7 @@
   App.levelBox = function (row, sg) {
     const pc = App.pieceOf(row, sg), rec = App.images.get(row.img);
     if (!pc || !rec || rec.kind !== 'chemi') return null;
-    const F = App.segFrame(pc, sg), p = App.segPitch(sg), vT = sg.vc - row.above, vB = sg.vc + row.below, was = sg.vc + (sg.b0 + sg.b1) / 2;
+    const F = App.segFrame(pc, sg), p = App.segPitch(sg), vT = sg.vc - App.boxAbove(row, sg), vB = sg.vc + App.boxBelow(row, sg), was = sg.vc + (sg.b0 + sg.b1) / 2;
     const found = sg.lanes.filter(l => l.r === 's').map(l => ({ u: l.u, bd: WB.bandInBox(sigOf(rec), F, [l.u], p * 0.25, vT, vB, was) })).filter(x => x.bd);
     const top = Math.max(0, ...found.map(x => x.bd.rel)), pts = found.filter(x => x.bd.rel >= top * 0.35 && Math.abs(x.bd.v - was) < (row.above + row.below) * 0.35);
     if (pts.length < 3) return null;
@@ -904,6 +928,35 @@
     keepJoined(row, sg, before);
     return out;
   };
+  // A skipped internal lane is a real cut: expose the separate crops in the editor too.
+  App.splitExcluded = function (row) {
+    row.segs = row.segs.flatMap(sg => {
+      const runs = []; let run = [];
+      sg.lanes.forEach((l, i) => { if (l.r === 's') run.push(i); else if (run.length) { runs.push(run); run = []; } });
+      if (run.length) runs.push(run);
+      if (runs.length < 2) return [sg];
+      const cut = sg.cut || { id: uid('cut'), lanes: sg.lanes.map(l => ({ ...l })) };
+      let col = sg.c0;
+      return runs.map((indices, k) => {
+        const copy = { ...sg, id: k ? uid('box') : App.boxId(sg), label: k ? null : sg.label, cut,
+          above: App.boxAbove(row, sg), below: App.boxBelow(row, sg),
+          lanes: indices.map(i => ({ ...sg.lanes[i] })), c0: col,
+          x0: App.laneLeft(sg, indices[0]), x1: App.laneRight(sg, indices[indices.length - 1]) };
+        col += indices.length;
+        return copy;
+      });
+    });
+  };
+  App.restoreContinuous = function (row, cutId) {
+    const parts = row.segs.filter(s => s.cut && s.cut.id === cutId);
+    if (parts.length < 2 || parts.some(s => s.piece !== parts[0].piece || Math.abs(s.vc - parts[0].vc) > 1 || Math.abs((s.rot || 0) - (parts[0].rot || 0)) > 0.01)) return false;
+    const first = parts[0], all = parts.flatMap(s => s.lanes).concat(first.cut.lanes);
+    const lanes = []; all.sort((a,b) => a.u-b.u).forEach(l => { if (!lanes.some(x => Math.abs(x.u-l.u)<1)) lanes.push({u:l.u,r:'s'}); });
+    first.lanes = lanes; first.x0 = Math.min(...parts.map(s=>s.x0)); first.x1 = Math.max(...parts.map(s=>s.x1));
+    first.c0 = Math.min(...parts.map(s=>s.c0)); delete first.cut;
+    row.segs = row.segs.filter(s => s === first || !parts.includes(s));
+    return true;
+  };
 
   /* The box of a segment set to x0..x1 (piece frame), from its lanes before the edit (base {lanes, c0, p}):
    * lanes whose centres lie inside stay where they are, the spacing continues into new room, and the lanes
@@ -944,7 +997,7 @@
     const x0 = sg.x0 != null ? sg.x0 : -pc.w / 2, x1 = sg.x1 != null ? sg.x1 : pc.w / 2;
     let res = null;
     for (const rec of recs) {
-      res = WB.detectBoxLanes(sigOf(rec), App.segFrame(pc, sg), x0, x1, sg.vc - row.above, sg.vc + row.below, { pitch: pc.pitch || App.segPitch(sg) });
+      res = WB.detectBoxLanes(sigOf(rec), App.segFrame(pc, sg), x0, x1, sg.vc - App.boxAbove(row, sg), sg.vc + App.boxBelow(row, sg), { pitch: pc.pitch || App.segPitch(sg) });
       if (res.lanes.length) break;
     }
     if (!res || !res.lanes.length) return 0;
@@ -1018,7 +1071,7 @@
   App.shiftCols = function (row, sg, d) {
     const i = row.segs.indexOf(sg);
     if (i < 0) return false;
-    const segs = row.segs.slice(i);
+    const segs = [sg];
     d = Math.max(d, 1 - Math.min(...segs.map(t => t.c0)));
     if (!d) return false;
     segs.forEach(t => { t.c0 += d; });
@@ -1063,11 +1116,10 @@
     S.range = [Math.max(1, S.range[0] - s), Math.max(1, S.range[1] - s)];
     S.hiCol = Math.max(0, S.hiCol - s);
   }
-  /* the figure columns of everything on the piece of box sg moved by d (a piece's rows share its lanes), or with
-   * onlyBox just that box — not left of column 1 (the other pieces are never pushed aside). Returns {n: boxes
-   * moved, d: columns they moved} (n 0: already at column 1). */
+  /* Move this box only, never its siblings on the same physical strip. The former onlyBox argument remains
+   * accepted for saved test scenarios; it no longer changes the scope. Stop at column 1. */
   App.shiftAlign = function (row, sg, d, onlyBox) {
-    const segs = (onlyBox ? [sg] : App.S.rows.flatMap(r => r.segs.filter(s => s.piece === sg.piece))).filter(s => App.nSample(s));
+    const segs = [sg].filter(s => App.nSample(s));
     if (!segs.length) return { n: 0, d: 0 };
     d = Math.max(d, 1 - Math.min(...segs.map(s => s.c0)));
     if (!d) return { n: 0, d: 0 };
@@ -1112,7 +1164,7 @@
   App.findBand = function (row, sg) {
     const pc = App.pieceOf(row, sg), rec = App.images.get(row.img);
     if (!pc || !rec || rec.kind !== 'chemi') return;
-    const us = sg.lanes.filter(l => l.r === 's').map(l => l.u), vT = sg.vc - row.above, vB = sg.vc + row.below;
+    const us = sg.lanes.filter(l => l.r === 's').map(l => l.u), vT = sg.vc - App.boxAbove(row, sg), vB = sg.vc + App.boxBelow(row, sg);
     const was = sg.vc + (sg.b0 + sg.b1) / 2;
     const bd = WB.bandInBox(sigOf(rec), App.segFrame(pc, sg), us, App.segPitch(sg) * 0.3, vT, vB, was > vT && was < vB ? was : null);
     if (bd) { sg.b0 = bd.v0 - sg.vc; sg.b1 = bd.v1 - sg.vc; }
@@ -1129,7 +1181,7 @@
     const sg = row.segs[0], pc = sg && App.pieceOf(row, sg), rec = App.images.get(row.img);
     if (!pc || !rec || rec.kind !== 'chemi') return v;
     const us = sg.lanes.filter(l => l.r === 's').map(l => l.u), tol = Math.max(10, (sg.b1 - sg.b0) * 0.8);
-    const bd = WB.bandInBox(sigOf(rec), App.segFrame(pc, sg), us, App.segPitch(sg) * 0.3, Math.max(sg.vc - row.above, v - 2 * tol), Math.min(sg.vc + row.below, v + 2 * tol), v);
+    const bd = WB.bandInBox(sigOf(rec), App.segFrame(pc, sg), us, App.segPitch(sg) * 0.3, Math.max(sg.vc - App.boxAbove(row, sg), v - 2 * tol), Math.min(sg.vc + App.boxBelow(row, sg), v + 2 * tol), v);
     return bd && Math.abs(bd.v - v) <= tol ? bd.v : v;
   };
   App.addArrow = function (row, v) {
@@ -1214,12 +1266,12 @@
   /* Figure columns shown, the source of every row in every column, and where a white gap separates
    * columns: wherever neighbouring columns are not neighbouring lanes of one box in some row. */
   App.columns = function () {
-    const S = App.S, vis = App.figLanes(), rows = S.rows.filter(r => !r.hidden && App.blot(r.blot));
+    const S = App.S, vis = App.figLanes(), rows = S.rows.filter(r => !r.hidden && App.blot(r.blot) && App.images.has(r.img));
     const src = rows.map(r => vis.map(j => App.colSource(r, j)));
     const gapAfter = new Set();
     for (let k = 0; k + 1 < vis.length; k++) {
       if (vis[k + 1] !== vis[k] + 1) { gapAfter.add(k); continue; }
-      if (src.some(rs => { const a = rs[k], c = rs[k + 1]; return a && c && (a.sg !== c.sg || c.i !== a.i + 1); })) gapAfter.add(k);
+      // Local box splices are rendered only in that row; unrelated continuous rows stay continuous.
     }
     const segs = []; let cur = null;
     vis.forEach((j, k) => { if (!cur) { cur = []; segs.push(cur); } cur.push(j); if (gapAfter.has(k)) cur = null; });
@@ -1229,7 +1281,7 @@
   App.ensureLane = j => { while (App.S.lanes.length < j) App.S.lanes.push({ name: '', hidden: false }); };
 
   /* ---------- rows: geometry, exposures, levels ---------- */
-  App.rowPieces = row => { const b = App.blot(row.blot); return row.segs.map(sg => App.piece(b, sg.piece)).filter(Boolean); };
+  App.rowPieces = row => { const b = App.blot(row.blot); return [...new Set(row.segs.map(sg => App.piece(b, sg.piece)).filter(Boolean))]; };
   App.rowPitch = row => (row.segs.length ? row.segs.reduce((s, sg) => s + App.segPitch(sg), 0) / row.segs.length : 100);
   // image position of a row (band centre on its first piece)
   App.rowXY = row => { const b = App.blot(row.blot), sg = row.segs[0], pc = sg && App.piece(b, sg.piece); return pc ? WB.toImg(pFrame(pc), 0, sg.vc) : [0, 0]; };
@@ -1241,13 +1293,13 @@
       const cs = App.segCols(sg).filter(s => s.col != null && (all || vis.has(s.col)));
       if (!cs.length) return;
       parts.push({ F: App.segFrame(pc, sg), u0: App.laneLeft(sg, cs[0].i), u1: App.laneRight(sg, cs[cs.length - 1].i),
-        vTop: sg.vc - row.above, vBot: sg.vc + row.below, b0: sg.vc + sg.b0, b1: sg.vc + sg.b1, sg, pc });
+        vTop: sg.vc - App.boxAbove(row, sg), vBot: sg.vc + App.boxBelow(row, sg), b0: sg.vc + sg.b0, b1: sg.vc + sg.b1, sg, pc });
     });
     return parts.length || all ? parts : App.rowParts(row, true);
   };
   const expoCache = new Map();
   App.rowExpo = function (row) {
-    const b = App.blot(row.blot); if (!b) return [];
+    const b = App.blot(row.blot); if (!b || b.dirty) return [];
     const ch = App.chemiOf(b);
     const key = row.id + JSON.stringify([row.segs, row.above, row.below, App.S.range, App.figLanes()]) + ch.map(c => c.id);
     if (expoCache.has(key)) return expoCache.get(key);
@@ -1289,8 +1341,8 @@
         white = Math.max(white, bg + 0.005, bg + noise * 30, rec.bits <= 8 ? bg + 0.16 : 0);
         black = Math.max(0, (bg - 0.06 * white) / 0.94);
       } else {
-        const [p50, p999] = G.Engine.percentiles(rec.cs.sig, [50, 99.95], 7);
-        black = p50; white = Math.max(p999, p50 + 0.01);
+        if (!rec._defaultLevels) { const [p50, p999] = G.Engine.percentiles(rec.cs.sig, [50, 99.95], 7); rec._defaultLevels = { black: p50, white: Math.max(p999, p50 + 0.01) }; }
+        ({black, white} = rec._defaultLevels);
       }
       S.levels[id] = { black, white, manual: false };
     });
@@ -1310,7 +1362,7 @@
   const rasterCache = new Map();
   App.runRaster = function (row, sg, pc, iA, iB, step) {
     const rec = App.images.get(row.img), lv = App.rowLevels(row);
-    const u0 = App.laneLeft(sg, iA), u1 = App.laneRight(sg, iB), v0 = sg.vc - row.above, v1 = sg.vc + row.below;
+    const u0 = App.laneLeft(sg, iA), u1 = App.laneRight(sg, iB), v0 = sg.vc - App.boxAbove(row, sg), v1 = sg.vc + App.boxBelow(row, sg);
     const key = [row.img, lv.black, lv.white, App.S.style.invert, pc.cx, pc.cy, pc.angle, pc.w, pc.h, sg.rot || 0, sg.pu, u0, u1, v0, v1, step.toFixed(3)].join('|');
     if (rasterCache.has(key)) return rasterCache.get(key);
     const F = App.segFrame(pc, sg);
@@ -1422,13 +1474,13 @@
     insertRow(row);
     return row;
   };
-  /* a box moved (or drawn) onto another piece belongs to that piece from then on (its sizes, its module in the
-   * figure); it stays where it is on the picture. Not when the row has a box on that piece already. */
+  /* A moved box inherits its new strip's marker frame but remains an independent box, including when another
+   * box of the same row already uses that strip. Its position on the picture is preserved. */
   App.rehomeSeg = function (row, sg) {
     const b = App.blot(row.blot), op = App.piece(b, sg.piece);
     if (!op) return null;
     const mid = (sg.x0 + sg.x1) / 2, [mx, my] = WB.toImg(pFrame(op), mid, sg.vc), hit = App.pieceAt(b, mx, my, 0);
-    if (!hit || hit.pc === op || row.segs.some(s => s !== sg && s.piece === hit.pc.id)) return null;
+    if (!hit || hit.pc === op) return null;
     const np = hit.pc, vc0 = sg.vc, m = carry(op, np, mid, vc0), du = m.u - mid;
     sg.lanes = sg.lanes.map(l => ({ u: carry(op, np, l.u, vc0).u, r: l.r }));
     if (sg.pu != null) sg.pu = carry(op, np, sg.pu, vc0).u;
@@ -1464,21 +1516,24 @@
     row.segs.sort((s, t) => s.c0 - t.c0);
   }
   App.joinRows = function (row, other) {
-    const added = other.segs.filter(s => !row.segs.some(t => t.piece === s.piece));
+    const added = other.segs;
+    [row, other].forEach(r => r.segs.forEach(s => { s.above = App.boxAbove(r, s); s.below = App.boxBelow(r, s); }));
     row.segs.push(...added);
     if (!row.name && other.name) row.name = other.name;
     App.S.rows = App.S.rows.filter(r => r !== other);
     if (App.selRow === other.id) App.selRow = row.id;
     placeNew(row, added);
+    App.fitRowHeight(row);
   };
-  /* one protein on a membrane cut through: the boxes of `other` join `row`, side by side (row keeps its place
-   * and name). Refused when that would put two proteins in one row: other membranes (other pictures), two
-   * bands of one piece, or pieces one above the other on the same lanes. */
+  /* User-directed joining: independent non-overlapping crops, including several on one strip, may share a row.
+   * All boxes use the row's single exposure. Different membrane groups and duplicated source areas are refused. */
   App.mergeRows = function (row, other) {
     if (!row || !other || row === other) return 'none';
     if (row.blot !== other.blot) return 'blot';
-    if (other.segs.some(s => row.segs.some(t => t.piece === s.piece))) return 'same';
-    if (App.rowPieces(other).some(q => App.stacked(row, q))) return 'stacked';
+    // Same strip is valid: separate crops can represent the same protein after a lane was cut out.
+    // Refuse only duplicated source pixels, never the shared strip identity.
+    if (other.segs.some(s => row.segs.some(t => s.piece === t.piece && Math.min(s.x1, t.x1) > Math.max(s.x0, t.x0) + 1 &&
+      Math.min(s.vc + App.boxBelow(other, s), t.vc + App.boxBelow(row, t)) > Math.max(s.vc - App.boxAbove(other, s), t.vc - App.boxAbove(row, t)) + 1))) return 'overlap';
     App.joinRows(row, other);
     return 'joined';
   };
@@ -1487,6 +1542,7 @@
     const rest = row.segs.slice(1).map(sg => ({ id: uid('r'), blot: row.blot, name: '', img: row.img, auto: row.auto, hidden: false, segs: [sg], above: row.above, below: row.below }));
     row.segs = [row.segs[0]];
     App.S.rows.splice(App.S.rows.indexOf(row) + 1, 0, ...rest);
+    [row, ...rest].forEach(App.fitRowHeight);
   };
 
   /* ---------- marker bands set by hand ---------- */
@@ -1570,23 +1626,24 @@
     if (!rec || !b.images.includes(id)) return;
     if (rec.kind !== 'marker') { delete App.S.align[id]; App.applyAlign(rec); rec._reg = null; rec.kind = 'marker'; prepare(rec); }
     b.marker = id;
-    alignAndAnalyze(b, null, true);
+    b.dirty = true;
   };
   // step 2 → 3: the boxes of every membrane that has none yet, read on its confirmed pieces, each turned along
   // its band
   App.makeBoxes = function () {
     App.S.step = Math.max(App.S.step, 3);
     App.S.blots.forEach(b => {
-      if (App.S.rows.some(r => r.blot === b.id) || !App.analysis[b.id]) return;
-      const rows = App.rowsFromAnalysis(b);
-      App.S.rows.push(...rows);
-      rows.forEach(r => r.segs.forEach(sg => App.levelBox(r, sg)));
+      const old = new Set(App.S.rows.map(r => r.id));
+      if (b.dirty || !App.analysis[b.id]) alignAndAnalyze(b, new Map(Object.entries(b.pendingInit || {})), true);
+      if (App.analysis[b.id] && App.analysis[b.id].outlinesOnly) App.analyze(b);
+      if (!App.S.rows.some(r => r.blot === b.id) && App.analysis[b.id]) App.S.rows.push(...App.rowsFromAnalysis(b));
+      App.S.rows.filter(r => r.blot === b.id && !old.has(r.id)).forEach(r => r.segs.forEach(sg => App.levelBox(r, sg)));
     });
   };
   // the box a click on the membrane adds (step 3), in the frame of piece pc: as wide and high as the other boxes on
   // that piece (else about six lanes and a band with room around it), centred at (u, v)
   App.defaultBox = function (b, pc, u, v) {
-    const segs = App.S.rows.filter(r => r.blot === b.id).flatMap(r => r.segs.map(s => ({ s, h: r.above + r.below })));
+    const segs = App.S.rows.filter(r => r.blot === b.id).flatMap(r => r.segs.map(s => ({ s, h: App.boxAbove(r, s) + App.boxBelow(r, s) })));
     const mine = segs.filter(x => x.s.piece === pc.id), use = mine.length ? mine : segs;
     const med = a => a.sort((p, q) => p - q)[a.length >> 1];
     const w = use.length ? med(use.map(x => x.s.x1 - x.s.x0)) : Math.min(pc.w, 6 * (pc.pitch || 100));
@@ -1595,18 +1652,37 @@
   };
 
   /* ---------- membranes: moving pictures between them ---------- */
-  App.moveImage = function (imgId, toBlotId) {
-    const S = App.S, from = S.blots.find(b => b.images.includes(imgId));
+  function invalidateGroup(b) {
+    if (!b) return;
+    b.dirty = true;
+    if (!b.images.includes(b.marker)) b.marker = null;
+    if (!b.marker) b.marker = (App.markersOf(b)[0] || {}).id || null;
+    const ch = App.chemiOf(b);
+    App.S.rows.filter(r => r.blot === b.id).forEach(r => {
+      if (!ch.some(c => c.id === r.img)) { r.img = (ch[0] || {}).id || null; r.auto = true; }
+    });
+  }
+  App.moveImages = function (ids, toBlotId) {
+    const S = App.S, active = App.activeImageIds(), moving = [...new Set(ids)].filter(id => active.has(id));
+    if (!moving.length) return 0;
     let to = toBlotId === 'new' ? null : App.blot(toBlotId);
+    if (!to && toBlotId !== 'new') return 0;
     if (!to) { to = newBlot([], null); S.blots.push(to); }
-    if (from === to) return;
-    if (from) { from.images = from.images.filter(i => i !== imgId); if (from.marker === imgId) from.marker = null; }
-    to.images.push(imgId);
-    // put onto the other membrane's grid (it may lie elsewhere in the picture), then analysed again
-    if (S.align[imgId] && S.align[imgId].how === 'manual') delete S.align[imgId];
-    [from, to].forEach(b => { if (b && b.images.length) alignAndAnalyze(b, null, true); });
-    if (from && !from.images.length) { S.blots = S.blots.filter(b => b !== from); S.rows = S.rows.filter(r => r.blot !== from.id); }
+    const changed = new Set(); let n = 0;
+    moving.forEach(id => {
+      const from = S.blots.find(b => b.images.includes(id));
+      if (!from || from === to) return;
+      from.images = from.images.filter(i => i !== id); to.images.push(id);
+      changed.add(from); changed.add(to); n++;
+      delete S.align[id]; App.applyAlign(App.images.get(id));
+    });
+    changed.forEach(invalidateGroup);
+    S.blots = S.blots.filter(b => b.images.length);
+    S.rows = S.rows.filter(r => App.blot(r.blot));
+    if (n) { S.step = 1; App.viewBlot = to.id; App.viewImg = moving.find(id => to.images.includes(id)); }
+    return n;
   };
+  App.moveImage = (id, to) => App.moveImages([id], to);
   App.setKind = function (imgId, kind) {
     const rec = App.images.get(imgId);
     if (!rec || rec.kind === kind) return;
@@ -1614,7 +1690,7 @@
     delete App.S.align[imgId]; App.applyAlign(rec); rec._reg = null;
     rec.kind = kind; prepare(rec);
     const b = App.S.blots.find(b => b.images.includes(imgId));
-    if (b) { if (kind === 'marker' && !b.marker) b.marker = imgId; alignAndAnalyze(b, null, true); }
+    if (b) { if (kind === 'marker' && !b.marker) b.marker = imgId; if (kind !== 'marker' && b.marker === imgId) b.marker = null; invalidateGroup(b); }
   };
   App.setExposure = function (imgId, sec) {
     const rec = App.images.get(imgId); if (!rec) return;
@@ -1623,16 +1699,24 @@
     if (b) { const ch = App.chemiOf(b); if (ch.every(c => c.exposure)) { const mx = Math.max(...ch.map(c => c.exposure)); ch.forEach(c => { c.factor = c.exposure / mx; }); } }
     expoCache.clear();
   };
-  App.removeImage = function (imgId) {
-    const S = App.S, b = S.blots.find(b => b.images.includes(imgId));
-    App.images.delete(imgId);
-    delete S.levels[imgId]; delete S.align[imgId];
-    if (!b) return;
-    b.images = b.images.filter(i => i !== imgId);
-    if (b.marker === imgId) b.marker = null;
-    if (!b.images.length) { S.blots = S.blots.filter(x => x !== b); S.rows = S.rows.filter(r => r.blot !== b.id); }
-    else alignAndAnalyze(b, null, true);
+  App.removeImages = function (ids) {
+    const active = App.activeImageIds(), removed = new Set(ids.filter(id => active.has(id)));
+    if (!removed.size) return 0;
+    const S = App.S;
+    S.blots.forEach(b => {
+      if (!b.images.some(id => removed.has(id))) return;
+      b.images = b.images.filter(id => !removed.has(id)); invalidateGroup(b);
+    });
+    S.blots = S.blots.filter(b => b.images.length);
+    S.rows = S.rows.filter(r => App.blot(r.blot));
+    removed.forEach(id => { delete S.levels[id]; delete S.align[id]; });
+    App.syncImages();
+    if (!App.blot(App.viewBlot)) App.viewBlot = (S.blots[0] || {}).id;
+    if (removed.has(App.viewImg)) App.viewImg = null;
+    S.step = 1;
+    return removed.size;
   };
+  App.removeImage = id => App.removeImages([id]);
 
   /* ---------- checks shown as warnings / legend text ---------- */
   App.isLoading = row => G.ProteinLadders.LOADING_RE.test(row.name || '');
@@ -1666,12 +1750,12 @@
       });
     }
     // membranes whose figure rows show sizes
-    const sized = new Set(blotsUsed.filter(bid => S.style.showMW && vis.some(r => r.blot === bid && App.rowPieces(r).some(pc => App.pieceCal(App.blot(bid), pc)))));
+    const sized = new Set(blotsUsed.filter(bid => S.style.showMW && vis.some(r => r.blot === bid && App.rowPieces(r).some(pc => App.pieceTicks(App.blot(bid), pc).length))));
     blotsUsed.forEach(bid => {
       const b = App.blot(bid);
       if (S.style.showMW && S.step >= 5 && !sized.has(bid)) {
-        warn.push(L(`${App.blotName(b)} 还没标 Marker，成图没有分子量：在第 4 步每条膜条标 2 条 Marker 带（不需要的话在第 5 步"更多版式"里关掉"分子量刻度"）`,
-          `${App.blotName(b)} has no ladder marked yet, so the figure shows no molecular weights: in step 4, mark 2 marker bands on each strip (if you don't need them, turn off "MW ticks" under "More layout" in step 5)`));
+        warn.push(L(`${App.blotName(b)} 还没标 Marker，成图没有分子量：在第 4 步标出可见的 Marker 带（1 条也可以）（不需要的话在第 5 步"更多版式"里关掉"分子量刻度"）`,
+          `${App.blotName(b)} has no ladder marked yet, so the figure shows no molecular weights: in step 4, mark the visible marker bands (one is enough for a tick) (if you don't need them, turn off "MW ticks" under "More layout" in step 5)`));
       }
       (b.pieces || []).forEach(pc => {
         const ms = (pc.marks || []).filter(m => m.kda > 0).sort((p, q) => p.v - q.v);
@@ -1721,6 +1805,7 @@
   App.preflight = function () {
     const S = App.S, st = S.style, out = [], add = (level, text, fix) => out.push({ level, text, fix });
     const vis = S.rows.filter(r => !r.hidden), ck = App.checks(), label = ck.label;
+    if (S.blots.some(b => b.dirty)) { add('block', L('图片分组已修改，请先在第 1 步确认，再导出。', 'Picture groups changed. Confirm step 1 before exporting.')); return out; }
     if (!vis.length) { add('block', L('成图里还没有蛋白行。', 'The figure has no protein rows yet.')); return out; }
     const eff = App.effectiveDpi(), safe = App.maxSafeMmPerLane(300);
     if (eff < 300) add('block', L(`条带本身的有效分辨率只有 ${Math.round(eff)} dpi（< 300）：每道 ${st.mmPerLane} mm 太宽，导出 ${st.dpi} dpi 也只是把像素放大。`,
@@ -1788,8 +1873,8 @@
           recommendedExposure: (App.images.get(App.bestExpo(r)) || {}).name || null, saturatedBandFrac: e ? +e.satFrac.toFixed(5) : null,
           apparentKDa: App.rowKda(r) ? r1(App.rowKda(r)) : null,
           levels: { black: lv.black, white: lv.white, ownToThisRow: !!r.lv },
-          boxes: r.segs.map(sg => ({ piece: letter(b, sg.piece), firstFigureColumn: sg.c0, tiltDeg: sg.rot || 0,
-            boxPx: { u0: r1(sg.x0), u1: r1(sg.x1), vTop: r1(sg.vc - r.above), vBottom: r1(sg.vc + r.below) },
+          boxes: r.segs.map(sg => ({ id: App.boxId(sg), label: App.boxLabel(sg), piece: letter(b, sg.piece), firstFigureColumn: sg.c0, tiltDeg: sg.rot || 0,
+            boxPx: { u0: r1(sg.x0), u1: r1(sg.x1), vTop: r1(sg.vc - App.boxAbove(r, sg)), vBottom: r1(sg.vc + App.boxBelow(r, sg)) },
             lanes: sg.lanes.map(l => ({ uPx: r1(l.u), role: l.r === 's' ? 'sample' : l.r === 'm' ? 'marker' : 'left out' })) })) };
       }),
       figure: { widthMm: r1(f.w / MM), heightMm: r1(f.h / MM), columns: App.figLanes(), laneNames: App.figLanes().map(j => (S.lanes[j - 1] || {}).name || ''),

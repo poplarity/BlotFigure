@@ -4,6 +4,38 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-22
+
+Faster image organisation, independent protein boxes and manual marker labels that stay visible.
+
+**中文摘要**
+- 第 1 步只读取和整理图片，确认分组后才对齐并分析膜条；批量删除、移动不再重复全量分析，支持撤销。
+- 缩略图直接拖放到膜组，可多选一起移动/移除，或拖出新膜组；长文件名自动截断或换行。
+- 每个蛋白框有独立编号，同膜上的其他框不再跟着横移；同一膜条上的不同区域可以拼成一行，裁切范围独立保留。
+- 弱信号框默认显示，隐藏操作改成明确的「隐藏 / 显示」，可一键恢复全部隐藏框。
+- 排除中间 Marker 泳道时拆成多个源框，接缝只作用于对应行；误排除时可恢复连续框。
+- 修改泳道数即生效，去掉重复的对齐按钮；高级操作说明折叠。
+- 一条 Marker 也能显示刻度；两条以上才估算其他分子量。拥挤的刻度错列排布，不再直接丢弃。
+
+### Changed
+- Import defers alignment and strip analysis until picture groups are confirmed. Step 2 computes outlines only; protein detection runs in step 3.
+- Batch image moves and removal update the groups immediately, without re-running analysis. Removed pictures can be restored with Undo and are excluded from saved projects until restored.
+- Thumbnail selection, drag-and-drop between groups, a new-group drop target and direct removal buttons. Same-page drag IDs cover WebKit's custom MIME filtering.
+- Independent stable box IDs, per-box figure positioning and crop heights. Separate boxes on the same strip may be joined, while duplicate source regions are refused and each row still uses one exposure.
+- All detected protein rows are initially shown, including weak candidates. Explicit visibility buttons and a restore-all action make hidden rows discoverable.
+- Excluded internal lanes appear as separate source boxes; local splices no longer add gaps to unrelated continuous rows. Incorrect exclusions can be restored to a continuous box.
+- Lane count changes apply immediately between the end lanes. Manual edits and re-detection remain available without the redundant spacing button.
+- A single marker band is accepted for tick annotation. Calibration of other sizes still needs two marks. Close manual ticks use extra label columns instead of being dropped.
+
+### Fixed
+- Long picture names overflowing the image menu, summary or tabs.
+- Joined boxes on one physical strip collapsing back into a single crop on re-analysis.
+- Independent crop bounds being lost when rows of different heights were joined.
+
+### Validation
+- Added browser interaction coverage for the above workflows, plus project round trips and no shared movement between sibling boxes.
+- On the same 14-picture local fixture: first-step readiness improved from about 12.6 s to 6.9 s; single-picture removal from about 3.4 s to 49 ms. Full analysis now happens after confirmation; these are not total analysis-time measurements.
+
 ## [0.8.0] - 2026-10-22
 
 English interface, a one-file offline download, and the project's GitHub home set up like GelFigure's.

@@ -104,7 +104,7 @@
     const mwRight = st.mwSide === 'right', nameLeft = st.nameSide === 'left';
     const rows = C.rows, rowNames = [], ticksOut = [], arrowsOut = [];
     let y = 0, prevBlot = null, maxLeft = 0, maxRight = 0, tickLabW = 0;
-    const rowBoxes = [], placedTicks = [{ y: -mp * 0.6 }];   // the kDa header sits just above the first row
+    const rowBoxes = [];   // the kDa header sits just above the first row
     rows.forEach((row, ri) => {
       if (prevBlot !== null) y += row.blot === prevBlot ? st.rowGapPt : st.blotGapPt;
       prevBlot = row.blot;
@@ -118,10 +118,14 @@
         const flush = () => {
           if (!cur) return;
           const ras = App.runRaster(row, cur.sg, cur.pc, cur.i0, cur.i1, step);
-          const x0 = X.get(cur.j0) - laneW / 2, w = (cur.i1 - cur.i0 + 1) * laneW;
-          const tag = P ? `data-row="${row.id}" data-piece="${cur.sg.piece}" ` : '';
-          els.push(`<image ${tag}x="${f(x0)}" y="${f(y)}" width="${f(w)}" height="${f(h)}" preserveAspectRatio="none" href="${ras.href}" xlink:href="${ras.href}"/>`);
-          if (st.border) els.push(`<rect ${tag}x="${f(x0)}" y="${f(y)}" width="${f(w)}" height="${f(h)}" fill="none" stroke="#000" stroke-width="${f(lw)}" pointer-events="none"/>`);
+          const left = srcOf.get(cur.j0 - 1), right = srcOf.get(cur.j0 + cur.i1 - cur.i0 + 1);
+          const gL = left && (left.sg !== cur.sg || left.i !== cur.i0 - 1) ? gap / 2 : 0;
+          const gR = right && (right.sg !== cur.sg || right.i !== cur.i1 + 1) ? gap / 2 : 0;
+          const x0 = X.get(cur.j0) - laneW / 2 + gL, w = (cur.i1 - cur.i0 + 1) * laneW - gL - gR;
+          const iy = y + (row.above - App.boxAbove(row, cur.sg)) * sc, ih = (App.boxAbove(row, cur.sg) + App.boxBelow(row, cur.sg)) * sc;
+          const tag = P ? `data-row="${row.id}" data-piece="${cur.sg.piece}" data-box="${App.boxId(cur.sg)}" ` : '';
+          els.push(`<image ${tag}x="${f(x0)}" y="${f(iy)}" width="${f(w)}" height="${f(ih)}" preserveAspectRatio="none" href="${ras.href}" xlink:href="${ras.href}"/>`);
+          if (st.border) els.push(`<rect ${tag}x="${f(x0)}" y="${f(iy)}" width="${f(w)}" height="${f(ih)}" fill="none" stroke="#000" stroke-width="${f(lw)}" pointer-events="none"/>`);
           cur = null;
         };
         run.forEach(j => {
@@ -142,39 +146,37 @@
         const ya = y + (App.arrowV(a) - (row.segs[0].vc - row.above)) * sc, lab = App.arrowLabel(a), wait = !lab && P && a.sym === '◀' && a.auto;
         if (ya >= y - 0.5 && ya <= y + h + 0.5) arrowsOut.push({ a, k, y: ya, label: lab || (wait ? '? kDa' : ''), wait, pt: a.pt || pt });
       });
-      // kDa ticks, from the leftmost piece of the row that has marker sizes
+      // Every hand-set tick is retained, including single marks and marks from other boxes in a joined row.
       const b = App.blot(row.blot);
-      const tsg = st.showMW ? row.segs.find(sg => App.pieceTicks(b, App.piece(b, sg.piece)).length) : null;
-      if (tsg) {
-        const top = tsg.vc - row.above;
-        const ticks = App.pieceTicks(b, App.piece(b, tsg.piece), tsg).filter(t => t.v > top + 1 && t.v < tsg.vc + row.below - 1)
-          .map(t => ({ k: t.k, y: y + (t.v - top) * sc })).sort((a, c) => a.y - c.y);
-        const kept = [], yBand = y + (row.above + (tsg.b0 + tsg.b1) / 2) * sc;
-        // too close to fit both: the tick nearest the band wins (it tells the size best);
-        // also keep clear of ticks already printed for the row above
-        ticks.slice().sort((a, c) => Math.abs(a.y - yBand) - Math.abs(c.y - yBand))
-          .forEach(t => { if (kept.concat(placedTicks).every(o => Math.abs(o.y - t.y) >= mp * 0.95)) kept.push(t); });
-        kept.sort((a, c) => a.y - c.y);
-        placedTicks.push(...kept);
-        kept.forEach(t => {
-          if (mwRight) { els.push(line(W + 1, t.y, W + st.tickLenPt + 1, t.y, lw)); els.push(text(String(t.k), W + st.tickLenPt + 2.5, t.y + mp * 0.35, mp, 'start')); }
-          else { els.push(line(-st.tickLenPt - 1, t.y, -1, t.y, lw)); els.push(text(String(t.k), -st.tickLenPt - 2.5, t.y + mp * 0.35, mp, 'end')); }
+      if (st.showMW) row.segs.forEach(sg => {
+        const all = App.pieceTicks(b, App.piece(b, sg.piece), sg);
+        const inside = all.filter(t => t.v >= sg.vc - App.boxAbove(row, sg) && t.v <= sg.vc + App.boxBelow(row, sg));
+        inside.forEach(t => {
+          const yy = y + (t.v - sg.vc + row.above) * sc;
+          if (ticksOut.some(o => o.row === row.id && o.k === t.k && Math.abs(o.y - yy) < 0.6)) return;
+          ticksOut.push({ k: t.k, y: yy, row: row.id, box: App.boxId(sg) });
           tickLabW = Math.max(tickLabW, measure(String(t.k), mp));
-          ticksOut.push(t);
         });
-        // (said once the piece's marks are done — 2 of them — not while they are being set)
-        if (!kept.length && App.pieceCal(b, App.piece(b, tsg.piece))) {
-          const ls = App.rowPieces(row).map(pc => pc.letter).join('+');
-          warnings.push(L(`「${row.name || '膜条 ' + ls + ' 的行'}」的框里没有标过的 Marker 带，旁边不画分子量刻度：在第 4 步标出这一高度附近的 Marker 带，或把框的上下边拉大`,
-            `"${row.name || 'row on strip ' + ls}" has no marked marker bands in its box, so no molecular weight ticks are drawn beside it: in step 4, mark marker bands near this height, or make the box taller`));
-        }
-      }
+        if (all.length && !inside.length) warnings.push(L(`框 ${App.boxLabel(sg)} 内没有已标的 Marker 刻度；可扩大框的上下范围或在附近补标。`,
+          `Box ${App.boxLabel(sg)} has no marked ticks within its crop; enlarge its vertical range or mark a nearby band.`));
+      });
       rowBoxes.push({ id: row.id, y, h });
       y += h;
     });
     const H = y;
     // beside the bands, outwards: the kDa scale, the target-band arrows, the names (each on its own side)
-    const scaleW = ticksOut.length ? st.tickLenPt + 2.5 + tickLabW : 0;
+    // Use another label column for close ticks instead of silently dropping a manual annotation.
+    const tracks = [st.unitHeader ? -mp * 0.6 : -Infinity], stride = tickLabW + mp * 0.7;
+    ticksOut.sort((a,b) => a.y-b.y).forEach(t => {
+      let track = 0; while (tracks[track] != null && t.y - tracks[track] < mp * 1.15) track++;
+      tracks[track] = t.y;
+      const d = st.tickLenPt + 2.5 + track * stride, tx = mwRight ? W + d : -d;
+      const mark = line(mwRight ? W + 1 : -d + 1, t.y, mwRight ? W + d - 1 : -1, t.y, lw)
+        + text(String(t.k), tx, t.y + mp * 0.35, mp, mwRight ? 'start' : 'end');
+      els.push(`<g data-marker-box="${t.box}" data-marker-size="${t.k}">${mark}</g>`);
+      grow(mwRight ? W : tx - tickLabW, t.y - mp * 0.7, mwRight ? tx + tickLabW : 0, t.y + mp * 0.55);
+    });
+    const scaleW = ticksOut.length ? st.tickLenPt + 2.5 + tickLabW + (tracks.length - 1) * stride : 0;
     if (mwRight) maxRight = scaleW; else maxLeft = scaleW;
     const scaleOn = right => (right === mwRight && scaleW ? scaleW + 2 : 0), arrowW = { left: 0, right: 0 };
     arrowsOut.forEach(t => {

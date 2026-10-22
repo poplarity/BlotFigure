@@ -873,6 +873,10 @@
     const nzc = mad(comp, 3);
     let regions = strips.map((s, si) => ({ strip: si, cx: s.cx / f, cy: s.cy / f, angle: s.angle, w: s.w / f, h: s.h / f }));
     if (!regions.length) regions = regionsFromSignal(compImg, nzc);
+    if (opt.outlinesOnly) return { outlinesOnly: true, strips, regions, pieces: regions.map((r, i) => ({
+      strip: r.strip, cx: r.cx * f, cy: r.cy * f, angle: r.angle, w: r.w * f, h: r.h * f,
+      pitch: 80, u0: 0, col0: 1, roles: [], ladderUs: []
+    })), rows: [], pitch: 80, factors, calib: null, ladderId: null, ladderRank: [], ladderStrips: [], notes, f };
     // --- rows and lanes per region
     let rowsRaw = [];
     regions.forEach((rg, ri) => {
