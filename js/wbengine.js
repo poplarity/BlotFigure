@@ -911,7 +911,7 @@
     const explained = (si, u, v) => rowsRaw.some(r => regions[r.region].strip === si && v / f >= r.v0 - 3 && v / f <= r.v1 + 3 &&
       r.peaks.some(p => Math.abs(p - u / f) < pitchDs * 0.35) && r.peaks.filter(p => Math.abs(p - u / f) > pitchDs * 0.6).length >= 2);
     let ladderStrips = [];
-    if (marker && strips.length) {
+    if (marker && strips.length && opt.autoMarkerLanes !== false) {
       ladderStrips = findLadders(marker.img, stripsRaw, pitch, opt.noChemiCheck ? {} : { explained });     // (tests: without)
       if (!ladderStrips.some(l => l && l.bands.length)) notes.push('Marker 图中没有找到 Ladder 条带');
     }
@@ -942,8 +942,13 @@
     });
     const cands = regions.map((rg, ri) => pieceAnchors(rowsRaw.filter(r => r.region === ri), ladderU[ri], pitchDs));
     const pJoint = jointPitch(cands.map(c => c.anchors), pitchDs);
-    const lat = regions.map((rg, ri) => pieceLattice(rg, cands[ri], ladderU[ri], pJoint));
-    const slotOf = (ri, u) => { const L = lat[ri]; if (!L) return -1; const m = Math.round((u - L.u0) / L.pitch); return m >= 0 && m < L.roles.length && L.roles[m] === 'sample' ? m : -1; };
+    const fixedCount=Number.isInteger(opt.laneCount)&&opt.laneCount>=1&&opt.laneCount<=60?opt.laneCount:0;
+    const lat = regions.map((rg, ri) => {
+      if(!fixedCount)return pieceLattice(rg, cands[ri], ladderU[ri], pJoint);
+      const fit=detectBoxLanes(compImg,frame(rg.cx,rg.cy,rg.angle),-rg.w/2,rg.w/2,-rg.h/2,rg.h/2,{count:fixedCount});
+      return {u0:fit.lanes[0],pitch:fit.pitch,roles:Array(fixedCount).fill('sample')};
+    });
+    const slotOf = (ri, u) => { const L = lat[ri]; if (!L) return -1; const raw = Math.round((u - L.u0) / L.pitch), m=fixedCount?clamp(raw,0,L.roles.length-1):raw; return m >= 0 && m < L.roles.length && L.roles[m] === 'sample' ? m : -1; };
     // --- row records: one segment each (piece, band centre vc, band extent b0..b1 around it; full resolution)
     let out = rowsRaw.map(r => {
       const ri = r.region, rg = r.rg;
@@ -1274,13 +1279,48 @@
    * implies the fewest empty lanes. opt.pitch, the spacing the membrane's rows show, stands when the box does
    * not clearly keep another one — unless the box's bands are wider than it, which no lane spacing can be.
    * Returns {lanes: [u], pitch} (frame units). */
+  function fitCountGrid(profile, noise, count, u0, u1, step) {
+    const w=profile.length, fallback={lanes:Array.from({length:count},(_,i)=>u0+(i+.5)*(u1-u0)/count),pitch:(u1-u0)/count,confident:false};
+    const max=Math.max(...profile);
+    if(count===1 || w<8 || !(max>Math.max(1e-7,noise*6)))return fallback;
+    const q=Float32Array.from(profile,v=>Math.sqrt(Math.max(0,v)/max)), at=(x,arr=q)=>{const a=Math.max(0,Math.min(w-1,Math.floor(x))),b=Math.min(w-1,a+1);return arr[a]+(arr[b]-arr[a])*Math.max(0,Math.min(1,x-a));};
+    const nominal=w/count, pMin=Math.max(2,nominal*.25),pMax=(w-1)/(count-.55);
+    let best=null;
+    for(let t=0;t<=70;t++) {
+      const p=pMin+(pMax-pMin)*t/70, smooth=gaussSmooth(q,Math.max(1,p*.065));
+      const lo=p*.2,hi=w-1-(count-1)*p-p*.2,delta=Math.max(.75,p/20);
+      for(let o=lo;o<=hi+.001;o+=delta) {
+        let sum=0,support=0;
+        for(let k=0;k<count;k++) {const x=o+k*p,v=at(x,smooth),edge=(at(x-p*.45,smooth)+at(x+p*.45,smooth))/2;const c=Math.max(0,v-edge);sum+=c;if(c>.11&&v>.16)support++;}
+        const score=sum/count-.045*Math.abs(p/nominal-1)-.018*Math.abs((o+(count-1)*p/2)/(w/2)-1);
+        if(!best||score>best.score)best={score,p,o,support};
+      }
+    }
+    if(!best||best.support<Math.min(count,2)||best.score<.065)return fallback;
+    // Refine all centres by one affine fit; weak or empty lanes remain on the same grid.
+    const points=[];
+    for(let k=0;k<count;k++) {
+      const x=best.o+k*best.p,a=Math.max(0,Math.round(x-best.p*.23)),b=Math.min(w-1,Math.round(x+best.p*.23));
+      let low=Infinity,sw=0,sx=0;for(let j=a;j<=b;j++)low=Math.min(low,profile[j]);
+      for(let j=a;j<=b;j++){const v=Math.max(0,profile[j]-low);sw+=v;sx+=v*j;}
+      if(sw/(b-a+1)>max*.035)points.push({k,x:sx/sw});
+    }
+    if(points.length>=2) {
+      const mk=points.reduce((s,t)=>s+t.k,0)/points.length,mx=points.reduce((s,t)=>s+t.x,0)/points.length;
+      const den=points.reduce((s,t)=>s+(t.k-mk)**2,0),p=points.reduce((s,t)=>s+(t.k-mk)*(t.x-mx),0)/den,o=mx-p*mk;
+      if(p>0&&Math.abs(p/best.p-1)<.12&&o>=0&&o+(count-1)*p<w){best.p=p;best.o=o;}
+    }
+    return {lanes:Array.from({length:count},(_,k)=>u0+(best.o+k*best.p+.5)*step),pitch:best.p*step,confident:true};
+  }
+
   function detectBoxLanes(sig, F, u0, u1, v0, v1, opt) {
     opt = opt || {};
     // never finer than the pixels: interpolated neighbours would share their noise
     const step = Math.max(1, (u1 - u0) / 700, (v1 - v0) / 400);
     const win = sampleWindow(sig, F, u0, u1, v0, v1, step), { w, h, data } = win;
-    const P0 = opt.pitch > 0 ? opt.pitch / step : 0;
-    if (w < 8 || h < 3) return { lanes: [], pitch: opt.pitch || 0 };
+    const count=Number.isInteger(opt.count)&&opt.count>=1&&opt.count<=60?opt.count:0;
+    const P0 = count ? w/count : opt.pitch > 0 ? opt.pitch / step : 0;
+    if (w < 8 || h < 3) return count ? fitCountGrid(new Float32Array(Math.max(1,w)),1,count,u0,u1,step) : { lanes: [], pitch: opt.pitch || 0 };
     // column profile: the mean of each column's strongest 15 % (the rows its band runs through), compressed so
     // a faint lane counts next to a strong one; a background drifting across the box is taken off below
     const k = Math.max(2, Math.round(h * 0.15)), prof = new Float32Array(w), col = new Float32Array(h);
@@ -1295,13 +1335,14 @@
     const R = Math.max(4, Math.round(Math.min(w / 2.5, Math.max(P0 * 1.2, w / 5))));
     const bl = slide(slide(q0, R, false), R, true), q = new Float32Array(w);
     let mx = 0; for (let x = 0; x < w; x++) { q[x] = Math.max(0, q0[x] - bl[x]); mx = Math.max(mx, q[x]); }
-    if (!(mx > 0)) return { lanes: [], pitch: opt.pitch || 0 };
+    if (!(mx > 0)) return count ? fitCountGrid(q,1,count,u0,u1,step) : { lanes: [], pitch: opt.pitch || 0 };
     // pixel noise of the profile, from differences of columns 2 apart (a lane spans many columns, so they
     // hardly see the lanes), as it is left after the smoothing: a lane must stand well clear of it — in a
     // picture where the row's band is missing, noise ripples would otherwise read as dozens of lanes
     const dif = []; for (let x = 2; x < w; x++) dif.push(Math.abs(prof[x] - prof[x - 2]));
     dif.sort((a, b) => a - b);
     const noise = 1.4826 * dif[dif.length >> 1] / Math.SQRT2 / Math.sqrt(2 * Math.sqrt(Math.PI) * sig0);
+    if(count)return fitCountGrid(q,noise,count,u0,u1,step);
     // two peaks of one lane (a band with a dip, the two edges of a smeared or clipped band) are one lane, at
     // their weighted middle: closer than 0.6 of the membrane's spacing, or — spacing unknown — with only a
     // shallow dip between them

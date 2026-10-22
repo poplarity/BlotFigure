@@ -75,5 +75,10 @@ try {
   await page.click('#btnLang');
   await page.waitForTimeout(300);
   await page.screenshot({path:path.join(root,'docs/gallery-en.png')});
+  await page.goto(pathToFileURL(path.join(root,'index.html')).href+'?demo=1&step=2&lang=zh');
+  await page.waitForFunction(()=>document.title.startsWith('READY '),null,{timeout:180000});
+  await page.fill('#defaultLanesBefore','9');await page.locator('#defaultLanesBefore').press('Tab');
+  await page.waitForTimeout(3400);await page.mouse.move(1590,990);
+  await page.screenshot({path:path.join(root,'docs/lane-count.png')});
   console.log('Documentation screenshots (synthetic demo only):', info);
 } finally { await browser.close(); }

@@ -4,7 +4,7 @@
 
 **Turn the raw pictures of a Western blot experiment into a publication-ready figure — in your browser, offline.**
 
-[**Download the single HTML file**](https://github.com/poplarity/BlotFigure/releases/download/v0.10.0/BlotFigure-v0.10.0.html) · [Use online](https://poplarity.github.io/BlotFigure/) · [中文说明](README.zh-CN.md)
+[**Download the single HTML file**](https://github.com/poplarity/BlotFigure/releases/download/v0.11.0/BlotFigure-v0.11.0.html) · [Use online](https://poplarity.github.io/BlotFigure/) · [中文说明](README.zh-CN.md)
 
 [![CI](https://github.com/poplarity/BlotFigure/actions/workflows/ci.yml/badge.svg)](https://github.com/poplarity/BlotFigure/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -17,13 +17,13 @@
 
 **Download one file, open it in your browser, and start making your figure. No installation, ZIP extraction or GitHub account is needed.**
 
-1. **[Download BlotFigure-v0.10.0.html](https://github.com/poplarity/BlotFigure/releases/download/v0.10.0/BlotFigure-v0.10.0.html)** (about 750 KB). Save it to your Desktop or Downloads folder.
+1. **[Download BlotFigure-v0.11.0.html](https://github.com/poplarity/BlotFigure/releases/download/v0.11.0/BlotFigure-v0.11.0.html)** (about 750 KB). Save it to your Desktop or Downloads folder.
 2. **Double-click the downloaded file.** It opens in your browser. If a text editor opens instead, right-click → **Open with** → Firefox, Chrome, Edge or Safari.
 3. **Drop in all pictures of one experiment**: every exposure of each membrane plus a picture that shows the marker (the white-light picture, or white light merged with chemiluminescence). Then follow the 5 steps on the left and choose **Export PNG**.
 
 That one HTML file is the complete tool. Keep it on your computer or send the same file to a colleague. Once downloaded, it works without an internet connection.
 
-**Get the right file:** choose the release attachment named **BlotFigure-v0.10.0.html**, not the repository's **index.html**, **Source code (zip)** or **Source code (tar.gz)**. If you reach the [release page](https://github.com/poplarity/BlotFigure/releases/latest), expand **Assets** and click the file ending in **.html**.
+**Get the right file:** choose the release attachment named **BlotFigure-v0.11.0.html**, not the repository's **index.html**, **Source code (zip)** or **Source code (tar.gz)**. If you reach the [release page](https://github.com/poplarity/BlotFigure/releases/latest), expand **Assets** and click the file ending in **.html**.
 
 **Keep your work:** use **File → Save project** (Ctrl+S) before closing. Your **.blotfig** file contains all the pictures and every adjustment; reopen it in BlotFigure to continue, on any computer.
 
@@ -65,6 +65,7 @@ Drop in everything the imager saved for one experiment. BlotFigure tells exposur
 - **Cut and tilted membranes**: the strips of a cut membrane are found on the marker picture with their own angle; boxes level themselves along their bands and can be turned by hand to a tenth of a degree.
 - **Membranes moved between captures** (substrate added, strips lifted and put back) are recognised as one membrane and aligned, as a whole or strip by strip, and can be adjusted by hand.
 - **The best exposure per row**: every protein row gets its own exposure (no saturated pixels in the band, enough signal, clean background), with a side-by-side comparison of all exposures and saturated pixels in red.
+- **Known lane count**: enter the total lanes per protein box in step 2 (include marker and empty lanes inside that box). Detection and new boxes use that count, with positions fitted locally. Leave blank for automatic counting. In step 3, change a single box or explicitly apply the default count to existing boxes. The default is saved with projects and parameter presets; projects also retain each box’s override.
 - **Boxes you can put anywhere**: resize, move, tilt; the figure shows exactly what a box covers. Lanes as in GelFigure: drag the first and last lane onto their lanes and the others spread evenly.
 - **Arrange independent boxes**: drag rows up and down; drag each box left or right without moving other boxes on its membrane. Each detected protein region stays independent. Vertical dragging only reorders; dropping onto another row never combines it.
 - **Optional columns in one WB figure**: each column has its own title (top or bottom), lane names, range and conditions. Move a region across by dragging or its ⋯ menu; exposure and levels remain independent. Top alignment by default, optional row alignment, adjustable spacing.
@@ -82,7 +83,7 @@ Drop in everything the imager saved for one experiment. BlotFigure tells exposur
 Follow the sequence once for a new experiment. Afterwards use each tool’s **Expand / Collapse** button directly; switching tools applies pending strip edits and preserves existing regions, including your deletions. In the protein tool, **Add a protein box** is at the top. Click a box and press **Backspace** to remove just that box; text editing keeps normal keyboard behavior.
 
 1. **Marker picture** — each membrane needs one picture that shows the marker. The guess is marked ★; if it is wrong, click "Use as marker picture" under the right one.
-2. **Strips** — the blue boxes are the strips found on the marker picture. Move, resize, rotate, draw or delete them right on the picture.
+2. **Strips** — the blue boxes are the strips found on the marker picture. Move, resize, rotate, draw or delete them right on the picture. Set the expected lanes per protein box here before generating the boxes.
 3. **Protein boxes** — one box per protein, and the figure appears on the right. Resize, move or tilt a box; drag the leftmost and rightmost lane lines onto the lanes; add a box for a protein that was missed.
 4. **Marker** — choose your ladder and click its bands on the marker picture (they snap); one mark displays its known size; two or more allow estimates for the other bands.
 5. **Names, lanes and export** — protein and lane names (on the figure or pasted as a row), annotations, layout; then **Export PNG**, TIFF or SVG.
@@ -93,9 +94,11 @@ In step 5 choose **Add a layout column**, then drag regions into it or use **⋯
 
 <img src="docs/example-columns.png" alt="Synthetic WB example with two independent columns and separate condition labels" width="620">
 
+<img src="docs/lane-count.png" alt="Set the lane count before generating protein boxes" width="900">
+
 ## Versions
 
-The current version is **0.10.0**: a central photo browser for grouping and inspecting pictures, expandable tools, independent Backspace deletion, direct naming on the figure, custom marker import, one global marker font with fixed short ticks, local project history and parameter presets. iBright composite detection now checks image content before an ambiguous Chemi filename, and the iBright brand no longer counts as a white-light clue. See the [changelog](CHANGELOG.md).
+The current version is **0.11.0**: set a default lane count before protein detection, fit lane positions independently inside each box, and reuse the count when adding boxes. Local exceptions and explicit batch application are supported. Clearing every box no longer leaves a one-lane display range. Automatic marker guesses no longer exclude lanes or split protein crops; only manual exclusions do that. See the [changelog](CHANGELOG.md).
 
 ## Privacy
 

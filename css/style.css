@@ -592,3 +592,8 @@ html[lang=en] .sec.step.reach .sec-head::after { content: "Continue →"; }
 .tool-nav button.on { background:var(--accent-bg); color:var(--accent); font-weight:700; }
 .tool-nav button:disabled { opacity:.45; cursor:default; }
 .sec.step { scroll-margin-top:42px; }
+
+.lane-default { padding:10px; margin:12px 0; border:1px solid var(--line-2); border-radius:8px; background:#f7f9fc; }
+.lane-default > label { display:block; font-size:12px; font-weight:600; }
+.lane-default .field { margin:6px 0; }
+.lane-default.compact { margin-top:8px; }

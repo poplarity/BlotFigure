@@ -457,7 +457,18 @@
     }).join('<br>');
   }
   /* step 2: the pieces of each membrane (outlines edited on the picture); several membranes: one at a time */
+  ['defaultLanesBefore','defaultLanesNew'].forEach(id=>{
+    $(id).addEventListener('input',e=>{if(S())$('applyDefaultLanes').disabled=!(+e.target.value>0)||!S().rows.length;});
+    $(id).addEventListener('change',done(e=>{App.setDefaultLaneCount(e.target.value);}));
+  });
+  $('applyDefaultLanes').onclick=done(()=>{const n=App.applyDefaultLanes();toast(L(`已统一 ${n} 个框的泳道数（Ctrl+Z 可撤销）`,`Lane counts applied to ${n} boxes (Ctrl+Z to undo)`));});
+  function syncDefaultLanes(){
+    const n=S().defaultLaneCount||'';['defaultLanesBefore','defaultLanesNew'].forEach(id=>$(id).value=n);
+    $('applyDefaultLanes').disabled=!n||!S().rows.length;
+    $('defaultLanesHint').textContent=n?L(`自动生成与新加的框均按 ${n} 道定位；现有框不会被自动改动。`,`Detected and added boxes use ${n} lanes; existing boxes keep their adjustments.`):L('留空自动计数；填写后，新加的框按此数量定位。','Leave blank for automatic counting; set a count for newly added boxes.');
+  }
   function renderPieces() {
+    syncDefaultLanes();
     const st = S(), box = $('pieceList');
     box.innerHTML = st.blots.map(b => {
       const np = (b.pieces || []).length, ls = (b.pieces || []).map(p => p.letter).sort().join(' ');
@@ -697,8 +708,8 @@
       if (sel) box.appendChild(rowDetail(row, ex, best));
     });
     if (!st.rows.length) {
-      box.innerHTML = `<p class="hint">${L('没有找到蛋白条带：点下面的"+ 添加一个蛋白框"，再到膜上点一下放下。',
-        'No protein bands found: click "+ Add a protein box" below, then click on the membrane to place it.')}</p>`;
+      box.innerHTML = `<p class="hint">${L('没有找到蛋白条带：点顶部的"+ 添加一个蛋白框"，再到膜上点一下放下。',
+        'No protein bands found: click "+ Add a protein box" at the top, then click on the membrane to place it.')}</p>`;
     }
     const bound = App.boundRows();
     if (bound.length && !(bound.length === 1 && App.selRow === bound[0].id)) {
@@ -744,7 +755,7 @@
           <span class="bt-cols">${L(`成图第 <b>${cols}</b> 列`, `${n > 1 ? 'columns' : 'column'} <b>${cols}</b>`)}</span>
           <button class="pnav" data-shift="-1" title="${L('这个框的泳道在成图里往左挪一列（最左到第 1 列，不会推动其他行）', "Move this box's lanes one column left in the figure (down to column 1; other rows are not pushed)")}"${sg.c0 <= 1 ? ' disabled' : ''}>‹</button><button class="pnav" data-shift="1" title="${L('往右挪一列', 'One column right')}">›</button></div>
         <div class="bt-line"><span class="bt-even">${L('泳道数', 'Lanes')} <input type="number" class="num" min="1" max="60" value="${sg.lanes.length}"> </span>
-          <button class="btn sm ghost" data-act="redetect" title="${L('只看框里的像素，重新找泳道', 'Find the lanes again from the pixels in the box only')}">${L('框内重新识别', 'Detect in box')}</button></div>
+          <button class="btn sm ghost" data-act="redetect" title="${L('只看框里的像素，重新找泳道', 'Find the lanes again from the pixels in the box only')}">${sg.laneCount||S().defaultLaneCount ? L(`按 ${sg.laneCount||S().defaultLaneCount} 道定位`,`Locate ${sg.laneCount||S().defaultLaneCount} lanes`) : L('框内重新识别','Detect in box')}</button></div>
         <div class="bt-line"><span class="bt-rot">${L('倾斜', 'Tilt')} <button class="pnav" data-rot="-0.1" title="${L('逆时针 0.1°（选中框后按 [ ）', '0.1° anticlockwise ([ with the box selected)')}">−</button><b>${(sg.rot || 0).toFixed(1)}°</b><button class="pnav" data-rot="0.1" title="${L('顺时针 0.1°（选中框后按 ] ）', '0.1° clockwise (] with the box selected)')}">+</button></span>
           <button class="btn sm ghost" data-act="level" title="${L('按框里的条带把框摆正（条带和膜条不完全水平时）', "Level the box by its bands (when bands and strip aren't quite horizontal)")}">${L('按条带摆正', 'Level by bands')}</button>${sg.rot ? `<button class="link" data-act="rot0">${L('归零', 'Reset')}</button>` : ''}</div>
       </div>`;
@@ -785,7 +796,7 @@
         const n = App.editLanes(row, sg, () => App.redetectBox(row, sg)); App.splitExcluded(row);
         App.findBand(row, sg); App.selLane = null;
         const nm = sg.lanes.filter(l => l.r === 'm').length;
-        toast(n ? L(`框内识别出 ${n} 道${nm ? `（另有 ${nm} 道 Marker）` : ''}`, `Found ${pl(n, 'lane')} in the box${nm ? ` (and ${pl(nm, 'marker lane')})` : ''}`)
+        toast(sg.laneCount ? L(`已按 ${sg.laneCount} 道排布，可拖动首尾泳道线微调`, `Placed ${sg.laneCount} lanes; drag the two end lines to fine-tune`) : n ? L(`框内识别出 ${n} 道${nm ? `（另有 ${nm} 道 Marker）` : ''}`, `Found ${pl(n, 'lane')} in the box${nm ? ` (and ${pl(nm, 'marker lane')})` : ''}`)
           : L('框里没识别到泳道：拖框调整范围，或直接修改泳道数', 'No lanes found in the box: drag the box to adjust it, or change the lane count'), 3200);
       });
       const pcOf = () => App.pieceOf(row, sg);
@@ -799,7 +810,7 @@
       if (r0) r0.onclick = done(() => { App.setSegRot(pcOf(), sg, 0); App.findBand(row, sg); });
       const inp = div.querySelector('.bt-even input');
       const even = done(() => {
-        const n = App.editLanes(row, sg, () => App.evenEnds(row, sg, +inp.value)); App.selLane = null;
+        const n = App.editLanes(row, sg, () => App.evenEnds(row, sg, +inp.value)); sg.laneCount=n; App.selLane = null;
         toast(L(`已按最左、最右两条泳道等间距排布 ${n} 道`, `${pl(n, 'lane')} spaced evenly between the outermost two`));
       });
       inp.addEventListener('change', even);

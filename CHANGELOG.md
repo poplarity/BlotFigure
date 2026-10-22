@@ -4,6 +4,23 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-23
+
+Count-constrained lane positioning and source-crop fixes.
+
+**中文摘要**
+- 第 2 步识别前可指定每个蛋白框的总泳道数；各框按自身图像拟合位置，弱带、空道不再改变指定数量。新加框沿用默认值，可逐框覆盖，支持明确操作后统一已有框。
+- 修复删除全部蛋白框后旧的单道显示范围继续限制新增框的问题。空排版列首次添加框时恢复完整范围；源泳道不再受成图范围过滤。
+- 关闭应用中自动 Marker 泳道推断造成的自动删道、拆框与全局范围裁切。只有用户手动标 M 或排除泳道才拆分框；手动裁切片段在批量调整时按原始框处理。
+- 指定条数随缩放和重定位保留，单框例外独立；项目、预设和样式文件记录默认值。保存重开使用该膜原来的检测参数，不因为后来修改默认值而重算现有几何。
+- 增加缺带、弱带、双峰、宽背景、空框、真实鼠标新增、清空恢复、手动 Marker 和已知条带坐标覆盖测试。用户提供的 TIFF 仅在本地验证。
+
+### Added / fixed
+- Optional lane-count constraint before detection, local signal fitting, per-box overrides, batch counts, and persistence through projects/presets.
+- Empty-to-populated display-range recovery and source-lane inference independent of figure cropping.
+- Manual-only lane exclusions in the app; automatic marker guesses cannot silently crop or split protein regions.
+- Regression tests verify ground-truth band coverage as well as counts, including weak/missing lanes and deletion/re-addition flows.
+
 ## [0.10.0] - 2026-10-23
 
 Direct editing, a photo workspace, and persistent local projects.

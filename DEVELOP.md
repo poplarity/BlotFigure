@@ -181,3 +181,12 @@ msedge --headless=new --disable-gpu --user-data-dir=$env:TEMP\wb_dbg --allow-fil
 - Marker 只读取 style.markerPt；旧行级覆盖在 commit 时移除。刻度与文字锚点固定，测量真实数字字形判断重叠；不移动数字以隐藏重叠。
 - 自定义 Marker 随项目头/缓存保存；同名但不同条带表采用新 id，避免修改旧项目引用的型号。
 - `node tests/run.mjs --suite=usability` 测新交互、照片浏览、全局字号、Marker 导入、参数预设、多项目缓存、旧草稿迁移和配额故障。`--suite=ui` 单独运行界面/导出回归。用户原图只在本地临时目录测试，不提交到仓库或文档。
+
+
+## 0.11.0：泳道数约束与空范围恢复
+
+- `S.defaultLaneCount` 是以后检测/新框的默认数量；`sg.laneCount` 是该框的固定数量，可单独覆盖。框内识别用 `WB.detectBoxLanes(...,{count})`，在本框信号中拟合数量固定的格点；信号不足时等距补足，绝不从缺失条带重新推断数量。缩放固定数量的框对当前泳道作仿射移动；端点拖动仍均分中间。
+- `blot.laneCountAtDetection` 记录膜原来的检测参数，避免用户改新框默认值后保存重开，旧膜的派生格点被不同默认值重算。显式全部重新识别才采用最新默认值。
+- App 的 analyzeSession 传 `autoMarkerLanes:false`；diagnostic engine 的自动 Marker 方法保留用于独立测试，不能通过 `roleAt()` 自动影响用户的样本道。source geometry 不再按成图全局范围裁切。
+- `hiCol:0` 表示本排版列当前没有源泳道。首次重新添加时重建完整范围并恢复该范围的可见标记；已有内容的其他列不受影响。
+- `tests/lanecount.mjs`（`--suite=lanecount`）及 `test/boxlanes.html` 检查固定条数定位误差、实际条带落在框内、手动裁切、清空后真实点击新增、多列隔离、预设和重开。

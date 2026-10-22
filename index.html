@@ -72,7 +72,7 @@
         <div class="inline"><button class="btn sm primary" id="btnDraftRestore" data-en="Restore">恢复</button><button class="btn sm ghost" id="btnDraftDrop" data-en="Discard">丢弃</button></div>
       </div>
       <p class="privacy" data-en-html="Pictures are processed only in this browser and never uploaded.<br>A saved project: File → Open project (top right).">图片只在本机浏览器处理，不会上传。<br>保存过的项目：右上角"文件 → 打开项目"。</p>
-      <p class="hint" id="offlineDownload"><a href="https://github.com/poplarity/BlotFigure/releases/download/v0.10.0/BlotFigure-v0.10.0.html" data-en="Download for offline use: one HTML file">下载离线版：只需一个 HTML 文件</a><br><span data-en="Save it to your computer, then open it in your browser. No installation or extraction.">保存到电脑，用浏览器打开；不用安装、不用解压。</span></p>
+      <p class="hint" id="offlineDownload"><a href="https://github.com/poplarity/BlotFigure/releases/download/v0.11.0/BlotFigure-v0.11.0.html" data-en="Download for offline use: one HTML file">下载离线版：只需一个 HTML 文件</a><br><span data-en="Save it to your computer, then open it in your browser. No installation or extraction.">保存到电脑，用浏览器打开；不用安装、不用解压。</span></p>
       <p class="hint storage-note hidden" data-en="Browser storage is unavailable. You can still edit and export; preferences and custom ladders stay in this tab only and there is no autosaved draft. Save a project before closing.">浏览器存储不可用，仍可编辑和导出；偏好与自定义 Marker 仅在本页暂存，也没有自动草稿。关闭前请保存项目。</p>
     </div>
 
@@ -97,6 +97,7 @@
           <p class="lead" data-en-html="The <b>blue boxes</b> on the marker picture in the middle are the strips found (one box per strip when a membrane was cut). Each should just enclose its strip. Fix them right on the picture:">中间 Marker 图上的<b>蓝框</b>是找到的膜条（一张膜剪成几条时每条一个框），要刚好框住每一条膜。不对就直接在图上改：</p>
           <ul class="howto"><li data-en-html="<b>Drag a box</b>: move"><b>拖动蓝框</b>：移动</li><li data-en-html="<b>Drag an edge or corner</b>: resize"><b>拖边、角</b>：改大小</li><li data-en-html="<b>Drag the ↻ above</b>: rotate"><b>拖上方的 ↻</b>：旋转</li><li data-en-html="<b>Drag on empty space</b>: add one"><b>在空白处拖出</b>：加一条</li><li data-en-html="<b>Select + Delete</b>: remove"><b>选中后 Delete</b>：删掉</li></ul>
           <div id="pieceList"></div>
+          <div class="lane-default"><label for="defaultLanesBefore" data-en="Lanes per protein box">每个蛋白框的泳道数</label><div class="field inline"><input id="defaultLanesBefore" type="number" class="num" min="1" max="60" step="1" placeholder="自动" data-en-placeholder="Auto"><span class="hint" data-en="Fill this before generating boxes">建议先填写，再生成蛋白框</span></div><p class="hint" data-en="Count every lane inside the box, including marker or empty lanes. Each box finds its own positions; leave blank for automatic counting. Exceptions can be edited individually.">填写框内总道数，包含 Marker 道和空道；各框分别定位。留空自动计数，不同的框仍可单独修改。</p></div>
           <div class="step-next"><button class="btn primary big" id="next2" data-en="Strips are right. Next: protein boxes →">膜条对了，下一步：生成蛋白框 →</button></div>
         </div>
       </section>
@@ -107,6 +108,7 @@
         <div class="step-body">
           <div class="add-row"><button class="btn sm" id="btnAddRow" data-en="+ Add a protein box">+ 添加一个蛋白框</button><span class="hint" data-en="Click this button, then click on the membrane to place a box, or drag out any size. Backspace removes the selected box.">先点按钮，再在膜图上点一下放置；也可按住拖出任意大小。选中框后按退格删除。</span></div>
           <p class="lead" data-en-html="Each coloured box is one protein's area in the figure; the figure is on the right. <b>Click a box</b> to select it: drag an edge or corner to resize, drag inside to move, drag the <b>↻</b> above to tilt. If the lane lines are off, drag the <b>leftmost and rightmost</b> onto the lane centres. Click a row below for its exposure, lane count and columns.">每个彩色框是一个蛋白在成图里的范围，右边就是成图。<b>点框</b>选中：拖边、角改大小，拖框内部移动，拖上方的 <b>↻</b> 旋转；泳道线没对准就把<b>最左、最右</b>两条拖到泳道中心。点下面的一行看曝光、泳道数和列。</p>
+          <div class="lane-default compact"><label for="defaultLanesNew" data-en="Default lanes for new boxes">新框默认泳道数</label><div class="field inline"><input id="defaultLanesNew" type="number" class="num" min="1" max="60" step="1" placeholder="自动" data-en-placeholder="Auto"><button class="btn sm" id="applyDefaultLanes" data-en="Apply count to existing boxes">统一已有框的条数</button></div><p class="hint" id="defaultLanesHint"></p></div>
           <div id="rowList"></div>
 
           <p class="hint"><button class="link" id="btnRedetect" data-en="Detect all again">全部重新识别</button><span data-en=" (finds every protein box again from the strips; the current boxes are dropped)">（按膜条重新找所有蛋白框，丢掉现在的框）</span></p>
@@ -277,6 +279,8 @@
   </ol>
   <h3 data-en="Common situations">常见情况</h3>
   <ul>
+    <li data-en-html="<b>Known lane count</b>: before generating protein boxes in step 2, enter the total lanes per box (include marker and empty lanes inside it). Detection and newly added boxes use this number, while positions are fitted independently. Step 3 lets you set a local exception or explicitly apply the count to existing boxes. After all boxes are deleted, the first added box restores its complete visible range."><b>泳道数已知</b>：第 2 步生成蛋白框前填写每框总道数（含框内 Marker 和空道）。自动生成和新加的框使用这个数量，位置各自识别；第 3 步可单框调整或统一已有框。删光再添加时自动恢复完整预览范围。</li>
+    <li data-en-html="<b>Marker lanes and crop gaps</b>: an automatic marker guess does not remove sample lanes. Click a lane's number to exclude it or mark it M; only those explicit choices split a continuous source crop."><b>Marker 泳道与分隔</b>：不会再根据自动猜测排除泳道。点泳道数字改为不用或 M 后，才按你的选择拆分连续框。</li>
     <li data-en-html="<b>Photo browser</b>: step 1 shows membrane groups in the centre and a large picture on the right. Select pictures, drag between groups, zoom in, and set a picture as marker or exposure. Confirm when ready; returning to a completed experiment keeps existing boxes."><b>相册浏览</b>：第 1 步在中间整理膜组，右侧放大查看图片。可多选、跨组拖动、缩放，直接设为 Marker 图或曝光图；确认后继续，返回编辑时保留已有框。</li>
     <li data-en-html="<b>Custom markers</b>: step 4 → Custom / import marker. Paste band sizes from the package, or choose a TXT/CSV/JSON file. Preview the numbers, then Save and use. Custom definitions are also included in saved projects."><b>自定义 Marker</b>：第 4 步点「自定义 / 导入 Marker」，粘贴包装上的条带大小，或选 TXT/CSV/JSON 文件；预览数字后保存并使用。定义也会随项目文件保存。</li>
     <li data-en-html="<b>Recent projects and presets</b>: the top bar or File menu opens locally cached projects. Starting a new project keeps the previous one. File → Parameter presets saves fonts, layout, export settings and the marker model. Storage is specific to this browser; save a .blotfig file for another computer or a backup."><b>历史项目和参数预设</b>：顶栏或文件菜单可打开本机缓存的历史项目；新建时保留上一批。文件 → 参数预设可保存字号、排版、导出参数和 Marker 型号。缓存属于当前浏览器；换电脑或留备份请保存 .blotfig 文件。</li>

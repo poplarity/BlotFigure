@@ -46,11 +46,18 @@
     { name: 'saturated wide bands nearly touching', o: { W: 300, P: 44, x0: 40, bw: 40, bh: 20, lanes: [0, 1, 2, 3, 4, 5], amp: 1.2 }, P0: 44, want: 6 },
     { name: 'tall box, band in its upper part', o: { W: 300, H: 260, P: 44, x0: 40, bw: 28, bh: 14, lanes: [0, 1, 2, 3, 4, 5] }, P0: 44, want: 6 }
   ];
+  cases.push(
+    { name:'fixed 6 ignores wrong membrane pitch', o:{W:300,P:44,x0:40,bw:28,bh:14,lanes:[0,1,2,3,4,5]},P0:22,count:6,want:6 },
+    { name:'fixed 6 includes a missing last lane', o:{W:300,P:44,x0:40,bw:28,bh:14,lanes:[0,2,4]},P0:80,count:6,want:6 },
+    { name:'fixed 5 with wide blank margins', o:{W:520,P:44,x0:150,bw:28,bh:14,lanes:[0,1,2,3,4]},P0:90,count:5,want:5 },
+    { name:'fixed 6 handles lobed bands', o:{W:300,P:44,x0:40,bw:32,bh:14,lanes:[0,1,2,3,4,5],twoLobe:true},P0:22,count:6,want:6 },
+    { name:'fixed 6 faint unequal bands', o:{W:300,P:44,x0:40,bw:28,bh:14,lanes:[0,1,2,3,4,5],amps:[.8,.04,.06,.05,.07,.04]},P0:25,count:6,want:6 }
+  );
   const out = [];
   let fails = 0;
   cases.forEach(c => {
     const img = box(c.o), F = WB.frame(img.w / 2, img.h / 2, 0);
-    const r = WB.detectBoxLanes(img, F, -img.w / 2, img.w / 2, -img.h / 2, img.h / 2, { pitch: c.P0 });
+    const r = WB.detectBoxLanes(img, F, -img.w / 2, img.w / 2, -img.h / 2, img.h / 2, { pitch: c.P0, count:c.count });
     const xs = r.lanes.map(u => Math.round(u + img.w / 2));
     // where the lanes should be: first..last band slot (empty slots between included)
     const ok = c.atMost != null ? xs.length <= c.atMost : xs.length === c.want &&
@@ -58,6 +65,11 @@
     if (!ok) fails++;
     out.push(`${ok ? 'ok  ' : 'FAIL'} ${c.name}: ${xs.length} lanes (want ${c.atMost != null ? '≤' + c.atMost : c.want}) p=${r.pitch.toFixed(1)} at ${xs.join(',')}`);
   });
+  for(const count of [1,6,60]) {
+    const img={w:300,h:100,data:new Float32Array(300*100)}, r=WB.detectBoxLanes(img,WB.frame(150,50,0),-150,150,-50,50,{count});
+    const ok=r.lanes.length===count&&r.lanes.every(Number.isFinite)&&!r.confident;
+    if(!ok)fails++;out.push(`${ok?'ok  ':'FAIL'} fixed ${count} blank fallback`);
+  }
   document.getElementById('out').textContent = out.join('\n');
   window.__done = true;      // (tests/run.mjs waits for it)
   document.title = 'BOX ' + JSON.stringify({ fails, out });
