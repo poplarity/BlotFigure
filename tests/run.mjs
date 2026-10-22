@@ -14,6 +14,7 @@ import { chromium, firefox, webkit } from 'playwright';
 import { execFileSync } from 'node:child_process';
 import { startupChecks } from './startup.mjs';
 import { uiChecks } from './ui.mjs';
+import { usabilityChecks } from './usability.mjs';
 import { layoutChecks } from './layout.mjs';
 import { workflowChecks } from './workflow.mjs';
 
@@ -49,6 +50,8 @@ async function runIn(name, base) {
   const add = list => { out.results.push(...list); if (list.some(r => r[0] === 'FAIL')) out.ok = false; };
   const browser = await ENGINES[name].launch(channel && name === 'chromium' ? { channel } : {});
   try {
+    if (arg('suite') === 'ui') { add(await uiChecks(browser, base)); return out; }
+    if (arg('suite') === 'usability') { add(await usabilityChecks(browser, base)); return out; }
     if (arg('suite') === 'layout') { add(await layoutChecks(browser, base)); return out; }
     if (arg('suite') === 'workflow') { add(await workflowChecks(browser, base)); return out; }
     add(await startupChecks(browser, base, ROOT));
@@ -77,6 +80,7 @@ async function runIn(name, base) {
     add(await uiChecks(browser, base));
     add(await workflowChecks(browser, base));
     add(await layoutChecks(browser, base));
+    add(await usabilityChecks(browser, base));
     // privacy: the Content Security Policy must stop every request to another origin
     {
       const c2 = await browser.newContext(), page = await c2.newPage();

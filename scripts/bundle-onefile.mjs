@@ -17,7 +17,7 @@ for (const f of cssFiles) style += `/* css/${f} */\n` + read(path.join(root, 'cs
 html = html.replace(/<link rel="stylesheet" href="css\/[^"]+"\s*\/?>/g, () => `<style>\n${style}\n</style>`);
 
 // inline scripts; the order must match index.html exactly
-for (const f of ['storage', 'i18n', 'tiff', 'engine', 'export', 'wbladders', 'wbengine', 'wbdemo', 'wbapp', 'wbrender', 'wbview', 'wbui']) {
+for (const f of ['storage', 'i18n', 'tiff', 'engine', 'export', 'wbladders', 'wbengine', 'wbdemo', 'wbapp', 'wblibrary', 'wbrender', 'wbview', 'wbui', 'wbextras']) {
   // "</script" inside a string would end the inline element early
   const code = read(path.join(root, 'js', f + '.js')).replace(/<\/script/gi, '<\\/script');
   const tag = new RegExp(`<script src="js/${f}\\.js"><\\/script>`, 'g');

@@ -4,7 +4,7 @@
 
 **Turn the raw pictures of a Western blot experiment into a publication-ready figure — in your browser, offline.**
 
-[**Download the single HTML file**](https://github.com/poplarity/BlotFigure/releases/download/v0.9.0/BlotFigure-v0.9.0.html) · [Use online](https://poplarity.github.io/BlotFigure/) · [中文说明](README.zh-CN.md)
+[**Download the single HTML file**](https://github.com/poplarity/BlotFigure/releases/download/v0.10.0/BlotFigure-v0.10.0.html) · [Use online](https://poplarity.github.io/BlotFigure/) · [中文说明](README.zh-CN.md)
 
 [![CI](https://github.com/poplarity/BlotFigure/actions/workflows/ci.yml/badge.svg)](https://github.com/poplarity/BlotFigure/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -17,13 +17,13 @@
 
 **Download one file, open it in your browser, and start making your figure. No installation, ZIP extraction or GitHub account is needed.**
 
-1. **[Download BlotFigure-v0.9.0.html](https://github.com/poplarity/BlotFigure/releases/download/v0.9.0/BlotFigure-v0.9.0.html)** (about 700 KB). Save it to your Desktop or Downloads folder.
+1. **[Download BlotFigure-v0.10.0.html](https://github.com/poplarity/BlotFigure/releases/download/v0.10.0/BlotFigure-v0.10.0.html)** (about 750 KB). Save it to your Desktop or Downloads folder.
 2. **Double-click the downloaded file.** It opens in your browser. If a text editor opens instead, right-click → **Open with** → Firefox, Chrome, Edge or Safari.
 3. **Drop in all pictures of one experiment**: every exposure of each membrane plus a picture that shows the marker (the white-light picture, or white light merged with chemiluminescence). Then follow the 5 steps on the left and choose **Export PNG**.
 
 That one HTML file is the complete tool. Keep it on your computer or send the same file to a colleague. Once downloaded, it works without an internet connection.
 
-**Get the right file:** choose the release attachment named **BlotFigure-v0.9.0.html**, not the repository's **index.html**, **Source code (zip)** or **Source code (tar.gz)**. If you reach the [release page](https://github.com/poplarity/BlotFigure/releases/latest), expand **Assets** and click the file ending in **.html**.
+**Get the right file:** choose the release attachment named **BlotFigure-v0.10.0.html**, not the repository's **index.html**, **Source code (zip)** or **Source code (tar.gz)**. If you reach the [release page](https://github.com/poplarity/BlotFigure/releases/latest), expand **Assets** and click the file ending in **.html**.
 
 **Keep your work:** use **File → Save project** (Ctrl+S) before closing. Your **.blotfig** file contains all the pictures and every adjustment; reopen it in BlotFigure to continue, on any computer.
 
@@ -36,6 +36,8 @@ Need help? See [the download and opening guide](docs/getting-started.md) or pres
 Drop in everything the imager saved for one experiment. BlotFigure tells exposures from marker pictures, groups the pictures by membrane (also when the membrane was moved between captures), finds the strips of a cut membrane and their tilt, makes one box per protein, picks the best exposure for every row (no saturation, enough signal), and lays the rows out as one figure with lane names, molecular-weight ticks and protein names. You confirm each step, mark the ladder bands with a few clicks and type the names. Everything happens in the browser; **nothing is uploaded, nothing is installed**.
 
 <p align="center"><img src="docs/example-figure.png" alt="Example output" width="520"></p>
+
+<img src="docs/gallery-en.png" alt="Photo browser: grouped pictures in the centre and a large inspection view" width="900">
 
 ## Contents
 
@@ -56,6 +58,9 @@ Drop in everything the imager saved for one experiment. BlotFigure tells exposur
 
 ## Features
 
+- **Photo workspace**: step 1 puts grouped thumbnails in the centre and a zoomable picture on the right, with direct marker/exposure controls and multi-select drag between groups.
+- **Local history and presets**: new experiments keep previous projects in a browser-local library. Fonts, layout, export options and marker models can be saved as named presets. Save a `.blotfig` file for another computer or a durable backup.
+- **Custom markers**: paste sizes, or import TXT/CSV/JSON; check a preview and save. Custom definitions travel with project files.
 - **A whole experiment at once**: all exposures of all membranes and their white-light pictures in one drop; each picture is sorted by kind (exposure / marker picture) and by membrane.
 - **Cut and tilted membranes**: the strips of a cut membrane are found on the marker picture with their own angle; boxes level themselves along their bands and can be turned by hand to a tenth of a degree.
 - **Membranes moved between captures** (substrate added, strips lifted and put back) are recognised as one membrane and aligned, as a whole or strip by strip, and can be adjusted by hand.
@@ -65,16 +70,16 @@ Drop in everything the imager saved for one experiment. BlotFigure tells exposur
 - **Optional columns in one WB figure**: each column has its own title (top or bottom), lane names, range and conditions. Move a region across by dragging or its ⋯ menu; exposure and levels remain independent. Top alignment by default, optional row alignment, adjustable spacing.
 - **Marker by hand, in a few clicks**: choose the ladder once (40 prestained ladders with their reference bands), click the bands you can see. One mark displays a tick; two or more enable size estimates and hints for the remaining bands.
 - **Edit on the figure**: click a lane or protein name and type, Enter jumps to the next; group lines, +/− condition rows, target-band arrows with estimated sizes, side brackets for IP / Input groups or (Ub)n smears, `*` / `#` / `†` marks.
-- **Marker display**: set the global font in step 4; click a number on the figure or a protein’s ⋯ menu for a region override and label visibility. Hiding a number keeps its calibration; crowded labels are retained.
+- **Marker display**: one global font for all labels, with short ticks at their actual positions. Overlaps are checked using glyph heights; numbers are never moved into extra columns. Fit the font or hide unneeded numbers without deleting calibration.
 - **Conditions from Excel**: paste tab-separated rows (condition name, then one cell per visible lane), append or replace the current column; blanks and arbitrary time/dose values are preserved. Shift+click a cell to edit text. Side labels support vertical text and straight lines.
 - **Flexible labels**: group labels wrap, shrink or stay on one line; every label can have its own font size; protein names and molecular weights can each go on the left or right.
 - **Pre-flight check before export**: unnamed rows, saturated exposures, tiny fonts, effective resolution below 300 dpi, a figure wider than a double column, with one-click fixes.
-- **Reproducible**: project files with every picture's SHA-256, a processing log, the uncropped originals for the supplement, reusable style files, and an autosaved draft that survives a page reload.
+- **Reproducible**: project files with every picture's SHA-256, a processing log, the uncropped originals for the supplement, reusable style files, and a local history of projects that survives a page reload.
 - **Bilingual interface**: English and Chinese, switchable at any time. Type figure labels in your preferred language.
 
 ## The five steps
 
-The panel on the left opens one step at a time; look, fix what needs fixing, and click **Next**. Finished steps fold to a summary and can be opened again; the top bar always says what to do now.
+Follow the sequence once for a new experiment. Afterwards use each tool’s **Expand / Collapse** button directly; switching tools applies pending strip edits and preserves existing regions, including your deletions. In the protein tool, **Add a protein box** is at the top. Click a box and press **Backspace** to remove just that box; text editing keeps normal keyboard behavior.
 
 1. **Marker picture** — each membrane needs one picture that shows the marker. The guess is marked ★; if it is wrong, click "Use as marker picture" under the right one.
 2. **Strips** — the blue boxes are the strips found on the marker picture. Move, resize, rotate, draw or delete them right on the picture.
@@ -90,13 +95,13 @@ In step 5 choose **Add a layout column**, then drag regions into it or use **⋯
 
 ## Versions
 
-The current version is **0.9.0**: optional columns within one WB figure, independently editable lane labels and conditions, global/per-region Marker fonts, hideable Marker labels that retain calibration, Excel condition tables and vertical side labels. Each region keeps its exposure, levels and crop when moved. See the [changelog](CHANGELOG.md).
+The current version is **0.10.0**: a central photo browser for grouping and inspecting pictures, expandable tools, independent Backspace deletion, direct naming on the figure, custom marker import, one global marker font with fixed short ticks, local project history and parameter presets. iBright composite detection now checks image content before an ambiguous Chemi filename, and the iBright brand no longer counts as a white-light clue. See the [changelog](CHANGELOG.md).
 
 ## Privacy
 
 BlotFigure is a static web page with no backend. Pictures are decoded and processed by JavaScript in your browser, and results are saved by your browser's own download mechanism.
 
-The page carries a [Content Security Policy](index.html) that **forbids it from connecting to any other server** (it may only load its own files), so this is enforced by the browser, not just promised. The only data kept on your computer are preferences, custom ladders and the autosaved draft in the browser's local storage.
+The page carries a [Content Security Policy](index.html) that **forbids it from connecting to any other server** (it may only load its own files), so this is enforced by the browser, not just promised. The only data kept on your computer are preferences, custom ladders and the local project library in IndexedDB.
 
 ## Supported input
 
@@ -124,7 +129,7 @@ Exposures are recognised by their file names (`Chemi`, `ECL`, `_30s`, `2min` …
 - Weak detected rows stay visible. Hide them explicitly if unwanted; hidden rows have a **Show** button and **Show all hidden boxes** restores them together.
 - An excluded internal marker lane produces separate editable source boxes. Their splice gap appears only in that row. **Include middle lanes; restore continuous box** undoes a mistaken exclusion.
 - Set the lane count directly, then drag the two end lane lines. No extra spacing button is needed; automatic detection is still available as a fallback.
-- A single manual marker mark is sufficient to display that tick. Other molecular weights are estimated only after two marks. Crowded ticks use additional label columns instead of disappearing.
+- A single manual marker mark is sufficient to display that tick. Other molecular weights are estimated only after two marks. Crowded ticks stay in one label column; reduce the global font or hide unneeded numbers. No calibration is removed.
 
 ## What is detected automatically
 
@@ -177,7 +182,7 @@ Any other ladder can be added as a custom ladder in step 4. To add a ladder for 
 
 Current Chrome, Edge, Firefox and Safari 16.4+ on Windows, macOS and Linux, with a mouse (there is no phone layout). The test suite runs in Chromium, Firefox and WebKit on every change.
 
-When the downloaded HTML is opened directly from disk, some browsers disable IndexedDB for local files; everything works except the autosaved draft. Use the online version or "Save project" if you need it.
+When the downloaded HTML is opened directly from disk, some browsers disable IndexedDB for local files; the local project library may be unavailable. Use the online version or "Save project" if you need it.
 
 ## Known limitations
 
@@ -202,7 +207,9 @@ js/i18n.js          interface language (L('中文', 'English') pairs)
 js/tiff.js          TIFF decoder                 js/engine.js     shared image helpers (from GelFigure)
 js/wbengine.js      blot analysis: kinds, membranes, strips, rows, lanes, ladder fit, exposures, registration
 js/wbladders.js     prestained ladder library    js/wbdemo.js     synthetic demo membranes
-js/wbapp.js         state, undo, projects, drafts, alignment, rows and boxes, checks, processing log
+js/wbapp.js         state, undo, projects, alignment, rows and boxes, checks, processing log
+js/wblibrary.js     cached projects and parameter presets
+js/wbextras.js      history/preset dialogs, marker import and photo browser
 js/wbrender.js      figure layout (SVG)          js/export.js     PNG / TIFF / SVG export
 js/wbview.js        the membrane view            js/wbui.js       steps panel, editing on the figure
 test/*.html         engine self-tests on synthetic membranes

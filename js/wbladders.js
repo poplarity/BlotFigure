@@ -56,12 +56,30 @@
   ];
   const KEY = 'blotfig.customLadders';
   function loadCustom() { try { return JSON.parse(G.PrefStorage.getItem(KEY) || '[]'); } catch (e) { return []; } }
-  function saveCustom(name, sizes) {
-    const list = loadCustom().filter(l => l.name !== name);
-    const lad = { id: 'c_' + Date.now(), name, sizes: sizes.slice().sort((a, b) => b - a), ref: [], custom: true, vendor: 'Custom' };
-    list.push(lad);
-    G.PrefStorage.setItem(KEY, JSON.stringify(list));
-    return lad;
+  function parseSizes(raw) {
+    const tokens=String(raw).replace(/kda/ig,'').trim().split(/[\s,，;；、]+/).filter(Boolean);
+    if(!tokens.length || tokens.some(t=>!/^\d+(?:\.\d+)?$/.test(t) || +t<=0 || +t>2000)) throw new Error((G.L|| (zh=>zh))('请输入 0–2000 之间的分子量数字，以空格、逗号或换行分隔。','Enter molecular weights between 0 and 2000, separated by spaces, commas or new lines.'));
+    const sizes=[...new Set(tokens.map(Number))].sort((a,b)=>b-a);
+    if(sizes.length>100)throw new Error((G.L|| (zh=>zh))('最多支持 100 条刻度','Up to 100 bands are supported'));
+    return sizes;
+  }
+  function saveCustom(name, sizes, options={}) {
+    sizes=parseSizes(sizes.join(' ')); name=String(name||'').trim() || (G.L|| (zh=>zh))('我的 Marker','My marker');
+    const list=loadCustom(), old=list.find(l=>l.name===name && l.sizes.join(',')===sizes.join(',') && (l.ref||[]).join(',')===(options.ref||[]).join(',')), lad={id:options.id||old?.id||'c_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),name,sizes,ref:(options.ref||[]).filter(k=>sizes.includes(k)),custom:true,vendor:'Custom'};
+    G.PrefStorage.setItem(KEY,JSON.stringify([...list.filter(l=>l.id!==lad.id),lad]));return lad;
+  }
+  function importDefinitions(definitions) {
+    for(const l of definitions) { if(l?.custom && l.id && Array.isArray(l.sizes)) saveCustom(l.name,l.sizes,{id:l.id,ref:l.ref}); }
+  }
+  function parseImport(raw, filename='') {
+    const txt=String(raw).trim();
+    if(txt.startsWith('{')||txt.startsWith('[')) {
+      const data=JSON.parse(txt), items=Array.isArray(data)?data:(data.ladders||[data]);
+      return items.map(l=>({name:l.name||filename.replace(/\.[^.]+$/,''),sizes:parseSizes((l.sizes||[]).join(' ')),ref:l.ref||[]}));
+    }
+    const lines=txt.split(/\r?\n/), header=lines[0].split(/[,;\t]/), sizeCol=header.findIndex(x=>/^(kda|size|sizes|分子量)$/i.test(x.trim()));
+    const numbers=sizeCol>=0 ? lines.slice(1).filter(x=>x.trim()).map(x=>x.split(/[,;\t]/)[sizeCol]||'').join(' ') : txt;
+    return [{name:filename.replace(/\.[^.]+$/,''),sizes:parseSizes(numbers),ref:[]}];
   }
   const all = () => L.concat(loadCustom());
   const get = id => all().find(l => l.id === id);
@@ -85,5 +103,5 @@
   }
   const LOADING_RE = /gapdh|actin|tubulin|vinculin|lamin|histone|h3\b|hsp90|pcna|cofilin|total protein|ponceau|内参/i;
 
-  G.ProteinLadders = { all, get, groups, label, saveCustom, suggest, LOADING_RE };
+  G.ProteinLadders = { all, get, groups, label, saveCustom, parseSizes, parseImport, importDefinitions, suggest, LOADING_RE };
 })(window);

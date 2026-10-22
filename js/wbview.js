@@ -720,7 +720,7 @@
   // keys only when the image area has focus: a selected lane moves / goes; else the selected box's lanes
   // move together (Alt: their spacing), ↑↓ moves the row, Delete removes it
   box.addEventListener('keydown', e => {
-    if (e.target !== box || !App.S) return;
+    if (e.target !== box || !App.S || e.isComposing || e.keyCode === 229 || e.defaultPrevented || e.repeat) return;
     if (App.mode === 'align' && aligning(curImage())) {
       const rec = curImage(), k = e.key, big = e.shiftKey;
       const dir = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[k];
@@ -753,6 +753,7 @@
     }
     const row = App.selRow && App.row(App.selRow), sg = App.curSeg(row), st = e.shiftKey ? 5 : 1;
     if (!row || !sg) return;
+    if(e.key==='Backspace') {e.preventDefault();if(App.deleteBox(row,sg))G.UI.toast(L('已删除选中的蛋白框（Ctrl+Z 可撤销）','Selected box deleted (Ctrl+Z to undo)'));return;}
     if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) return;     // Alt+↑↓ reorders the figure (wbui)
     // [ ] turn the box 0.1° (Shift: 1°)
     if (e.key === '[' || e.key === ']' || e.key === '{' || e.key === '}') {
@@ -776,7 +777,7 @@
       row.segs.forEach(t => { t.vc += dv; t.b0 -= dv; t.b1 -= dv; App.findBand(row, t); });
       App.commit(); e.preventDefault();
     }
-    if (e.key === 'Delete') { App.S.rows = App.S.rows.filter(r => r !== row); App.selRow = null; App.selLane = null; App.commit(); G.UI.toast(L('已删除该行（Ctrl+Z 可撤销）', 'Row deleted (Ctrl+Z to undo)')); e.preventDefault(); }
+    if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); if (App.deleteBox(row, sg)) G.UI.toast(L('已删除选中的蛋白框（Ctrl+Z 可撤销）', 'Selected protein box deleted (Ctrl+Z to undo)')); }
   });
 
   // screen positions (canvas px) of a row's box handles and of its lanes at mid-height (tests)
@@ -801,5 +802,5 @@
   // the pieces being edited: their middles and handles on screen (tests)
   const probePieces = () => (pedit ? pedit.pcs.map(pc => ({ id: pc.id, letter: pc.letter, c: toScr(pc.cx, pc.cy), angle: pc.angle, w: pc.w, h: pc.h, handles: pc.id === pedit.sel ? Object.fromEntries(pieceHandles(pc).map(hd => [hd.k, [hd.x, hd.y]])) : null })) : null);
   G.View = { draw, fitFull, fitRow, fitPiece, resize, curImage, dispCanvas, probe, probeMarks, probePieces, scrOf, toScr, probeScale: () => view.s, hitAt: hitTest, alignStart, alignEnd,
-    alignLive: () => align && Object.assign({}, align.T), piecesStart, piecesEnd, piecesSel: () => pedit && pedit.pcs.find(p => p.id === pedit.sel) };
+    alignLive: () => align && Object.assign({}, align.T), piecesStart, piecesEnd, piecesDirty: () => !!pedit?.changed, piecesSel: () => pedit && pedit.pcs.find(p => p.id === pedit.sel) };
 })(window);

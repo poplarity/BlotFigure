@@ -171,3 +171,13 @@ msedge --headless=new --disable-gpu --user-data-dir=$env:TEMP\wb_dbg --allow-fil
 - 校准点有稳定的 `mark.id`；区域的 `hiddenMarkers` 只控制显示，`markerPt` 只覆盖该区域字号。隐藏数字不影响 `pieceCal()`。引线绘制在所有文字背后，不拦截文字点击。恢复隐藏数字的入口始终在区域名称旁 ⋯。
 - 跨列括号暂不渲染，但保留数据、提示及删除按钮；移回原列即可恢复。条件 TSV 只写当前列，明确追加或替换，空格不丢失，超出可见泳道的值拒绝导入。
 - `node tests/run.mjs --suite=layout` 覆盖跨列真实拖动、像素不变、输入法、条件表、Marker 校准保留、括号、项目/样式/旧格式、多列 PNG/原图/CSV。WebKit 的 text-only SVG quad 在嵌套变换下有坐标差异；点击测试使用带背景的标签组，与用户实际点击区域相同。
+
+
+## 0.10.0：工作区与本地项目库
+
+- `wblibrary.js` 在 wbapp 后加载，接管 `saveDraft / restoreDraft` 兼容接口。IndexedDB 仍用原来的 drafts store；`project:<id>` 存每个项目的状态，`img:<sha256>` 存共享原图，meta 记录最近项目。保存先捕获状态再入队，写图像与元数据使用同一事务；失败回滚，不清空历史。旧 meta 草稿迁移为独立项目。
+- `wbextras.js` 在 wbui 后加载，提供历史、参数预设、自定义 Marker 导入和相册。相册复用原 `#blotList` 的多选、拖放控件，移动到中间区域；右侧以原图显示画布浏览，不生成蛋白框。
+- `boxesReady` 区分“尚未识别”和“用户已清空框”：返回旧步骤不重新生成删除的区域；主动重新识别仍可生成。`deleteBox` 只移除指定 sg；同一条膜上的其他区域保持原设置。
+- Marker 只读取 style.markerPt；旧行级覆盖在 commit 时移除。刻度与文字锚点固定，测量真实数字字形判断重叠；不移动数字以隐藏重叠。
+- 自定义 Marker 随项目头/缓存保存；同名但不同条带表采用新 id，避免修改旧项目引用的型号。
+- `node tests/run.mjs --suite=usability` 测新交互、照片浏览、全局字号、Marker 导入、参数预设、多项目缓存、旧草稿迁移和配额故障。`--suite=ui` 单独运行界面/导出回归。用户原图只在本地临时目录测试，不提交到仓库或文档。

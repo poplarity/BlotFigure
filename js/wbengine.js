@@ -139,16 +139,16 @@
     return u.startsWith('ms') ? v / 1000 : u.startsWith('m') ? v * 60 : v;
   }
   // (a white-light picture, or white light and chemiluminescence in one — a composite, merge or overlay)
-  const isMarkerName = n => /marker|white|light|colou?r|ladder|visible|epi|trans|rgb|bright|merge|overlay|composite|combin|白光|复合|叠加|合并/i.test(n);
+  const isMarkerName = n => /(?:^|[\s_.()\-])(?:marker|white(?:light)?|light|colou?r|ladder|visible|epi|trans|rgb|bright|merge|overlay|composite|combined)(?=$|[\s_.()\-]|\d)|白光|复合|叠加|合并/i.test(n);
   const isChemiName = n => /chemi|ecl|lumi|signal|exposure|曝光/i.test(n);
 
-  /* classify: 'marker' (white-light photo of the membrane) or 'chemi'. RGB photos are markers.
+  /* classify: 'marker' (white-light photo of the membrane) or 'chemi'. RGB alone does not identify a marker (iBright exports both roles as RGB).
    * A marker photo has large bright membrane areas on a darker tray: strong large-scale structure. */
   function classify(img, meta) {
     const name = (meta && meta.name) || '';
     if (/merge|overlay|composite|combin|复合|叠加|合并/i.test(name)) return 'marker';      // (chemiluminescence over white light: the marker shows)
-    if (isMarkerName(name) && !isChemiName(name)) return 'marker';
-    if (isChemiName(name)) return 'chemi';
+    if (isMarkerName(name.replace(/ibright/ig,'')) && !isChemiName(name)) return 'marker';
+    // Export names often still say Chemi for an overlay; inspect its membrane/background first.
     // A white-light photo shows the whole membrane: a large mid/bright area on a dark tray.
     // Chemi images are mostly background: nearly all dark (raw) or nearly all white (inverted export,
     // as iBright does), even for long exposures with a glowing membrane.

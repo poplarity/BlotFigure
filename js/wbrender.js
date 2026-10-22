@@ -155,8 +155,8 @@
         inside.filter(t => !(row.hiddenMarkers || []).includes(t.id)).forEach(t => {
           const yy = y + (t.v - sg.vc + row.above) * sc;
           if (ticksOut.some(o => o.row === row.id && o.k === t.k && Math.abs(o.y - yy) < 0.6)) return;
-          ticksOut.push({ id: t.id, k: t.k, pt: row.markerPt || mp, y: yy, row: row.id, box: App.boxId(sg) });
-          tickLabW = Math.max(tickLabW, measure(String(t.k), row.markerPt || mp));
+          ticksOut.push({ id: t.id, k: t.k, pt: mp, y: yy, row: row.id, box: App.boxId(sg) });
+          tickLabW = Math.max(tickLabW, measure(String(t.k), mp));
         });
         if (all.length && !inside.length) warnings.push(L(`框 ${App.boxLabel(sg)} 内没有已标的 Marker 刻度；可扩大框的上下范围或在附近补标。`,
           `Box ${App.boxLabel(sg)} has no marked ticks within its crop; enlarge its vertical range or mark a nearby band.`));
@@ -166,21 +166,24 @@
     });
     const H = y;
     // beside the bands, outwards: the kDa scale, the target-band arrows, the names (each on its own side)
-    // Use another label column for close ticks instead of silently dropping a manual annotation.
-    const tracks = [-Infinity], stride = tickLabW + mp * 0.7;
+    // Fixed short ticks and a single aligned label column. Calibration positions never move.
+    let previous = null, markerFit = mp;
     ticksOut.sort((a,b) => a.y-b.y).forEach(t => {
-      let track = 0; while (tracks[track] != null && t.y - t.pt * 0.7 < tracks[track] + 1) track++;
-      tracks[track] = t.y + t.pt * 0.55;
-      const d = st.tickLenPt + 2.5 + track * stride, tx = mwRight ? W + d : -d;
-      // Leaders sit behind all labels: a crowded tick must never draw through (or steal clicks from) a number.
-      els.unshift(line(mwRight ? W + 1 : -d + 1, t.y, mwRight ? W + d - 1 : -1, t.y, lw).replace('/>', ' pointer-events="none"/>'));
-      const tw = measure(String(t.k), t.pt);
-      const mark = `<rect x="${f(mwRight ? tx - 0.5 : tx - tw - 0.5)}" y="${f(t.y - t.pt * 0.7)}" width="${f(tw + 1)}" height="${f(t.pt * 1.25)}" fill="#fff"/>`
-        + text(String(t.k), tx, t.y + t.pt * 0.35, t.pt, mwRight ? 'start' : 'end');
+      mctx.font = `${mp * 4}px Arial`;
+      const metric = mctx.measureText(String(t.k)), asc = (metric.actualBoundingBoxAscent || mp * 2.8) / 4;
+      const desc = (metric.actualBoundingBoxDescent || 0) / 4, height = asc + desc, margin = 0.3;
+      const crowded = previous && t.y - previous.y < (height + previous.height) / 2 + margin;
+      if (previous) markerFit = Math.min(markerFit, mp * Math.max(0, t.y - previous.y - margin) / Math.max(0.1, (height + previous.height) / 2));
+      if (crowded) overlap(L('Marker 数字确实重叠：可统一缩小字号、加大行距，或点数字隐藏不需要的刻度。', 'Marker numbers overlap: reduce the global font, increase the row gap, or click a number to hide an unneeded tick.'));
+      const d = st.tickLenPt + 2.5, tx = mwRight ? W + d : -d, tw = measure(String(t.k), mp);
+      const mark = line(mwRight ? W + 1 : -d + 1, t.y, mwRight ? W + d - 1 : -1, t.y, lw)
+        + `<rect x="${f(mwRight ? tx - .5 : tx - tw - .5)}" y="${f(t.y - height / 2 - .3)}" width="${f(tw + 1)}" height="${f(height + .6)}" fill="${P && crowded ? '#fff2d8' : '#fff'}"/>`
+        + text(String(t.k), tx, t.y + (asc - desc) / 2, mp, mwRight ? 'start' : 'end');
       els.push(`<g data-marker-box="${t.box}" data-marker-size="${t.k}">${ed(`data-edit="marker" data-row="${t.row}" data-mark="${t.id}"`, mark)}</g>`);
-      grow(mwRight ? W : tx - tickLabW, t.y - t.pt * 0.7, mwRight ? tx + tickLabW : 0, t.y + t.pt * 0.55);
+      grow(mwRight ? W : tx - tickLabW, t.y - height / 2, mwRight ? tx + tickLabW : 0, t.y + height / 2);
+      previous = { y: t.y, height };
     });
-    const scaleW = ticksOut.length ? st.tickLenPt + 2.5 + tickLabW + (tracks.length - 1) * stride : 0;
+    const scaleW = ticksOut.length ? st.tickLenPt + 2.5 + tickLabW : 0;
     if (mwRight) maxRight = scaleW; else maxLeft = scaleW;
     const scaleOn = right => (right === mwRight && scaleW ? scaleW + 2 : 0), arrowW = { left: 0, right: 0 };
     arrowsOut.forEach(t => {
@@ -364,7 +367,7 @@
     const m = 2, vx = box.x0 - m, vy = box.y0 - m, vw = box.x1 - box.x0 + 2 * m, vh = box.y1 - box.y0 + 2 * m;
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${f(vw / MM)}mm" height="${f(vh / MM)}mm" viewBox="${f(vx)} ${f(vy)} ${f(vw)} ${f(vh)}" font-family="Arial, Helvetica, sans-serif" fill="#000">` +
       `<rect x="${f(vx)}" y="${f(vy)}" width="${f(vw)}" height="${f(vh)}" fill="#fff"/>` + els.join('') + '</svg>';
-    return { svg, content: els.join(''), vx, vy, w: vw, h: vh, warnings, overlaps, angle, rowBoxes, laneX: X, laneW, figW: W, minPt: usedMin === Infinity ? pt : usedMin };
+    return { svg, content: els.join(''), markerFit, vx, vy, w: vw, h: vh, warnings, overlaps, angle, rowBoxes, laneX: X, laneW, figW: W, minPt: usedMin === Infinity ? pt : usedMin };
   }
 
   // A column is an independent lane grid. Composition changes position only, never image data.
@@ -406,7 +409,7 @@
     const w = x - gap, h = bottom - top;
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${f(w / MM)}mm" height="${f(h / MM)}mm" viewBox="0 ${f(top)} ${f(w)} ${f(h)}" font-family="Arial, Helvetica, sans-serif" fill="#000"><rect x="0" y="${f(top)}" width="${f(w)}" height="${f(h)}" fill="#fff"/>${content.join('')}</svg>`;
     return { svg, w, h, rowBoxes, columnBoxes, laneX: columnBoxes.find(c => c.id === App.activeColumn)?.laneX || new Map(), laneW: App.S.style.mmPerLane * MM, figW: w,
-      warnings: parts.flatMap(o => o.p.warnings), overlaps: parts.flatMap(o => o.p.overlaps), minPt: Math.min(...parts.map(o => o.p.minPt)), angle: parts[0].p.angle };
+      markerFit: Math.min(...parts.map(o => o.p.markerFit ?? Infinity)), warnings: parts.flatMap(o => o.p.warnings), overlaps: parts.flatMap(o => o.p.overlaps), minPt: Math.min(...parts.map(o => o.p.minPt)), angle: parts[0].p.angle };
   }
 
   G.BRender = { build, measure, wrapText };

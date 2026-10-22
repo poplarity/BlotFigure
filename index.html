@@ -16,6 +16,7 @@
   <div class="brand">BlotFigure</div>
   <label class="chip" title="添加更多图片（同一次实验的其他膜或曝光）" data-en-title="Add more pictures (other membranes or exposures of the same experiment)"><span class="chip-dot"></span><span id="imgCount" data-en="Add pictures">添加图片</span>
     <input type="file" id="fileInput" multiple accept=".tif,.tiff,.png,.jpg,.jpeg,.bmp" hidden></label>
+  <button class="cache-status" id="cacheStatus" data-en="Recent projects" title="历史项目">历史项目</button>
   <div class="coach" id="coach"><span class="coach-dot"></span><span id="coachText" data-en="Drop all pictures of one experiment into the window: every exposure + a picture that shows the marker (white light or merged)">把一次实验的全部图片拖进窗口：各个曝光 + 看得见 Marker 的图（白光或复合图）</span></div>
   <div class="topbar-right">
     <button class="icon-btn" id="btnUndo" title="撤销 (Ctrl+Z)" data-en-title="Undo (Ctrl+Z)">↺</button>
@@ -27,6 +28,8 @@
         <label><span data-en="Open project…">打开项目…</span><small data-en=".blotfig project file (all pictures and annotations)">.blotfig 项目文件（含全部图片和标注）</small><input type="file" id="projInput" accept=".blotfig" hidden></label>
         <button id="btnSaveProj"><span data-en="Save project…">保存项目…</span><small data-en="All pictures + boxes, names, marker ticks and layout; continue on any computer (Ctrl+S)">全部图片 + 框、名字、Marker 刻度和版式，换电脑也能接着做（Ctrl+S）</small></button>
         <div class="menu-sep"></div>
+        <button id="btnHistory" data-en="Recent projects">历史项目</button>
+        <button id="btnPresets" data-en="Parameter presets">参数预设</button>
         <button id="btnSaveTpl"><span data-en="Save style…">保存样式…</span><small data-en="Lane names, groups, condition rows, protein order, ladder, layout: reuse for the next figure of the series">泳道名、分组、条件行、蛋白名顺序、Marker 型号、版式：下一张同类的图一键套用</small></button>
         <label><span data-en="Apply style…">载入样式…</span><small data-en="Apply a saved style to this figure">把保存的样式套到这张图上</small><input type="file" id="tplInput" accept=".json" hidden></label>
         <div class="menu-sep"></div>
@@ -63,12 +66,13 @@
       <p data-en-html="Every exposure of each membrane (short / medium / long) together with one picture that shows the marker (a white-light picture, or white light merged with chemiluminescence).<br>Then follow the 5 steps on the left: marker picture → strips → protein boxes → marker → names and export.">每张膜的各次曝光（短 / 中 / 长）和一张看得见 Marker 的图（白光图，或白光 + 化学发光的复合图）一起拖入。<br>然后按左边的 5 步走：确认 Marker 图 → 检查膜条 → 调整蛋白框 → 标 Marker → 填名称导出。</p>
       <label class="btn primary big"><span data-en="Choose pictures (several at once)">选择图片（可多选）</span><input type="file" id="fileInput2" multiple accept=".tif,.tiff,.png,.jpg,.jpeg,.bmp" hidden></label>
       <button class="btn big" id="btnDemo" title="3 次曝光的切开的膜 + 另一张斜放的膜" data-en-title="A membrane cut into strips, 3 exposures + another membrane lying askew" data-en="Try the example">看看示例</button>
+      <button class="btn big" id="btnHistoryStart" data-en="Open a recent project">打开历史项目</button>
       <div id="draftBox" class="draft hidden">
-        <div><span data-en="Unfinished figure from last time:">上次有未完成的图：</span><b id="draftName"></b><br><span class="muted small" id="draftTime"></span></div>
+        <div><span data-en="Your most recent project:">最近一次的项目：</span><b id="draftName"></b><br><span class="muted small" id="draftTime"></span></div>
         <div class="inline"><button class="btn sm primary" id="btnDraftRestore" data-en="Restore">恢复</button><button class="btn sm ghost" id="btnDraftDrop" data-en="Discard">丢弃</button></div>
       </div>
       <p class="privacy" data-en-html="Pictures are processed only in this browser and never uploaded.<br>A saved project: File → Open project (top right).">图片只在本机浏览器处理，不会上传。<br>保存过的项目：右上角"文件 → 打开项目"。</p>
-      <p class="hint" id="offlineDownload"><a href="https://github.com/poplarity/BlotFigure/releases/download/v0.9.0/BlotFigure-v0.9.0.html" data-en="Download for offline use: one HTML file">下载离线版：只需一个 HTML 文件</a><br><span data-en="Save it to your computer, then open it in your browser. No installation or extraction.">保存到电脑，用浏览器打开；不用安装、不用解压。</span></p>
+      <p class="hint" id="offlineDownload"><a href="https://github.com/poplarity/BlotFigure/releases/download/v0.10.0/BlotFigure-v0.10.0.html" data-en="Download for offline use: one HTML file">下载离线版：只需一个 HTML 文件</a><br><span data-en="Save it to your computer, then open it in your browser. No installation or extraction.">保存到电脑，用浏览器打开；不用安装、不用解压。</span></p>
       <p class="hint storage-note hidden" data-en="Browser storage is unavailable. You can still edit and export; preferences and custom ladders stay in this tab only and there is no autosaved draft. Save a project before closing.">浏览器存储不可用，仍可编辑和导出；偏好与自定义 Marker 仅在本页暂存，也没有自动草稿。关闭前请保存项目。</p>
     </div>
 
@@ -80,7 +84,7 @@
         <div class="sec-head"><span class="sec-n">1</span><span data-en="Marker picture">确认 Marker 图</span><span class="sec-status" id="stBlots"></span></div>
         <div class="step-sum" id="sum1"></div>
         <div class="step-body">
-          <p class="lead" data-en-html="Each membrane needs one <b>picture that shows the marker</b>: a white-light picture, or white light merged with chemiluminescence. It is used to find the strips and to mark molecular weights. The one marked <span class=&quot;mk-star&quot;>★ Marker picture</span> is the guess; if it is wrong, click <b>&quot;Use as marker picture&quot;</b> under the right one. The others are taken as exposures.">每张膜要有一张<b>看得见 Marker 的图</b>：白光图，或白光 + 化学发光的复合图。后面靠它找膜条、标分子量。标着 <span class="mk-star">★ Marker 图</span> 的是猜的那张；不对就点对的那张下面的<b>"设为 Marker 图"</b>。其余的当作曝光图。</p>
+          <p class="lead" data-en-html="Browse pictures in the centre, inspect the selected picture on the right. <b>Drag pictures between membrane groups</b>; choose the picture showing the marker, then confirm.">中间浏览所有图片，右侧放大查看。<b>拖动图片调整膜组</b>，选好看得见 Marker 的图后确认即可。</p>
           <div id="blotList"></div>
           <div class="step-next"><button class="btn primary big" id="next1" data-en="Confirm. Next: check the strips →">确认，下一步：检查膜条 →</button></div>
         </div>
@@ -101,9 +105,10 @@
         <div class="sec-head"><span class="sec-n">3</span><span data-en="Protein boxes">调整蛋白框</span><span class="sec-status" id="stRows"></span></div>
         <div class="step-sum" id="sum3"></div>
         <div class="step-body">
+          <div class="add-row"><button class="btn sm" id="btnAddRow" data-en="+ Add a protein box">+ 添加一个蛋白框</button><span class="hint" data-en="Click this button, then click on the membrane to place a box, or drag out any size. Backspace removes the selected box.">先点按钮，再在膜图上点一下放置；也可按住拖出任意大小。选中框后按退格删除。</span></div>
           <p class="lead" data-en-html="Each coloured box is one protein's area in the figure; the figure is on the right. <b>Click a box</b> to select it: drag an edge or corner to resize, drag inside to move, drag the <b>↻</b> above to tilt. If the lane lines are off, drag the <b>leftmost and rightmost</b> onto the lane centres. Click a row below for its exposure, lane count and columns.">每个彩色框是一个蛋白在成图里的范围，右边就是成图。<b>点框</b>选中：拖边、角改大小，拖框内部移动，拖上方的 <b>↻</b> 旋转；泳道线没对准就把<b>最左、最右</b>两条拖到泳道中心。点下面的一行看曝光、泳道数和列。</p>
           <div id="rowList"></div>
-          <div class="add-row"><button class="btn sm" id="btnAddRow" data-en="+ Add a protein box">+ 添加一个蛋白框</button><span class="hint" data-en="Click, then click on the membrane to place it (or drag one out at any size)">点一下，再到膜上点一下放下（或拖出任意大小）</span></div>
+
           <p class="hint"><button class="link" id="btnRedetect" data-en="Detect all again">全部重新识别</button><span data-en=" (finds every protein box again from the strips; the current boxes are dropped)">（按膜条重新找所有蛋白框，丢掉现在的框）</span></p>
           <div class="step-next"><button class="btn primary big" id="next3" data-en="Boxes are done. Next: mark the ladder →">框都调好了，下一步：标 Marker →</button></div>
         </div>
@@ -113,9 +118,10 @@
         <div class="sec-head"><span class="sec-n">4</span><span data-en="Marker (molecular weight)">标 Marker（分子量）</span><span class="sec-status" id="stMarker"></span></div>
         <div class="step-sum" id="sum4"></div>
         <div class="step-body">
+          <button class="btn sm" id="btnCustomMarker" data-en="+ Custom / import marker">＋自定义 / 导入 Marker</button>
           <div id="markerPanel"></div>
-          <div class="field inline"><label class="inline-label"><span data-en="Marker font">Marker 字号</span> <input id="markerFontQuick" type="number" min="4" max="14" step="0.5" class="num"> pt</label></div>
-          <p class="hint" data-en="Click a number on the figure to set a region's font or hide a label; calibration is kept.">点成图上的数字，可单独调整该区域字号或隐藏数字；校准点仍保留。</p>
+          <div class="field inline"><label class="inline-label"><span data-en="Marker font">Marker 字号</span> <input id="markerFontQuick" type="number" min="4" max="14" step="0.5" class="num"> pt</label><button class="btn sm ghost" id="btnMarkerFit" data-en="Fit spacing">适配间距</button></div>
+          <p class="hint" data-en="One font size for every marker label. Click a number to hide it; calibration is kept. Short ticks stay aligned to their bands.">所有 Marker 数字统一字号。点成图数字可隐藏刻度，校准点仍保留；短刻度始终对准条带。</p>
           <div class="step-next"><button class="btn primary big" id="next4" data-en="Done. Next: names →">标好了，下一步：填名称 →</button><button class="btn ghost" id="skip4" title="成图不显示分子量刻度（以后可以在第 4 步补标）" data-en-title="The figure shows no molecular-weight ticks (you can mark them in step 4 later)" data-en="No molecular weights this time">这次不标分子量</button></div>
         </div>
       </section>
@@ -125,11 +131,9 @@
         <div class="step-sum" id="sum5"></div>
         <div class="step-body">
           <div id="columnControls" class="column-controls"></div>
-          <div class="sub-title"><span data-en="Protein names">蛋白名</span> <span class="h3-note" data-en="Enter jumps to the next; or click the grey text on the figure">回车跳下一个；也可以在右侧成图上点灰字</span></div>
-          <div id="nameList"></div>
-          <div class="sub-title" data-en="Lane names">泳道名</div>
-          <p class="lead" data-en-html="<b>Click the grey lane numbers</b> on the figure to type, Enter jumps to the next lane; or paste a whole row at once:">在右侧成图上<b>点灰色泳道号</b>输入，回车跳下一条；或一次粘贴整行：</p>
-          <textarea id="laneBulk" rows="2" placeholder="Ctrl, siA#1, siA#2 …（逗号、Tab、换行均可）" data-en-placeholder="Ctrl, siA#1, siA#2 … (commas, tabs or new lines)"></textarea>
+          <p class="lead" data-en-html="<b>Click names on the figure</b> to type protein or lane names. Enter moves to the next; ⋯ beside a row opens its settings. Drag rows to reorder."><b>直接点右侧成图上的名称</b>填写蛋白名、泳道名，回车继续下一项；行旁 ⋯ 打开区域设置，上下拖动调整顺序。</p>
+          <details class="adv"><summary data-en="Paste lane names in bulk">批量粘贴泳道名</summary>
+          <textarea id="laneBulk" rows="2" placeholder="Ctrl, siA#1, siA#2 …（逗号、Tab、换行均可）" data-en-placeholder="Ctrl, siA#1, siA#2 … (commas, tabs or new lines)"></textarea></details>
           <div class="field inline range-row"><span data-en="Figure uses columns">成图用第</span> <select id="rangeA"></select> – <select id="rangeB"></select> <span data-en="">列</span> <button class="btn sm ghost" id="btnRangeAuto" data-en="Auto">自动</button></div>
           <details class="adv"><summary data-en="Cut single columns">逐列剪除</summary><div id="laneList" class="list"></div>
             <p class="hint" data-en="Untick &quot;Show&quot; to cut that column from the figure: every row in the selected layout column loses it, with a gap left (say so in the legend).">取消"显示" = 从成图剪除这一列，本排版列的所有行同步剪除并留白间隔（图注需说明）。</p></details>
@@ -254,6 +258,7 @@
   <button data-fz="-" title="小一点" data-en-title="Smaller">A−</button><span class="fed-size" id="fedSize"></span><button data-fz="+" title="大一点" data-en-title="Larger">A+</button>
   <button data-fz="reset" id="fedReset" data-en="Default">默认</button>
   <button data-fz="br" id="fedBr" data-en="↵ New line">↵ 换行</button>
+  <button data-fz="delete" id="fedDelete" data-en="Delete annotation">删除标注</button>
   <span class="fed-hint" id="fedHint"></span>
 </div>
 <datalist id="protList"></datalist>
@@ -262,18 +267,21 @@
 
 <div id="helpDlg" class="dlg hidden"><div class="dlg-body">
   <button class="dlg-x" id="btnHelpClose" title="关闭" aria-label="关闭" data-en-title="Close">×</button>
-  <h3 data-en="Follow the 5 steps on the left (click &quot;Next&quot; when a step is right; finished steps can be opened and changed at any time)">按左边的 5 步走（每一步确认后点"下一步"，做完的步骤可以随时点开再改）</h3>
+  <h3 data-en="Follow the steps for a new experiment; later expand any tool directly to continue editing">新实验按顺序确认；之后随时展开各步骤修改，切换时保留进度</h3>
   <ol>
     <li data-en-html="<b>Marker picture</b>: drop all pictures of the experiment at once (every exposure + a picture that shows the marker: a white-light picture, or white light merged with chemiluminescence). Each membrane has one marked &quot;★ Marker picture&quot;; if it is wrong, click &quot;Use as marker picture&quot; under the right one; a wrong kind is changed in the picture's ⋯ menu. How it guesses: the file name first (Marker / White / Merge → marker picture; Chemi / ECL → exposure), otherwise the picture itself: a white-light picture is a large bright membrane on a dark tray."><b>确认 Marker 图</b>：把这次实验所有图片一次拖进来（各次曝光 + 看得见 Marker 的图：白光图，或白光 + 化学发光的复合图）。每张膜有一张标"★ Marker 图"，不对就点对的那张下面的"设为 Marker 图"；类型认错了在图片的 ⋯ 里改。怎么猜的：先看文件名（Marker / White / 白光 / Merge / 复合 → Marker 图；Chemi / ECL / 曝光 → 曝光图），看不出时看图：白光图是一大片亮的膜放在暗的托盘上。</li>
     <li data-en-html="<b>Strips</b>: the blue boxes on the marker picture are the strips found; each should just enclose its strip. Drag a box to move it, an edge or corner to resize, the ↻ above to rotate; drag on empty space for a new one; select one and press Delete to remove it (arrow keys nudge, [ ] turns 0.1°)."><b>检查膜条</b>：Marker 图上的蓝框是找到的膜条，要刚好框住每一条膜。拖动蓝框移动，拖边、角改大小，拖上方的 ↻ 旋转，在空白处拖出一条新的，选中后 Delete 删掉（方向键微调，[ ] 转 0.1°）。</li>
     <li data-en-html="<b>Protein boxes</b>: each protein's bands are found on the strips, one box per protein, and the figure appears on the right. Click a box to select it: drag an edge or corner to resize, drag inside to move (anywhere: the figure shows what the box encloses), drag the ↻ above or press [ ] to fine-tune the tilt (boxes first level themselves to the bands). A protein missing? &quot;+ Add a protein box&quot;, then click on the membrane to place it."><b>调整蛋白框</b>：按膜条找出每个蛋白的条带，每个蛋白一个框，右边出现成图。点框选中：拖边、角改大小，拖框内部移动（可以拖到任何位置，成图里就是框住的部分），拖上方的 ↻ 或按 [ ] 微调倾斜（框会先按条带自动摆正）。缺了蛋白就"+ 添加一个蛋白框"，再到膜上点一下放下。</li>
     <li data-en-html="<b>Marker</b>: choose the ladder you use (it is remembered); its official band chart shows on the right (orange = coloured / brighter reference bands). Click a marker band on the marker picture and pick its size; marks snap onto the band (hold Alt to place freely). One mark displays its tick; two or more allow estimates of other molecular weights; the remaining sizes then show as dashed lines where they are expected, a click adds one."><b>标 Marker</b>：选你用的 Marker 型号（下次自动用它），右边是它的官方条带示意（橙色 = 彩色 / 加粗的参考带）。在 Marker 图上点一条 Marker 带，选它的分子量；会自动吸附到条带上（按住 Alt 不吸附）。只标 1 条也能显示这个刻度；标 2 条以上才估算其他分子量，之后其余大小的位置用虚线提示，点一下就加上。</li>
-    <li data-en-html="<b>Names, lanes and export</b>: type the protein and lane names (on the left, or click the grey text on the figure; Enter jumps to the next), add target-band arrows, conditions, groups or change the layout if needed, then Export PNG (top right); &quot;Uncropped originals&quot; go into the supplement."><b>名称、泳道与导出</b>：填蛋白名和泳道名（左边或右侧成图上点灰字，回车跳下一个），需要的话加目标条带箭头、条件、分组、改版式，然后右上角导出 PNG；"未裁切原图"放补充材料。</li>
+    <li data-en-html="<b>Names, lanes and export</b>: type the protein and lane names (click the text on the figure; Enter jumps to the next), add target-band arrows, conditions, groups or change the layout if needed, then Export PNG (top right); &quot;Uncropped originals&quot; go into the supplement."><b>名称、泳道与导出</b>：填蛋白名和泳道名（右侧成图上点文字，回车跳下一个），需要的话加目标条带箭头、条件、分组、改版式，然后右上角导出 PNG；"未裁切原图"放补充材料。</li>
   </ol>
   <h3 data-en="Common situations">常见情况</h3>
   <ul>
+    <li data-en-html="<b>Photo browser</b>: step 1 shows membrane groups in the centre and a large picture on the right. Select pictures, drag between groups, zoom in, and set a picture as marker or exposure. Confirm when ready; returning to a completed experiment keeps existing boxes."><b>相册浏览</b>：第 1 步在中间整理膜组，右侧放大查看图片。可多选、跨组拖动、缩放，直接设为 Marker 图或曝光图；确认后继续，返回编辑时保留已有框。</li>
+    <li data-en-html="<b>Custom markers</b>: step 4 → Custom / import marker. Paste band sizes from the package, or choose a TXT/CSV/JSON file. Preview the numbers, then Save and use. Custom definitions are also included in saved projects."><b>自定义 Marker</b>：第 4 步点「自定义 / 导入 Marker」，粘贴包装上的条带大小，或选 TXT/CSV/JSON 文件；预览数字后保存并使用。定义也会随项目文件保存。</li>
+    <li data-en-html="<b>Recent projects and presets</b>: the top bar or File menu opens locally cached projects. Starting a new project keeps the previous one. File → Parameter presets saves fonts, layout, export settings and the marker model. Storage is specific to this browser; save a .blotfig file for another computer or a backup."><b>历史项目和参数预设</b>：顶栏或文件菜单可打开本机缓存的历史项目；新建时保留上一批。文件 → 参数预设可保存字号、排版、导出参数和 Marker 型号。缓存属于当前浏览器；换电脑或留备份请保存 .blotfig 文件。</li>
     <li data-en-html="<b>Optional columns in one WB figure</b>: step 5 → Add a layout column. Each has its own lane names, range, conditions and title (top or bottom). Drag a region across to move it, or use its ⋯ menu → Move to column. Exposure and levels stay independent. Column settings controls spacing, row alignment and copying labels. Empty columns are omitted from export."><b>一张 WB 图内分列</b>：第 5 步点「多列排版」，每列分别填泳道、范围、条件和标题（顶端或底端）。把区域拖到另一列，或在名称旁 ⋯ 中选「移到排版列」；曝光、亮度仍各自独立。「列设置」可调间距、按行对齐、复制标签；空列不导出。</li>
-    <li data-en-html="<b>Marker font and visibility</b>: step 4 has a global font control. Click a Marker number on the figure, or ⋯ beside a protein name, to set that region's font and show/hide numbers. Hidden labels retain their calibration; reopen ⋯ to restore them."><b>Marker 字号和显示</b>：第 4 步可设全局字号。点成图的 Marker 数字，或蛋白名旁 ⋯，可单独设该区域字号、隐藏或恢复数字。隐藏数字不删除校准点。</li>
+    <li data-en-html="<b>Marker font and visibility</b>: step 4 has a global font control. Click a Marker number on the figure, or ⋯ beside a protein name, to change the global font or show/hide numbers. Hidden labels retain their calibration; reopen ⋯ to restore them."><b>Marker 字号和显示</b>：第 4 步可设全局字号。点成图的 Marker 数字，或蛋白名旁 ⋯，统一设置所有 Marker 字号、隐藏或恢复数字。隐藏数字不删除校准点。</li>
     <li data-en-html="<b>Conditions and side labels</b>: paste a table copied from Excel in step 5 (first cell is the condition name, then one cell per visible lane; blanks are retained). Append or replace the current column. Shift+click a figure cell to type any value. Side brackets support vertical text and a straight-line style."><b>条件表和侧边标注</b>：第 5 步粘贴从 Excel 复制的表格（第一格条件名，后面对应显示的泳道；保留空格），选追加或替换本列。Shift+点击成图格子可输入任意值。行旁括号支持竖排文字和直线样式。</li>
     <li data-en-html="<b>The size of one band</b> (target band, as in GelFigure): in step 5 under &quot;Annotations&quot; click &quot;Target band&quot;, then the band on the figure: the arrow snaps onto it and its size is estimated from the marker marked in step 4. Click the arrow to add a name (shown as &quot;name (52 kDa)&quot;), type a size yourself, switch to * # † (* often marks a non-specific band), move it to the other side or delete it; drag it up or down onto another band of the row."><b>给某条带标分子量</b>（目标条带，和 GelFigure 一样）：第 5 步"标注"里点"目标条带"，再在右侧成图上点那条带：箭头吸附到条带上，按第 4 步标的 Marker 自动标分子量。点箭头可以加名称（显示成"名称 (52 kDa)"）、换成 * # †（* 常用来标非特异条带）、放到左边或右边、删除。</li>
     <li data-en-html="<b>IP / Input groups, ubiquitin smears</b> (side brackets, as in GelFigure): in step 5 under &quot;Annotations&quot; click &quot;Side bracket&quot; and drag along the rows on the figure: the rows covered form a group (e.g. the two IP: Flag rows, the three Input rows); a stretch within one row marks just that stretch (e.g. a (Ub)n smear); a click on a row covers the whole row. Ends near a row edge snap to it (hold Alt to place freely). Then type the text (↵ for a new line); it can go left or right and have its own size; click the bracket on the figure to change it."><b>IP / Input 分组、泛素化拖尾</b>（行旁括号，和 GelFigure 一样）：第 5 步"标注"里点"行旁括号"，在右侧成图上沿着行上下拖：盖住几行就是一组（如 IP: Flag 的两行、Input 的三行），在一行里拖一段就标出这一段（如 (Ub)n 拖尾）；在一行上点一下 = 盖住整行。两端靠近行边时自动对齐（按住 Alt 不吸附）。松开后输入文字（↵ 换行），可以放左边或右边、单独设字号；点成图上的括号再改。</li>
@@ -298,7 +306,7 @@
     <li data-en="The loading control should be on the same membrane as the target protein; the tool checks and warns.">内参应与目标蛋白在同一张膜上，工具会检查并提示。</li>
     <li data-en="Saturated bands cannot be quantified. Export the uncropped originals for the supplement (the pictures as taken, not aligned or rotated, boxes drawn where the bands really are); legend hints are generated automatically.">过曝条带不可定量；导出未裁切原图作为补充材料（用拍摄的原图，不做对齐或旋转，框画在条带实际所在的位置），图注提示会自动生成。</li>
   </ul>
-  <p class="muted small" data-en="Shortcuts: Ctrl+Z undo · Space+drag or right-drag pan · wheel zoom · with a row selected: ↑↓ move the box, [ ] turn 0.1° (Shift 1°), Alt+↑↓ order in the figure, ←→ shift lanes, Alt+←→ spacing, Delete removes the row · with a lane line selected: ←→ nudge, Delete removes the lane · double-click in a box adds a lane · marking the ladder: ↑↓ nudge the selected tick, Delete removes it · strips: arrow keys move, [ ] rotate, Delete removes · Ctrl+S save project · Esc cancel">快捷键：Ctrl+Z 撤销 · 空格+拖动或右键拖动 平移 · 滚轮 缩放 · 选中行后 ↑↓ 移动框、[ ] 转 0.1°（Shift 1°）、Alt+↑↓ 调整在成图里的上下顺序、←→ 平移泳道、Alt+←→ 调间距、Delete 删除整行 · 选中竖线后 ←→ 微调、Delete 删掉这一道 · 双击框内 加一道 · 标 Marker 时选中刻度后 ↑↓ 微调、Delete 删除 · 调整膜条时选中后方向键移动、[ ] 旋转、Delete 删除 · Ctrl+S 保存项目 · Esc 取消</p>
+  <p class="muted small" data-en="Shortcuts: Ctrl+Z undo · Space+drag or right-drag pan · wheel zoom · with a row selected: ↑↓ move the box, [ ] turn 0.1° (Shift 1°), Alt+↑↓ order in the figure, ←→ shift lanes, Alt+←→ spacing, Backspace removes the selected protein box · with a lane line selected: ←→ nudge, Delete removes the lane · double-click in a box adds a lane · marking the ladder: ↑↓ nudge the selected tick, Delete removes it · strips: arrow keys move, [ ] rotate, Delete removes · Ctrl+S save project · Esc cancel">快捷键：Ctrl+Z 撤销 · 空格+拖动或右键拖动 平移 · 滚轮 缩放 · 选中行后 ↑↓ 移动框、[ ] 转 0.1°（Shift 1°）、Alt+↑↓ 调整在成图里的上下顺序、←→ 平移泳道、Alt+←→ 调间距、退格删除选中的蛋白框 · 选中竖线后 ←→ 微调、Delete 删掉这一道 · 双击框内 加一道 · 标 Marker 时选中刻度后 ↑↓ 微调、Delete 删除 · 调整膜条时选中后方向键移动、[ ] 旋转、Delete 删除 · Ctrl+S 保存项目 · Esc 取消</p>
   <p class="muted small"><button class="link" id="btnTourAgain" data-en="Show the interface tour again">再看一遍界面引导</button> · <a href="https://github.com/poplarity/BlotFigure" target="_blank" rel="noopener" data-en="Source code and issues (GitHub)">源代码与问题反馈（GitHub）</a> · <span id="helpVersion"></span></p>
 </div></div>
 
@@ -331,8 +339,10 @@
 <script src="js/wbengine.js"></script>
 <script src="js/wbdemo.js"></script>
 <script src="js/wbapp.js"></script>
+<script src="js/wblibrary.js"></script>
 <script src="js/wbrender.js"></script>
 <script src="js/wbview.js"></script>
 <script src="js/wbui.js"></script>
+<script src="js/wbextras.js"></script>
 </body>
 </html>

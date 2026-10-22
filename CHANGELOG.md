@@ -4,6 +4,27 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-23
+
+Direct editing, a photo workspace, and persistent local projects.
+
+**中文摘要**
+- 第 1 步改为中间相册分组、右侧大图浏览：放大查看、多选、跨膜组拖动，直接指定复合 Marker 图或曝光图。
+- 各步骤增加展开/收起按钮，返回修改保留已有调整；已删除的框不再因重新检查膜条而生成回来。添加蛋白框置顶，补充放置/拖画引导。
+- 选中蛋白框后按退格只删这个框；同膜其他框不受影响；输入框和中文输入法维持正常行为。泳道仍可用 Delete 单独删除。
+- 去除左侧重复的名称输入和标注编辑，直接在成图填写；行旁 ⋯ 保留隐藏 Marker 和区域设置入口。
+- Marker 字号全局统一，移除逐区域字号；固定短刻度、按实际字形高度判断重叠，不再延长到额外标签列。可统一适配字号或手动隐藏数字，校准保留。
+- 自定义 Marker 可粘贴数字或导入 TXT/CSV/JSON；提供预览和填写示例，定义随项目文件保存。
+- 自动缓存多个历史项目，支持恢复、改名和删除；旧版单草稿无损迁移，共用原图按指纹只存一份，缓存失败不会覆盖上一次完整记录。参数预设可保存、套用与导入导出。
+- 修正 iBright 名称中的 bright 误判，以及 Chemi 文件名抢先覆盖复合图像特征的问题。用户提供的两张 TIFF 在本地导入测试中正确分为 Marker 复合图和曝光图；公开测试只用合成数据。
+
+### Added / changed
+- Central photo browser with zoomable inspection, drag grouping and direct picture-role controls.
+- Expandable tools, box-scoped Backspace deletion, direct figure naming and annotation controls.
+- Uniform marker font, fixed tick lengths, glyph-based overlap warnings and easy custom marker import.
+- Atomic multi-project IndexedDB cache with image deduplication, legacy-draft migration and recoverable quota failures; reusable parameter presets.
+- Composite classification no longer defers to ambiguous iBright/Chemi filenames. Expanded browser regression tests cover these flows and local storage failures.
+
 ## [0.9.0] - 2026-10-22
 
 Lightweight column layout and more direct annotation controls.

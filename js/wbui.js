@@ -11,7 +11,7 @@
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const composing = e => e.isComposing || e.keyCode === 229;
-  const live = fn => e => { if (!S()) return; fn(e); App.refresh(); };
+  const live = fn => e => { if (!S()) return; fn(e); App.refresh(); App.saveDraftSoon(); };
   const done = fn => e => { if (!S()) return; if (fn) fn(e); App.commit(); };
   // the pieces (modules) a row comes from: "B", "A+B"; with several membranes "2·B"
   const modLabel = row => row.segs.map(App.boxLabel).join('+') || '—';
@@ -74,10 +74,11 @@
       $('vmNone').onclick = () => { G.View.alignEnd(); App.setAlign(id, null); App.commit(); G.View.alignStart(id); toast(L('这张图按原样使用（不移动）', 'This picture is used as taken (not moved)')); };
     }
     if (m === 'pieces') {
-      $('vmPcNext').onclick = () => nextStep(2);
+      $('vmPcNext').onclick = () => S().step>2 ? openStep(S().step) : nextStep(2);
+      if(S().step>2)$('vmPcNext').textContent=L('完成，返回成图','Done, return to figure');
       if ($('vmPcAuto')) $('vmPcAuto').onclick = () => { G.View.piecesEnd(false); applyPieces(vb, null, true); };
     }
-    if (m === 'marks') $('vmMkNext').onclick = () => nextStep(4);
+    if (m === 'marks') { $('vmMkNext').onclick = () => S().step>4 ? openStep(5) : nextStep(4); if(S().step>4)$('vmMkNext').textContent=L('完成，返回成图','Done, return to figure'); }
     $('viewModeCancel').classList.toggle('hidden', m === 'pieces' || m === 'marks');
     $('viewModeCancel').textContent = m === 'align' ? L('完成', 'Done') : L('取消 (Esc)', 'Cancel (Esc)');
     $('btnAddRow').classList.toggle('primary', m === 'addrow');
@@ -156,7 +157,7 @@
         `${lw.length} pictures are not 16-bit TIFF and are read as 8-bit: low dynamic range, saturated pixels are hard to tell. If your imager exports 16-bit TIFF, use that`) : lw[0], 6000);
     }
   }
-  ['fileInput', 'fileInput2', 'fileInput3'].forEach(id => $(id).addEventListener('change', e => { $('fileMenu').classList.add('hidden'); addFiles(e.target.files); e.target.value = ''; }));
+  ['fileInput', 'fileInput2', 'fileInput3'].forEach(id => $(id).addEventListener('change', e => { $('fileMenu').classList.add('hidden'); (G.Extras ? G.Extras.importFiles([...e.target.files], true) : addFiles(e.target.files)); e.target.value = ''; }));
   async function loadDemo() {
     App.busy(true, L('生成示例膜图…', 'Making the example blots…'));
     await new Promise(r => setTimeout(r, 30));
@@ -168,7 +169,7 @@
   window.addEventListener('dragenter', e => { if ([...(e.dataTransfer || {}).types || []].includes('Files')) { dragDepth++; document.body.classList.add('dragging'); } });
   window.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) document.body.classList.remove('dragging'); });
   window.addEventListener('dragover', e => e.preventDefault());
-  window.addEventListener('drop', e => { e.preventDefault(); dragDepth = 0; document.body.classList.remove('dragging'); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
+  window.addEventListener('drop', e => { e.preventDefault(); dragDepth = 0; document.body.classList.remove('dragging'); if (e.dataTransfer.files.length) (G.Extras ? G.Extras.importFiles([...e.dataTransfer.files]) : addFiles(e.dataTransfer.files)); });
 
   /* ---------- top bar ---------- */
   $('btnUndo').onclick = () => App.undo();
@@ -201,7 +202,7 @@
     if (!S()) { toast(L('还没有内容可保存', 'Nothing to save yet')); return; }
     App.busy(true, L('保存项目…', 'Saving project…'));
     try {
-      const blob = await App.saveProject();
+      await G.UI.flushPending(); const blob = await App.saveProject();
       G.Export.download(blob, 'blot_project.blotfig');
       App.saved = App.hist[App.hist.length - 1];
       const mb = (blob.size / 1048576).toFixed(1);
@@ -212,13 +213,12 @@
   $('projInput').addEventListener('change', async e => {
     const f = e.target.files[0]; e.target.value = ''; $('fileMenu').classList.add('hidden');
     if (!f) return;
-    if (S() && App.hist[App.hist.length - 1] !== App.saved && !confirm(L('打开项目会替换现在的内容（没保存的改动会丢掉）。继续？',
-      'Opening a project replaces what is open now (unsaved changes are lost). Continue?'))) return;
+    if (G.Extras && !(await G.Extras.archiveCurrent())) return;
     try { const n = await App.openProject(f); toast(L(`已打开项目：${n} 张图片`, `Opened project: ${pl(n, 'picture')}`)); } catch (err) { alert(L('打开失败：', 'Could not open: ') + err.message); }
   });
   window.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveProject(); } });
   // leaving with work not saved as a project: the browser asks first (the draft keeps it too, if it can)
-  window.addEventListener('beforeunload', e => { if (!App.leaving && S() && S().rows.length && App.hist.length > 1 && App.hist[App.hist.length - 1] !== App.saved) { e.preventDefault(); e.returnValue = ''; } });
+  window.addEventListener('beforeunload', e => { if (!App.leaving && S() && (G.View.piecesDirty() || (S().rows.length && App.hist.length > 1 && App.hist[App.hist.length - 1] !== App.saved && !(App.cacheStatus==='saved' && App.cachedSnapshot===JSON.stringify(App.S))))) { e.preventDefault(); e.returnValue = ''; } });
   /* ---------- style files, resets (as GelFigure's file menu) ---------- */
   $('btnSaveTpl').onclick = () => {
     $('fileMenu').classList.add('hidden');
@@ -257,16 +257,11 @@
       `Go back to how it was ${when}: strips, protein boxes, names, marker ticks and annotations all return to that state.\nCtrl+Z undoes this. Continue?`))) return;
     if (App.resetAll()) { App.curStep = S().step; App.commit(); openStep(App.curStep); toast(L('已回到刚导入时（Ctrl+Z 可撤销）', 'Back to import (Ctrl+Z to undo)')); }
   };
-  $('btnNew').onclick = async () => {
-    $('fileMenu').classList.add('hidden');
-    if (S() && App.hist[App.hist.length - 1] !== App.saved && !confirm(L('新建会清空现在的图片和所有调整（没保存成项目的话就找不回来了）。继续？',
-      'New clears the pictures and every change (they cannot be recovered unless saved as a project). Continue?'))) return;
-    await App.dropDraft();
-    App.leaving = true; location.reload();
-  };
+  $('btnNew').onclick = () => G.Extras?.newProject();
   window.addEventListener('keydown', e => {
     const tag = (e.target.tagName || '').toLowerCase();
-    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+    if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable || composing(e) || e.defaultPrevented || e.repeat) return;
+    if ((e.key === 'Backspace' || e.key === 'Delete') && S() && App.selRow && !App.mode && (e.target === $('previewBox') || e.target === document.body)) { e.preventDefault(); if(App.deleteBox(App.row(App.selRow)))toast(L('已删除选中的蛋白框（Ctrl+Z 可撤销）','Selected box deleted (Ctrl+Z to undo)')); return; }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? App.redo() : App.undo(); }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); App.redo(); }
     if (e.key === 'Escape') {
@@ -338,7 +333,9 @@
 
   /* ---------- 1 membranes & pictures ---------- */
   function thumbCanvas(rec) {
-    const c = document.createElement('canvas'), t = rec.thumb;
+    const size=App.curStep===1?240:96, cacheKey=rec.kind+'|'+size+'|'+JSON.stringify(App.S.levels[rec.id]||{})+'|'+App.S.style.invert;
+    if(rec._uiThumb?.img===rec.img && rec._uiThumb.key===cacheKey)return rec._uiThumb.canvas;
+    const c = document.createElement('canvas'), t = {w:Math.round(rec.img.w/Math.max(1,Math.ceil(Math.max(rec.img.w,rec.img.h)/size))),h:Math.round(rec.img.h/Math.max(1,Math.ceil(Math.max(rec.img.w,rec.img.h)/size)))};
     c.width = t.w; c.height = t.h;
     const src = rec.kind === 'chemi' ? WB.down({ w: rec.img.w, h: rec.img.h, data: rec.cs.sig }, Math.max(1, Math.ceil(rec.img.w / t.w))) : WB.down(rec.img, Math.max(1, Math.ceil(rec.img.w / t.w)));
     const id = c.getContext('2d').createImageData(src.w, src.h);
@@ -350,7 +347,7 @@
       id.data[i * 4] = id.data[i * 4 + 1] = id.data[i * 4 + 2] = v; id.data[i * 4 + 3] = 255;
     }
     c.getContext('2d').putImageData(id, 0, 0);
-    return c;
+    rec._uiThumb={img:rec.img,key:cacheKey,canvas:c};return c;
   }
   const nMoved = b => b.images.filter(id => App.isMoved(id)).length;
   const wlOpen = new Set();          // membranes whose white-light pictures are all shown
@@ -402,7 +399,7 @@
         <div class="th-label">${L('曝光图', 'Exposures')} <span>${nCh}</span></div><div class="thumbs" data-kind="chemi"></div>`;
       // white-light pictures (often one per capture, all alike): the Marker picture and the grid's, the rest
       // behind "+N" unless opened or shown
-      const wl = App.markersOf(b), keep = r => wlOpen.has(b.id) || wl.length <= 3 || r.id === b.marker || r.id === b.frame || (r.id === App.viewImg && b.id === App.viewBlot);
+      const wl = App.markersOf(b), keep = r => App.curStep===1 || wlOpen.has(b.id) || wl.length <= 3 || r.id === b.marker || r.id === b.frame || (r.id === App.viewImg && b.id === App.viewBlot);
       b.images.map(id => App.images.get(id)).filter(Boolean).filter(r => r.kind !== 'marker' || keep(r)).sort((x, y) => (y.id === b.marker) - (x.id === b.marker) || (x.exposure || 0) - (y.exposure || 0)).forEach(rec => {
         const th = card.querySelector(`.thumbs[data-kind="${rec.kind}"]`);
         const t = document.createElement('div');
@@ -686,24 +683,12 @@
       const sugg = G.ProteinLadders.suggest(kda);
       // the tag: the row's colour on the membrane and the pieces it comes from; dragged = order in the figure
       el.innerHTML = `<span class="grip" style="--c:${App.rowColor(row)}" title="${L(`蛋白框 ${esc(modLabel(row))}。上下拖动调整这一行在成图里的位置（或选中后 Alt+↑↓）`, `Boxes ${esc(modLabel(row))}. Drag up or down to move this row in the figure (or select it and press Alt+↑↓)`)}">${esc(shortLabel(row))}</span>
-        <input type="text" value="${esc(row.name)}" placeholder="${esc(sugg[0] ? sugg[0] + L('？', '?') : L('蛋白名', 'Protein name'))}" list="protList">
+        <button class="row-name-link link" title="${L('在成图上填写名称', 'Edit the name on the figure')}">${esc(row.name || L('未命名蛋白', 'Unnamed protein'))}</button>
         <span class="kda">${kda ? '≈' + Math.round(kda) + ' kDa' : row.weak ? L('弱信号', 'Weak signal') : ''}</span>
         <button class="expo-chip${isBest ? ' best' : ' other'}${App.expoVerdict(curE) === 'sat' ? ' sat' : ''}" data-act="expo" title="${cur ? esc(App.expoLabel(cur)) + L('：', ': ') : ''}${isBest ? L('正在用推荐的曝光', 'Using the recommended exposure') : L('正在用的不是推荐曝光', 'Not the recommended exposure')}${L('｜点开对比全部曝光', ' | click to compare all exposures')}">${isBest ? '★ ' : ''}${cur ? esc(App.expoLabel(cur)) : '—'}</button>
         <button class="x visibility" data-act="hide" title="${row.hidden ? L('显示这一行', 'Show this row') : L('隐藏这一行', 'Hide this row')}">${row.hidden ? L('显示', 'Show') : L('隐藏', 'Hide')}</button>
         <button class="x" data-act="del" title="${L('删除这一行', 'Delete this row')}">×</button>`;
-      const inp = el.querySelector('input');
-      // (selecting the row draws the list again: the field is focused again there, see keepFocus)
-      inp.addEventListener('focus', () => { fillDatalist(kda); if (App.selRow !== row.id) selectRow(row.id, false); });
-      inp.addEventListener('input', live(e => { row.name = e.target.value; }));
-      inp.addEventListener('change', done());
-      inp.addEventListener('keydown', e => {
-        if (e.key !== 'Enter' || composing(e)) return;
-        e.preventDefault();
-        const ids = [...box.querySelectorAll('.row-item')].map(it => it.dataset.id), next = ids[ids.indexOf(row.id) + 1];
-        inp.blur();
-        const nx = next && $('rowList').querySelector(`.row-item[data-id="${next}"] input`);
-        if (nx) nx.focus(); else toast(L('蛋白名填完了', 'All protein names filled in'));
-      });
+      el.querySelector('.row-name-link').onclick = () => { activateColumn(App.rowColumn(row)); App.emit('change'); editRowName(row.id); };
       el.querySelector('[data-act="expo"]').onclick = () => selectRow(sel ? null : row.id, !sel);
       el.querySelector('[data-act="hide"]').onclick = done(() => { row.hidden = !row.hidden; });
       el.querySelector('[data-act="del"]').onclick = done(() => { st.rows = st.rows.filter(r => r !== row); if (App.selRow === row.id) App.selRow = null; toast(L('已删除该行（Ctrl+Z 可撤销）', 'Row deleted (Ctrl+Z to undo)')); });
@@ -730,24 +715,7 @@
   }
   /* step 5: the proteins' names in figure order (Enter: the next one) */
   function renderNames() {
-    const st = S(), box = $('nameList'), vis = App.rowsInColumn(App.activeColumn).filter(r => !r.hidden);
-    box.innerHTML = vis.map(r => { const k = App.rowKda(r), sg = G.ProteinLadders.suggest(k);
-      return `<div class="name-item" data-id="${r.id}"><span class="grip" style="--c:${App.rowColor(r)}">${esc(shortLabel(r))}</span><input type="text" value="${esc(r.name)}" placeholder="${esc(sg[0] ? sg[0] + L('？', '?') : L('蛋白名', 'Protein name'))}" list="protList"><span class="kda">${k ? '≈' + Math.round(k) + ' kDa' : ''}</span></div>`; }).join('');
-    box.querySelectorAll('.name-item').forEach(it => {
-      const mb = document.createElement('button'); mb.className = 'btn sm ghost'; mb.textContent = '⋯'; mb.title = L('区域标注与排版', 'Region labels and layout'); mb.setAttribute('aria-label', mb.title); mb.onclick = () => markerPopover(App.row(it.dataset.id), mb.getBoundingClientRect()); it.appendChild(mb);
-      const row = App.row(it.dataset.id), inp = it.querySelector('input');
-      inp.addEventListener('focus', () => { fillDatalist(App.rowKda(row)); });
-      inp.addEventListener('input', live(e => { row.name = e.target.value; }));
-      inp.addEventListener('change', done());
-      inp.addEventListener('keydown', e => {
-        if (e.key !== 'Enter' || composing(e)) return;
-        e.preventDefault();
-        const nx = it.nextElementSibling && it.nextElementSibling.querySelector('input');
-        inp.blur();
-        const again = nx && $('nameList').querySelector(`.name-item[data-id="${nx.closest('.name-item').dataset.id}"] input`);
-        if (again) again.focus(); else toast(L('蛋白名填完了', 'All protein names filled in'));
-      });
-    });
+    const st = S(), vis = App.rowsInColumn(App.activeColumn).filter(r => !r.hidden);
     const named = vis.filter(r => r.name).length, fl = App.figLanes(), ln = fl.filter(j => st.lanes[j - 1].name).length;
     $('stLanes').textContent = L(`蛋白名 ${named}/${vis.length} · 泳道名 ${ln}/${fl.length}`, `Proteins ${named}/${vis.length} · lanes ${ln}/${fl.length}`);
     $('sum5').innerHTML = L(`蛋白名 <b>${named}/${vis.length}</b> · 泳道名 <b>${ln}/${fl.length}</b>`, `Protein names <b>${named}/${vis.length}</b> · lane names <b>${ln}/${fl.length}</b>`);
@@ -922,20 +890,22 @@
     $('copyColumn').onchange = done(e => { if (e.target.value) App.copyColumnLabels(e.target.value, active.id); });
     if ($('removeColumn')) $('removeColumn').onclick = done(() => App.removeColumn(active.id));
   }
+  $('btnMarkerFit').onclick = done(() => { const f=G.BRender.build(false); S().style.markerPt=Math.max(4,Math.floor(Math.min(S().style.markerPt||S().style.fontPt,f.markerFit||4)*2)/2); toast(L('已统一适配字号；仍有重叠时可点数字隐藏次要刻度', 'Global font fitted; if labels still overlap, click a number to hide an unneeded tick')); });
   $('markerFontQuick').onchange = done(e => { S().style.markerPt = e.target.value === '' ? null : clamp(+e.target.value || 7, 4, 14); });
   function markerPopover(row, at) {
     if (!row) return;
     const marks = new Map(); row.segs.forEach(sg => App.pieceTicks(App.blot(row.blot), App.piece(App.blot(row.blot), sg.piece), sg).forEach(t => marks.set(t.id, t.k)));
     pop.innerHTML = `<h4>${esc(App.rowLabel(row))} · ${L('区域标注', 'Region labels')}</h4>
       ${App.layoutColumns().length > 1 ? `<div class="field"><label>${L('移到排版列', 'Move to column')} <select id="regionColumn">${App.layoutColumns().map(c => `<option value="${c.id}">${esc(columnName(c))}</option>`).join('')}</select></label></div>` : ''}
-      <label>${L('本区域 Marker 字号', 'Marker font for this region')} <input id="regionMarkerPt" type="number" min="4" max="14" step="0.5" class="num" value="${row.markerPt || ''}" placeholder="${S().style.markerPt || S().style.fontPt}"> pt</label>
-      <p class="hint">${L('留空跟随全局。取消勾选只隐藏数字，不删除校准点。', 'Empty uses the global font. Unchecking hides the label; calibration is kept.')}</p>
+      <label>${L('全部 Marker 字号', 'Global marker font')} <input id="globalMarkerPt" type="number" min="4" max="14" step="0.5" class="num" value="${S().style.markerPt || ''}" placeholder="${S().style.markerPt || S().style.fontPt}"> pt</label>
+      <p class="hint">${L('修改字号会应用到所有区域。取消勾选只隐藏数字，不删除校准点。', 'Font changes apply to every region. Unchecking hides a label; calibration is kept.')}</p>
       <div class="marker-visibility">${[...marks].map(([id,k]) => `<label><input type="checkbox" data-mark-toggle="${id}" ${!(row.hiddenMarkers || []).includes(id) ? 'checked' : ''}>${k} kDa</label>`).join('')}</div>
-      <div class="actions"><button class="btn sm primary" id="markerDisplayDone">${L('完成', 'Done')}</button></div>`;
+      <div class="actions"><button class="btn sm danger" id="deleteProteinBox">${L('删除此蛋白框', 'Delete this protein box')}</button><button class="btn sm primary" id="markerDisplayDone">${L('完成', 'Done')}</button></div>`;
     placePopNear(at);
     const dest = pop.querySelector('#regionColumn'); if (dest) { dest.value = App.rowColumn(row); dest.onchange = () => { App.moveToColumn(row, dest.value); closePop(); App.commit(); }; }
-    pop.querySelector('#regionMarkerPt').onchange = done(e => { row.markerPt = e.target.value === '' ? null : clamp(+e.target.value || 7, 4, 14); });
+    pop.querySelector('#globalMarkerPt').onchange = done(e => { S().style.markerPt = e.target.value === '' ? null : clamp(+e.target.value || 7, 4, 14); });
     pop.querySelectorAll('[data-mark-toggle]').forEach(i => i.onchange = done(() => { row.hiddenMarkers = (row.hiddenMarkers || []).filter(id => id !== i.dataset.markToggle); if (!i.checked) row.hiddenMarkers.push(i.dataset.markToggle); }));
+    pop.querySelector('#deleteProteinBox').onclick = () => { closePop(); App.deleteBox(row, App.curSeg(row)); };
     pop.querySelector('#markerDisplayDone').onclick = closePop;
   }
   function pasteConditions(replace) {
@@ -1029,14 +999,6 @@
   }
   function renderAnno() {
     const st = S(), rows = [];
-    // (a one-line field: a group label's line breaks show as ↵ and come back as breaks)
-    st.groups.forEach((g, k) => rows.push(`<div class="item"><span class="kind">${L('分组', 'Group')}</span><span class="idx" style="width:auto">${g.from}–${g.to}</span><input type="text" data-g="${k}" value="${esc((g.text || '').replace(/\n/g, ' ↵ '))}" placeholder="${L('分组文字', 'Group label')}" title="${L('↵ = 换行', '↵ = line break')}"><button class="x" data-gdel="${k}" aria-label="${L('删除', 'Delete')}">×</button></div>`));
-    st.conditions.forEach((c, r) => rows.push(`<div class="item"><span class="kind">${L('条件', 'Condition')}</span><input type="text" data-c="${r}" value="${esc(c.name)}" placeholder="${L('条件名，如 Dox', 'Condition name, e.g. Dox')}"><button class="x" data-cdel="${r}">×</button></div>`));
-    (st.arrows || []).forEach((a, k) => {
-      const row = App.row(a.row); if (!row || App.rowColumn(row) !== App.activeColumn) return;
-      const what = a.sym === '◀' ? App.arrowLabel(a) || L('未标分子量', 'no size') : a.sym + (a.text ? ' ' + a.text : '');
-      rows.push(`<div class="item"><span class="kind">${L('箭头', 'Arrow')}</span><button class="link anno-arrow" data-a="${k}" title="${L('点开修改', 'Click to edit')}">${esc(App.rowLabel(row))} · ${esc(what)}</button><button class="x" data-adel="${k}">×</button></div>`);
-    });
     (st.brackets || []).forEach((bk, k) => {
       const ends = [App.row(bk.r0), App.row(bk.r1)].filter(Boolean);
       if (!ends.some(r => App.rowColumn(r) === App.activeColumn)) return;
@@ -1044,8 +1006,6 @@
       if (!rs.length) {
         rows.push(`<div class="item"><span class="kind">${L('括号', 'Bracket')}</span><span class="hint">${esc(bk.text || '')} · ${L('两端已分列，移回可恢复，或删除后重画', 'Ends moved to different columns. Move back to restore, or delete and redraw.')}</span><button class="x" data-bdel="${k}">×</button></div>`); return;
       }
-      const span = rs.length > 1 ? `${App.rowLabel(rs[0])} – ${App.rowLabel(rs[rs.length - 1])}` : App.rowLabel(rs[0]);
-      rows.push(`<div class="item"><span class="kind">${L('括号', 'Bracket')}</span><button class="link anno-arrow" data-b="${k}" title="${L('点开修改', 'Click to edit')}">${esc(span)} · ${esc((bk.text || '').replace(/\n/g, ' ') || L('（没写文字）', '(no text)'))}</button><button class="x" data-bdel="${k}">×</button></div>`);
     });
     const box = $('annoList'); box.innerHTML = rows.join('');
     box.querySelectorAll('[data-a]').forEach(b => b.onclick = () => arrowPopover(+b.dataset.a, b.getBoundingClientRect()));
@@ -1157,6 +1117,7 @@
 
   /* ---------- preview + direct editing ---------- */
   const prev = $('preview'), fed = $('floatEd');
+  $('previewBox').tabIndex = 0;
   let lastFig = null, edit = null;
   function updatePreview() {
     let f;
@@ -1203,6 +1164,7 @@
     $('fedSize').textContent = curSize() + ' pt';
     $('fedReset').classList.toggle('hidden', !own);
     $('fedBr').classList.toggle('hidden', edit.kind !== 'group');
+    $('fedDelete').classList.toggle('hidden', !['group','condname'].includes(edit.kind));
     $('fedHint').textContent = edit.kind === 'group' ? L('Shift+Enter 换行', 'Shift+Enter: new line') : '';
   }
   function placeBar() {
@@ -1248,7 +1210,7 @@
     box.addEventListener('input', () => {
       if (!edit || edBox() !== box) return;
       if (edit.kind !== 'group' && box.value.includes('\n')) box.value = box.value.replace(/\n/g, ' ');     // (pasted text)
-      setV(edit, box.value); if (box === fta) autoRows(); App.refresh();
+      setV(edit, box.value); App.saveDraftSoon(); if (box === fta) autoRows(); App.refresh();
     });
     box.addEventListener('keydown', e => {
       if (!edit || composing(e)) return;          // (the IME is choosing characters: Enter belongs to it)
@@ -1278,6 +1240,7 @@
     const b = e.target.closest('button[data-fz]'); barPress = false;
     if (!b || !edit) return;
     const k = b.dataset.fz;
+    if (k === 'delete' && ['group','condname'].includes(edit.kind)) { const old=edit; closeEd(false); (old.kind==='group'?App.columnData(old.column).groups:App.columnData(old.column).conditions).splice(old.id,1);App.commit();return; }
     if (k === '+' || k === '-') setSize(curSize() + (k === '+' ? 0.5 : -0.5));
     else if (k === 'reset') setSize(null);
     else if (k === 'br' && edit.kind === 'group') { fta.setRangeText('\n', fta.selectionStart, fta.selectionEnd, 'end'); fta.dispatchEvent(new Event('input')); }
@@ -1394,7 +1357,7 @@
     if (!S() || swallowClick) return;
     const img = e.target.closest('image[data-row]');
     if (img && App.mode === 'arrow') { placeArrow(img.dataset.row, e.clientY); return; }
-    if (img) { selectRow(img.dataset.row, true); return; }
+    if (img) { selectRow(img.dataset.row, true); $('previewBox').focus({preventScroll:true}); return; }
     const g = e.target.closest('[data-edit]');
     if (!g) { if (App.mode === 'arrow') toast(L('请点在成图里某一行的条带上', 'Click on the bands of a row in the figure')); return; }
     activateColumn(g.dataset.column || App.activeColumn);
@@ -1449,6 +1412,8 @@
         `Boxes ${modLabel(row)}. Drag up or down to reorder only; drag bands left or right to line up lanes. Settings stay independent`);
       t.style.left = (columnScreenBounds(r.columnId).x0 - 5) + 'px'; t.style.top = ((r.top + r.bot) / 2) + 'px';
       ov.appendChild(t);
+      const menu=document.createElement('button'); menu.className='row-menu';menu.dataset.row=r.id;menu.textContent='⋯';menu.title=L('区域设置与 Marker 显示','Region settings and marker visibility');menu.setAttribute('aria-label',menu.title);
+      menu.style.left=(columnScreenBounds(r.columnId).x1+3)+'px';menu.style.top=((r.top+r.bot)/2)+'px';menu.onclick=e=>{e.stopPropagation();markerPopover(row,menu.getBoundingClientRect());};ov.appendChild(menu);
     });
     ov.insertAdjacentHTML('beforeend', '<div class="dropline hidden"></div><div class="dropbox hidden"></div><div class="droptip hidden"></div>');
   }
@@ -1565,6 +1530,11 @@
    * 4) runs its mode on the membrane view; done steps fold to a line and open again on a click; later ones wait.
    * The top bar says what to do in the open step, and a click on it does it. */
   const STEP_SEC = { 1: 'secImages', 2: 'secPieces', 3: 'secRows', 4: 'secMarker', 5: 'secNames' };
+  const toolNav=document.createElement('nav');toolNav.id='toolNav';toolNav.className='tool-nav';toolNav.setAttribute('aria-label',L('编辑工具','Editing tools'));
+  const toolNames=()=>[L('图片','Pictures'),L('膜区','Strips'),L('蛋白框','Boxes'),'Marker',L('成图','Figure')];
+  toolNames().forEach((name,i)=>{const button=document.createElement('button');button.type='button';button.dataset.tool=String(i+1);button.textContent=name;button.onclick=()=>openStep(i+1);toolNav.appendChild(button);});
+  $('sections').prepend(toolNav);
+
   // the pieces the figure uses that have fewer than 2 marks ({b, pc}), and them in words: "膜条 B、C" /
   // "膜 1 的膜条 B、C，膜 2 的膜条 A"
   const unmarked = () => S().blots.flatMap(b => App.usedPieces(b).filter(pc => App.markInfo(b, pc).state === 'none').map(pc => ({ b, pc })));
@@ -1576,13 +1546,15 @@
   };
   const goTo = id => { const el = $(id); if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' }); };
   const flash = x => { const el = typeof x === 'string' ? $(x) : x; if (!el) return; el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1300); };
+  const openSteps = new Set();
   function openStep(n) {
     const st = S(); if (!st) return;
     n = Math.max(1, Math.min(n, st.step));
     closePop();
+    if(n===1 && App.curStep>1)App.reviewReturnStep=App.curStep;
     const was = App.curStep, b = App.blot(App.viewBlot) || st.blots[0];
     const go = () => {
-      App.curStep = n;
+      App.curStep = n; openSteps.clear(); openSteps.add(n);
       if (n === 2) startPieces(b);
       else if (n === 4) startMarks(b);
       else {
@@ -1654,8 +1626,7 @@
     S().step = Math.max(S().step, 5); openStep(5);
     setTimeout(() => {
       if (lanes) { const j = App.figLanes().find(x => !(S().lanes[x - 1] || {}).name); if (j) openEd('lane', j); return; }
-      const r = S().rows.find(x => !x.hidden && !x.name), i = r && $('nameList').querySelector(`.name-item[data-id="${r.id}"] input`);
-      if (i) i.focus();
+      const r = S().rows.find(x => !x.hidden && !x.name); if (r) { activateColumn(App.rowColumn(r)); App.emit('change'); openEd('rowname', r.id); }
     }, 300);
   };
   $('skip4').onclick = () => {
@@ -1664,7 +1635,11 @@
     nextStep(4);
   };
   // a done step's header opens it again
-  Object.entries(STEP_SEC).forEach(([n, id]) => $(id).querySelector('.sec-head').addEventListener('click', () => { if (S() && +n <= S().step && +n !== App.curStep) openStep(+n); }));
+  Object.entries(STEP_SEC).forEach(([n,id])=>{
+    const head=$(id).querySelector('.sec-head'), body=$(id).querySelector('.step-body'), button=document.createElement('button');
+    body.id=id+'Body';button.className='step-toggle';button.type='button';button.setAttribute('aria-controls',body.id);head.appendChild(button);
+    head.onclick=()=>{if(!S()||+n>S().step)return;if(openSteps.has(+n)&&App.curStep===+n){openSteps.delete(+n);renderSteps();}else openStep(+n);};
+  });
 
   let coachAct = null;
   function updateCoach() {
@@ -1676,7 +1651,7 @@
       msg = L(`有 ${bound.length} 处<b>旧版绑定</b>：点这里解除后，分别选择曝光和亮度`, `${bound.length} <b>legacy combined rows</b>: click to detach and edit exposure and levels separately`);
       coachAct = () => { openStep(3); selectRow(bound[0].id, true); };
     } else if (n === 1) {
-      msg = L('第 1 步：确认每张膜的 <b>Marker 图</b>（左边标 ★ 的那张），对了就点"下一步"', 'Step 1: check the <b>marker picture</b> of each membrane (the one marked ★ on the left), then click "Next"');
+      msg = L('第 1 步：确认每张膜的 <b>Marker 图</b>（相册中标 ★ 的那张），对了就点"确认分组"', 'Step 1: check the <b>marker picture</b> of each membrane (marked ★ in the gallery), then confirm the groups');
       coachAct = () => flash('next1');
     } else if (n === 2) {
       const bn = st.blots.length > 1 && esc(App.blotName(App.blot(App.viewBlot)));
@@ -1707,7 +1682,7 @@
       const sat = vis.filter(r => { const e = App.rowExpo(r).find(x => x.id === r.img); return e && e.satFrac > 0.002; });
       if (unnamedRows.length) {
         msg = L(`第 5 步：<b>输入蛋白名</b>（还差 ${unnamedRows.length} 行，回车跳下一个）`, `Step 5: <b>type the protein names</b> (${unnamedRows.length} to go; Enter jumps to the next)`);
-        coachAct = () => { const i = $('nameList').querySelector(`.name-item[data-id="${unnamedRows[0].id}"] input`); if (i) i.focus(); else openEd('rowname', unnamedRows[0].id); };
+        coachAct = () => { activateColumn(App.rowColumn(unnamedRows[0])); App.emit('change'); openEd('rowname', unnamedRows[0].id); };
       } else if (unnamedLanes.length) {
         msg = L(`第 5 步：<b>输入泳道名</b>（成图上方灰色数字，还差 ${unnamedLanes.length} 条）`, `Step 5: <b>type the lane names</b> (the grey numbers above the figure; ${unnamedLanes.length} to go)`);
         coachAct = () => openEd('lane', unnamedLanes[0]);
@@ -1719,6 +1694,7 @@
         ok = true; coachAct = () => flash('btnPNG');
       }
     }
+    if(n<st.step && n!==1) { msg=L('可直接展开其他步骤继续编辑，当前修改会保留。','Expand another tool to continue; your changes are kept.');coachAct=()=>openStep(st.step); }
     $('coachText').innerHTML = msg + (coachAct && !ok ? ' <span class="coach-go">→</span>' : '');
     $('coach').classList.toggle('done', ok); $('coach').classList.toggle('act', !!coachAct);
     $('imgCount').textContent = L(`${App.images.size} 张图 · 添加`, `${pl(App.images.size, 'picture')} · add`);
@@ -1727,9 +1703,13 @@
   // the steps' look: open / done / waiting; the figure's placeholder until there are boxes
   function renderSteps() {
     const st = S(), cur = App.curStep || st.step;
+    toolNav.querySelectorAll('button').forEach((b,i)=>{b.textContent=toolNames()[i];b.disabled=i+1>st.step;b.classList.toggle('on',i+1===cur);b.setAttribute('aria-current',i+1===cur?'step':'false');});
     Object.entries(STEP_SEC).forEach(([n, id]) => {
       n = +n;
       const el = $(id);
+      if(!openSteps.size && !App.stepsStarted) {openSteps.add(cur); App.stepsStarted=true;}
+      el.classList.toggle('open',openSteps.has(n)); el.classList.toggle('completed',n<st.step);
+      const toggle=el.querySelector('.step-toggle'); if(toggle) {toggle.textContent=openSteps.has(n)?L('收起 ▴','Collapse ▴'):L('展开 ▾','Expand ▾');toggle.disabled=n>st.step;toggle.setAttribute('aria-expanded',String(openSteps.has(n)));}
       el.classList.toggle('cur', n === cur); el.classList.toggle('done', n < st.step); el.classList.toggle('reach', n === st.step && n !== cur); el.classList.toggle('locked', n > st.step);
     });
     // (a membrane added later goes through the steps again: the figure there is already stays)
@@ -1787,8 +1767,11 @@
     it.scrollIntoView({ block: 'nearest' });
   }
   App.on(what => {
+    if (what === 'storage') return;
+    if (what === 'empty') { pcSeen.clear(); $('emptyState').classList.remove('hidden'); $('sections').classList.add('hidden'); $('preview').innerHTML=''; $('figEmpty').classList.remove('hidden'); $('levelBar').classList.add('hidden'); App.curStep=1; G.View.draw(); offerDraft();return; }
     if (!S()) return;
     if (what === 'loaded') {
+      openSteps.clear(); openSteps.add(S().step); App.stepsStarted=true;
       $('emptyState').classList.add('hidden'); $('sections').classList.remove('hidden'); $('draftBox').classList.add('hidden');
       // the step to go on with (a membrane just added: its Marker picture first)
       App.curStep = S().step;
@@ -1884,8 +1867,8 @@
     toast(L('已导出定量 CSV（用于参考；正式定量请用 ≥3 次独立实验）', 'Exported the densitometry CSV (for reference; quantify from ≥3 independent experiments)'), 3600);
   }
 
-  G.UI = { toast, editRowName, openEd, markPicker, openStep, nextStep, lastFig: () => lastFig, preflight,
-    piecesChanged: () => { $('stPieces').textContent = L('改过了：点"下一步"生效', 'Changed: click "Next" to apply'); } };
+  G.UI = { finishImages: async () => { if(App.reviewReturnStep>=3 && S().blots.every(b=>b.boxesReady)) {await App.ensurePrepared(); S().step=Math.max(S().step,App.reviewReturnStep);App.commit();openStep(App.reviewReturnStep);}else await nextStep(1);}, addFiles, markerPopover, flushPending: async () => { if(edit)closeEd(false);closePop(true);if(App.mode==='pieces'){const b=App.blot(App.viewBlot),pcs=G.View.piecesEnd(true);await new Promise(resolve=>applyPieces(b,pcs,false,resolve));if(App.curStep===2)G.View.piecesStart();}if(S())App.commit();}, toast, editRowName, openEd, markPicker, openStep, nextStep, lastFig: () => lastFig, preflight,
+    piecesChanged: () => { $('stPieces').textContent = L('已修改：切换步骤时保存', 'Changed: saved when switching tools'); } };
 
   const qs = new URLSearchParams(location.search);
   const scripted = !!(qs.get('demo') === '1' || qs.get('srcdir') || qs.get('demomove'));
@@ -2335,7 +2318,7 @@
         marks: S().blots[0].pieces.map(p => p.letter + ':' + (p.marks || []).map(m => m.kda + '@' + Math.round(m.v)).join(',')), levels: S().levels, range: S().range,
         arrows: S().arrows.map(a => [App.row(a.row) && App.row(a.row).name, a.db, a.sym, a.side]) });
       const before = sig(), t0 = performance.now();
-      const blob = await App.saveProject();
+      await G.UI.flushPending(); const blob = await App.saveProject();
       log.push(`saved ${(blob.size / 1048576).toFixed(1)} MB`);
       await App.openProject(blob);
       const after = sig();

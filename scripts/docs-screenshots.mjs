@@ -33,7 +33,7 @@ try {
     fl.forEach((j, k) => { S.lanes[j - 1].name = ['Ctrl', 'siA #1', 'siA #2'][k % 3]; });
     S.groups = [0, 3, 6].filter(i => fl[i + 2]).map((i, k) => ({ from: fl[i], to: fl[i + 2], text: ['0 h', '24 h', '48 h'][k] }));
     S.conditions = [{ name: 'EGF', values: S.lanes.map((_, i) => i % 2 ? '+' : '−') }];
-    S.style.fontPt = 7;
+    S.style.fontPt = 7; S.style.markerPt = 5;
     BApp.commit(); UI.openStep(5);
     BApp.selRow = null; BApp.emit('select');
   });
@@ -41,7 +41,7 @@ try {
   await page.mouse.move(1590, 990);
   const info = await page.evaluate(() => {
     const f = BRender.build(false);
-    return { widthMm: f.w / BApp.MM, heightMm: f.h / BApp.MM, overlaps: f.overlaps.length };
+    return { widthMm: f.w / BApp.MM, heightMm: f.h / BApp.MM, overlaps: f.overlaps.length, markerFit: f.markerFit };
   });
   if (errors.length || info.overlaps) throw new Error(JSON.stringify({ errors, ...info }));
   await page.screenshot({ path: path.join(root, 'docs/screenshot-en.png') });
@@ -69,5 +69,11 @@ try {
   await page.waitForTimeout(300);
   await page.mouse.move(1590, 990);
   await page.screenshot({ path: path.join(root, 'docs/screenshot-zh.png') });
+  await page.evaluate(()=>UI.openStep(1));
+  await page.waitForTimeout(300);
+  await page.screenshot({path:path.join(root,'docs/gallery-zh.png')});
+  await page.click('#btnLang');
+  await page.waitForTimeout(300);
+  await page.screenshot({path:path.join(root,'docs/gallery-en.png')});
   console.log('Documentation screenshots (synthetic demo only):', info);
 } finally { await browser.close(); }

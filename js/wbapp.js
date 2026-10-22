@@ -30,7 +30,7 @@
   }
 
   const App = { images: new Map(), analysis: {}, S: null, hist: [], future: [], listeners: [], selRow: null, selSeg: null, selLane: null, viewBlot: null, viewImg: null, mode: null };
-  App.VERSION = '0.9.0';
+  App.VERSION = '0.10.0';
   App.activeColumn = 'main';
   const columnFields = new Set(['lanes', 'range', 'hiCol', 'groups', 'conditions']);
   App.layoutColumns = () => App.S.layoutColumns || (App.S.layoutColumns = [{ id: 'main', title: '', titleSide: 'top' }]);
@@ -156,7 +156,8 @@
   App.refresh = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; App.emit('refresh'); }); };
   App.commit = function () {
     if (!App.S) return;
-    App.S.rows.forEach(r => r.segs.forEach(s => { App.boxId(s); App.boxLabel(s); }));
+    App.S.rows.forEach(r => { delete r.markerPt; r.segs.forEach(s => { App.boxId(s); App.boxLabel(s); }); });
+    App.S.blots.forEach(b => { if (App.S.rows.some(r => r.blot === b.id)) b.boxesReady = true; });
     const columnIds = new Set(App.layoutColumns().map(c => c.id));
     App.S.rows.forEach(r => { if (!columnIds.has(App.rowColumn(r))) r.column = 'main'; });
     if (!App.layoutColumns().some(c => c.id === App.activeColumn)) App.activeColumn = 'main';
@@ -284,6 +285,7 @@
     const recs = [...App.images.values()], bufs = [];
     for (const r of recs) bufs.push(r.src && r.src.buffer ? r.src.buffer : await r.src.arrayBuffer());
     const head = { version: 1, app: 'BlotFigure ' + App.VERSION, savedAt: new Date().toISOString(), viewBlot: App.viewBlot, S: App.S, initial: App.initial,
+      projectId: App.projectId, projectName: App.projectName, ladders: App.customLadders(),
       images: recs.map((r, i) => ({ id: r.id, name: r.name, kind: r.kind, exposure: r.exposure, size: bufs[i].byteLength, sha256: r.sha256 || null })) };
     const json = new TextEncoder().encode(JSON.stringify(head)), len = new Uint8Array(4);
     new DataView(len.buffer).setUint32(0, json.length, true);
@@ -324,6 +326,8 @@
     matchSizes(recs);
     recs.forEach(r => { prepare(r); App.images.set(r.id, r); });
     App.S = head.S;
+    App.projectId = head.projectId || uid('project'); App.projectName = head.projectName || '';
+    G.ProteinLadders.importDefinitions(head.ladders || []);
     if (!App.S.step) App.S.step = 5;          // (projects saved before the steps: everything done)
     if (!App.S.arrows) App.S.arrows = [];
     if (!App.S.brackets) App.S.brackets = [];
@@ -343,75 +347,33 @@
     App.emit('loaded');
   }
 
-  /* ---------- autosaved draft (IndexedDB, as GelFigure): the pictures and the state survive a reload or a crash.
-   * Each picture is written once (keyed by its fingerprint), the state shortly after every change. ---------- */
-  const DB = 'blotfigure', STORE = 'drafts';
-  let dbP = null;
-  // some browsers never answer indexedDB.open for file:// pages: give up instead of hanging
-  function idb() {
-    if (!dbP) dbP = new Promise((res, rej) => {
-      if (!window.indexedDB) return rej(new Error('no indexedDB'));
-      const t = setTimeout(() => rej(new Error('indexedDB timeout')), 3000);
-      let rq;
-      try { rq = indexedDB.open(DB, 1); } catch (e) { clearTimeout(t); return rej(e); }
-      rq.onupgradeneeded = () => rq.result.createObjectStore(STORE);
-      rq.onsuccess = () => { clearTimeout(t); res(rq.result); };
-      rq.onerror = () => { clearTimeout(t); rej(rq.error); };
-      rq.onblocked = () => { clearTimeout(t); rej(new Error('indexedDB blocked')); };
-    });
-    dbP.catch(() => { dbP = null; });
-    return dbP;
-  }
-  async function idbDo(mode, fn) {
-    const db = await idb();
-    return new Promise((res, rej) => { const tx = db.transaction(STORE, mode), st = tx.objectStore(STORE), r = fn(st); tx.oncomplete = () => res(r && r.result); tx.onerror = () => rej(tx.error); });
-  }
-  let draftTimer = 0, draftOurs = false;      // draftOurs: the draft in the database is this session's
-  const draftHas = new Set();                 // fingerprints of the pictures already in it
-  App.saveDraftSoon = function () { if (App.noDraft) return; clearTimeout(draftTimer); draftTimer = setTimeout(App.saveDraft, 1000); };
-  App.saveDraft = async function () {
-    if (!App.S || !App.images.size || App.noDraft) return;
-    try {
-      const recs = [...App.images.values()], keep = new Set(recs.map(r => r.sha256)), fresh = [];
-      for (const r of recs) if (!draftHas.has(r.sha256) && !fresh.some(f => f.sha === r.sha256)) fresh.push({ sha: r.sha256, buf: r.src && r.src.buffer ? r.src.buffer : await r.src.arrayBuffer() });
-      await idbDo('readwrite', st => {
-        // (another session's draft is replaced by this one)
-        if (!draftOurs) st.clear();
-        [...draftHas].filter(s => !keep.has(s)).forEach(s => st.delete('img:' + s));
-        fresh.forEach(f => st.put(f.buf, 'img:' + f.sha));
-        st.put({ app: 'BlotFigure ' + App.VERSION, savedAt: Date.now(), viewBlot: App.viewBlot, S: JSON.stringify(App.S), initial: App.initial,
-          images: recs.map(r => ({ id: r.id, name: r.name, kind: r.kind, exposure: r.exposure, sha256: r.sha256 })),
-          summary: { membranes: App.S.blots.length, images: recs.length, rows: App.S.rows.filter(r => !r.hidden).length, step: App.S.step,
-            names: App.S.rows.filter(r => !r.hidden && r.name).map(r => r.name).slice(0, 6) } }, 'meta');
-      });
-      draftOurs = true;
-      [...draftHas].filter(s => !keep.has(s)).forEach(s => draftHas.delete(s));
-      fresh.forEach(f => draftHas.add(f.sha));
-    } catch (e) { /* private mode, a full quota, file:// without IndexedDB: drafts are best-effort */ }
+  // The local project library is installed by wblibrary.js; raw bytes remain on this device.
+  App.restoreSnapshot = restoreFrom;
+  App.customLadders = () => [...new Set((App.S?.blots || []).map(b => b.ladderId))].map(G.ProteinLadders.get).filter(l => l?.custom);
+  App.resetSession = () => {
+    clearTimeout(App.draftTimer); if (App.onSwap) App.onSwap();
+    App.S = null; App.images.clear(); retiredImages.clear(); App.analysis = {};
+    App.hist = []; App.future = []; App.initial = null; App.saved = null;
+    App.selRow = App.selSeg = App.selLane = App.selMark = null; App.viewBlot = App.viewImg = App.mode = null;
+    App.projectId = null; App.projectName = ''; App.cachedSnapshot=null; App.cacheStatus=null; App.activeColumn = 'main'; App.curStep = 1;
+    App.emit('empty');
   };
-  App.peekDraft = async function () { try { return await idbDo('readonly', st => st.get('meta')); } catch (e) { return null; } };
-  App.dropDraft = async function () { draftHas.clear(); draftOurs = false; try { await idbDo('readwrite', st => st.clear()); } catch (e) { /* ignore */ } };
-  App.restoreDraft = async function () {
-    const meta = await App.peekDraft();
-    if (!meta) throw new Error(L('没有可恢复的草稿', 'No draft to restore'));
-    busy(true, L('恢复上次的进度…', 'Restoring where you left off…')); await tick();
-    try {
-      const bufs = [];
-      for (const im of meta.images) {
-        const b = await idbDo('readonly', st => st.get('img:' + im.sha256));
-        if (!b) throw new Error(L(`草稿里缺少图片 ${im.name}`, `The draft is missing picture ${im.name}`));
-        bufs.push(b);
-      }
-      await restoreFrom({ images: meta.images, S: JSON.parse(meta.S), viewBlot: meta.viewBlot, initial: meta.initial }, bufs, L('恢复', 'Restoring'));
-      draftOurs = true; meta.images.forEach(im => draftHas.add(im.sha256));
-    } finally { busy(false); }
+  App.deleteBox = (row, sg) => {
+    if (!row || !App.S.rows.includes(row)) return false;
+    sg = sg || App.curSeg(row); if (!sg || !row.segs.includes(sg)) return false;
+    App.blot(row.blot).boxesReady = true;
+    row.segs.forEach(s => { s.above = App.boxAbove(row, s); s.below = App.boxBelow(row, s); });
+    row.segs = row.segs.filter(s => s !== sg);
+    if (!row.segs.length) { App.S.rows = App.S.rows.filter(r => r !== row); App.selRow = null; }
+    else App.fitRowHeight(row);
+    App.selSeg = null; App.selLane = null; App.commit(); return true;
   };
 
   App.addFiles = async function (files) {
     files = [...files].filter(f => /\.(tiff?|png|jpe?g|bmp)$/i.test(f.name));
     if (!files.length) return 0;
     const first = !App.S;
-    if (first) App.S = newState();
+    if (first) { App.S = newState(); App.projectId = uid('project'); App.projectName = files[0].name.replace(/\.[^.]+$/, ''); }
     busy(true, L(`读取图片 0/${files.length}…`, `Reading pictures 0/${files.length}…`));
     await tick();
     try {
@@ -829,7 +791,8 @@
     App.analyze(blot);
     if (!App.analysis[blot.id]) { App.S.rows = App.S.rows.filter(r => r.blot !== blot.id); return; }
     // (before the pieces are confirmed (step 3) there are no boxes yet)
-    if ((!rows.length && App.S.step >= 3) || (opt && opt.fresh)) {
+    if ((!rows.length && !blot.boxesReady && App.S.step >= 3) || (opt && opt.fresh)) {
+      blot.boxesReady = true;
       const fresh = App.rowsFromAnalysis(blot), at = App.S.rows.findIndex(r => r.blot === blot.id);
       App.S.rows = App.S.rows.filter(r => r.blot !== blot.id);
       App.S.rows.splice(at < 0 ? App.S.rows.length : at, 0, ...fresh);
@@ -1678,7 +1641,8 @@
       const old = new Set(App.S.rows.map(r => r.id));
       if (b.dirty || !App.analysis[b.id]) alignAndAnalyze(b, new Map(Object.entries(b.pendingInit || {})), true);
       if (App.analysis[b.id] && App.analysis[b.id].outlinesOnly) App.analyze(b);
-      if (!App.S.rows.some(r => r.blot === b.id) && App.analysis[b.id]) App.S.rows.push(...App.rowsFromAnalysis(b));
+      if (!b.boxesReady && !App.S.rows.some(r => r.blot === b.id) && App.analysis[b.id]) App.S.rows.push(...App.rowsFromAnalysis(b));
+      b.boxesReady = true;
       App.S.rows.filter(r => r.blot === b.id && !old.has(r.id)).forEach(r => r.segs.forEach(sg => App.levelBox(r, sg)));
     });
   };
@@ -1870,7 +1834,7 @@
     const f = G.BRender.build(false), minPt = Math.round((f.minPt || st.fontPt) * 10) / 10;
     if (minPt < 5) add('warn', L(`最小字号 ${minPt} pt 偏小（多数期刊要求 ≥ 5–6 pt）。`, `The smallest text is ${minPt} pt (most journals ask for ≥ 5–6 pt).`), { label: L('全部至少 6 pt', 'Make all text ≥ 6 pt'), run: () => {
       const up = v => (v && v < 6 ? 6 : v);
-      S.rows.forEach(r => { if (r.markerPt) r.markerPt = up(r.markerPt); });
+
       st.fontPt = Math.max(st.fontPt, 6); ['lanePt', 'markerPt', 'namePt'].forEach(k => { st[k] = up(st[k]); }); st.minFontPt = Math.max(st.minFontPt || 5, 6);
       [...App.layoutColumns().flatMap(c => [App.columnData(c.id).groups, App.columnData(c.id).conditions]), S.arrows, S.brackets].forEach(list => (list || []).forEach(o => { if (o.pt) o.pt = up(o.pt); }));
     } });
@@ -1919,7 +1883,7 @@
           markerMarks: (pc.marks || []).filter(m => m.kda > 0).map(m => ({ id: App.markerId(m), kDa: m.kda, vPx: r1(m.v) })) })) })),
       rows: S.rows.map(r => {
         const b = App.blot(r.blot), e = App.rowExpo(r).find(x => x.id === r.img), lv = App.rowLevels(r);
-        return { column: App.rowColumn(r), markerPt: r.markerPt || null, hiddenMarkers: r.hiddenMarkers || [], name: r.name || null, shown: !r.hidden, membrane: App.blotNameEn(b), exposure: (App.images.get(r.img) || {}).name || null,
+        return { column: App.rowColumn(r), hiddenMarkers: r.hiddenMarkers || [], name: r.name || null, shown: !r.hidden, membrane: App.blotNameEn(b), exposure: (App.images.get(r.img) || {}).name || null,
           recommendedExposure: (App.images.get(App.bestExpo(r)) || {}).name || null, saturatedBandFrac: e ? +e.satFrac.toFixed(5) : null,
           apparentKDa: App.rowKda(r) ? r1(App.rowKda(r)) : null,
           levels: { black: lv.black, white: lv.white, ownToThisRow: !!r.lv },

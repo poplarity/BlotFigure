@@ -35,6 +35,7 @@ export async function layoutChecks(browser, base) {
     });
     await check('column titles, lane names and Excel conditions are independent', async () => {
       await page.fill('#columnTitle', 'Drug response'); await page.locator('#columnTitle').press('Tab');
+      await page.locator('#laneBulk').evaluate(el=>el.closest('details').open=true);
       await page.fill('#laneBulk', 'Ctrl, Drug'); await page.locator('#laneBulk').press('Tab');
       await page.locator('#conditionBulk').evaluate(el => el.closest('details').open = true);
       await page.fill('#conditionBulk', 'Dose\t0\t10 nM\nTime\t\t24 h'); await page.click('#condReplace');
@@ -87,15 +88,15 @@ export async function layoutChecks(browser, base) {
       });
       // Hit the label group (including its white backing), not the text-only quad:
       // WebKit reports an incorrect text quad inside this translated SVG group.
-      const marker = page.locator(`g[data-edit="marker"][data-row="${await page.evaluate(()=>layoutRow)}"]`).first();
+      const marker = page.locator(`g[data-edit="marker"][data-row="${await page.evaluate(()=>layoutRow)}"]`).last();
       await marker.click();
-      await page.fill('#regionMarkerPt','4.5'); await page.locator('#regionMarkerPt').press('Tab');
+      await page.fill('#globalMarkerPt','4.5'); await page.locator('#globalMarkerPt').press('Tab');
       await page.locator('[data-mark-toggle]').first().uncheck(); await page.click('#markerDisplayDone');
       assert(await page.evaluate(() => {
         const r=BApp.row(layoutRow),s=r.segs[0],p=BApp.pieceOf(r,s);
-        return r.markerPt===4.5 && r.hiddenMarkers.length===1 && p.marks.length===2 && JSON.stringify(BApp.pieceCal(BApp.blot(r.blot),p,s))===calBefore;
+        return BApp.S.style.markerPt===4.5 && !r.markerPt && r.hiddenMarkers.length===1 && p.marks.length===2 && JSON.stringify(BApp.pieceCal(BApp.blot(r.blot),p,s))===calBefore;
       }));
-      await page.locator(`.name-item[data-id="${await page.evaluate(()=>layoutRow)}"] button`).click();
+      await page.locator(`.row-menu[data-row="${await page.evaluate(()=>layoutRow)}"]`).click();
       await page.locator('[data-mark-toggle]').first().check(); await page.click('#markerDisplayDone');
       assert.equal(await page.evaluate(()=> BApp.row(layoutRow).hiddenMarkers.length),0);
     });
@@ -146,7 +147,7 @@ export async function layoutChecks(browser, base) {
     });
     await check('region menu moves without merging; the empty first column can be removed',async()=>{
       const id=await page.evaluate(()=>{BApp.activeColumn=layoutColumn;BApp.commit();return layoutRow;});
-      await page.locator(`.name-item[data-id="${id}"] button`).click();
+      await page.locator(`.row-menu[data-row="${id}"]`).click();
       await page.selectOption('#regionColumn','main');
       assert.equal(await page.evaluate(()=>BApp.rowColumn(BApp.row(layoutRow))),'main');
       assert(await page.evaluate(()=>{

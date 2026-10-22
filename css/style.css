@@ -539,3 +539,56 @@ html[lang=en] .sec.step.reach .sec-head::after { content: "Continue →"; }
 .column-controls .adv { margin-top:6px; }
 .marker-visibility { display:flex; flex-wrap:wrap; gap:12px; margin:12px 0; }
 .marker-visibility label { display:flex; align-items:center; gap:4px; }
+
+/* Steps are expandable tools; the active editing mode is separate from completed progress. */
+.sec.step .step-body, .sec.step.cur .step-body { display:none; }
+.sec.step.open .step-body { display:block; }
+.sec.step.open .step-sum { display:none; }
+.sec.step .sec-head::after { content:none !important; }
+.sec.step .sec-head { cursor:pointer; gap:7px; }
+.step-toggle { margin-left:auto; padding:5px 7px; border:0; background:transparent; color:var(--accent); white-space:nowrap; font:inherit; font-size:11px; cursor:pointer; }
+.step-toggle:disabled { color:var(--faint); cursor:default; }
+.sec.step.completed .step-next { display:none; }
+.add-row { margin:0 0 14px; padding:10px; background:var(--accent-bg); border-radius:8px; display:flex; flex-direction:column; align-items:stretch; gap:7px; }
+.row-name-link { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:left; }
+.row-menu { position:absolute; transform:translateY(-50%); pointer-events:auto; border:0; padding:0 3px; background:transparent; color:var(--muted); cursor:pointer; }
+.row-menu:hover { background:var(--accent-bg); color:var(--accent); }
+.cache-status { border:0; background:transparent; color:#b9c7d9; font-size:11px; max-width:140px; white-space:nowrap; cursor:pointer; }
+.cache-status.error { color:#ffca80; }
+.library-card { border:1px solid var(--line-2); border-radius:8px; padding:12px; margin:8px 0; display:flex; align-items:center; gap:10px; }
+.library-card .project-info { flex:1; min-width:0; }
+.library-card .project-info button { max-width:100%; text-align:left; overflow:hidden; text-overflow:ellipsis; }
+.library-card small { display:block; color:var(--muted); margin-top:5px; }
+.extra-dialog .dlg-body { width:min(560px,92vw); max-height:85vh; overflow:auto; }
+.marker-import-preview { display:flex; gap:6px; flex-wrap:wrap; margin:12px 0; }
+.marker-import-preview span { padding:4px 8px; background:var(--accent-bg); border-radius:5px; }
+
+.image-gallery,.gallery-inspect { display:none; }
+.gallery-mode #rawCol > .col-head,.gallery-mode #rawCol > #levelBar,.gallery-mode #editorBox,.gallery-mode #figCol > .col-head,.gallery-mode #previewBox { display:none !important; }
+.gallery-mode .image-gallery { display:block; flex:1; padding:16px; overflow:auto; }
+.gallery-mode .gallery-inspect { display:flex; flex:1; min-height:0; flex-direction:column; padding:16px; gap:12px; }
+.gallery-mode #warnings { display:none; }
+.gallery-top { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+.image-gallery .thumbs { display:grid; grid-template-columns:repeat(auto-fill,minmax(155px,1fr)); gap:10px; }
+.image-gallery .thumb { width:auto; min-width:0; }
+.image-gallery .thumb canvas { width:100%; height:145px; object-fit:contain; background:#f2f4f7; }
+.image-gallery .blot-card { margin-top:14px; padding:12px; }
+.image-gallery .cap { white-space:normal; }
+.gallery-caption { min-width:0; }
+.gallery-caption b { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.gallery-caption span { font-size:12px; color:var(--muted); }
+.gallery-actions { display:flex; flex-wrap:wrap; gap:6px; }
+.gallery-image-scroll { overflow:auto; flex:1; min-height:0; background:#e9edf2; border-radius:8px; }
+.gallery-image-scroll canvas { display:block; height:auto; }
+
+.gallery-mode #secImages .step-next { display:none; }
+
+.gallery-mode #legendHints,.gallery-mode #secImages .step-body > button:first-child { display:none; }
+
+.image-gallery .image-tools > .hint { display:none; }
+
+.tool-nav { position:sticky; top:0; z-index:8; display:grid; grid-template-columns:repeat(5,1fr); background:#fff; border-bottom:1px solid var(--line-2); padding:5px; gap:2px; }
+.tool-nav button { border:0; background:transparent; font:inherit; font-size:11px; border-radius:5px; padding:7px 2px; color:var(--muted); cursor:pointer; }
+.tool-nav button.on { background:var(--accent-bg); color:var(--accent); font-weight:700; }
+.tool-nav button:disabled { opacity:.45; cursor:default; }
+.sec.step { scroll-margin-top:42px; }

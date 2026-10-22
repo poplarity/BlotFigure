@@ -4,7 +4,7 @@
 
 **把一次 Western blot 实验的原始图片做成可投稿的成图 —— 在浏览器里完成，离线可用。**
 
-[**下载单文件 HTML**](https://github.com/poplarity/BlotFigure/releases/download/v0.9.0/BlotFigure-v0.9.0.html) · [在线使用](https://poplarity.github.io/BlotFigure/) · [English](README.md)
+[**下载单文件 HTML**](https://github.com/poplarity/BlotFigure/releases/download/v0.10.0/BlotFigure-v0.10.0.html) · [在线使用](https://poplarity.github.io/BlotFigure/) · [English](README.md)
 
 [![CI](https://github.com/poplarity/BlotFigure/actions/workflows/ci.yml/badge.svg)](https://github.com/poplarity/BlotFigure/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -17,13 +17,13 @@
 
 **只需下载一个文件，用浏览器打开就能做图。不用安装、不用解压，也不用注册 GitHub。**
 
-1. **[点击下载 BlotFigure-v0.9.0.html](https://github.com/poplarity/BlotFigure/releases/download/v0.9.0/BlotFigure-v0.9.0.html)**，约 700 KB，保存到桌面或"下载"文件夹。
+1. **[点击下载 BlotFigure-v0.10.0.html](https://github.com/poplarity/BlotFigure/releases/download/v0.10.0/BlotFigure-v0.10.0.html)**，约 750 KB，保存到桌面或"下载"文件夹。
 2. **双击刚下载的文件。** 它会在浏览器中打开；如果打开的是记事本等软件，右键文件 → **打开方式** → 选择 Firefox、Chrome、Edge 或 Safari。
 3. **把一次实验的全部图片拖进去**：每张膜的各次曝光，加上一张看得见 Marker 的图（白光图，或白光 + 化学发光的复合图）。然后按左边的 5 步走，最后点 **导出 PNG**。
 
 这一个 HTML 文件已经包含完整界面和处理功能。保存后可以断网使用，也可以把同一个文件直接发给同事。
 
-**认准文件名：** 下载的是 **BlotFigure-v0.9.0.html**，不是仓库里的 **index.html**，也不是 **Source code (zip)** 或 **Source code (tar.gz)**。如果进入了[版本下载页](https://github.com/poplarity/BlotFigure/releases/latest)，展开 **Assets（附件）**，只点结尾为 **.html** 的文件即可。
+**认准文件名：** 下载的是 **BlotFigure-v0.10.0.html**，不是仓库里的 **index.html**，也不是 **Source code (zip)** 或 **Source code (tar.gz)**。如果进入了[版本下载页](https://github.com/poplarity/BlotFigure/releases/latest)，展开 **Assets（附件）**，只点结尾为 **.html** 的文件即可。
 
 **下次接着做：** 关闭前点 **文件 → 保存项目**（Ctrl+S）。得到的 **.blotfig** 项目文件包含全部图片和所有调整，下次用 BlotFigure 打开即可继续，换电脑也行。
 
@@ -66,16 +66,26 @@
 - **一张 WB 图内分列**：每列分别填写标题（上方或下方）、泳道名称、范围和条件。拖动区域到另一列，或在名称旁 ⋯ 中选择；曝光、亮度保持独立。默认顶部对齐，可选按行对齐、调整间距。
 - **Marker 手动标，点几下就好**：选一次型号（40 种预染 Marker，含参考带），只标看得见的条带；1 条能显示刻度，2 条以上才估算其他分子量。
 - **在成图上直接编辑**：点泳道名、蛋白名直接输入，回车跳下一个；分组横线、+/− 条件行、自动标分子量的目标条带箭头、IP / Input 分组或 (Ub)n 拖尾的行旁括号、`*` / `#` / `†` 标记。
-- **Marker 字号和显示**：第 4 步直接设置全局字号；点成图数字或蛋白名旁 ⋯，单独设置该区域字号、隐藏或恢复数字。隐藏数字保留校准点，拥挤时不丢弃数字。
+- **Marker 字号和显示**：所有区域统一字号，固定短刻度对准原位置；用实际字形高度检查重叠，不延长或错列。可统一适配字号，或隐藏次要数字，校准点仍保留。
 - **Excel 条件表**：第一格条件名，后面每格对应一条显示的泳道；支持追加、替换本列，保留空格和时间/剂量文字。Shift+点击成图格子可编辑任意值。侧边括号支持竖排文字与直线。
 - **灵活的文字排版**：分组文字放不下时自动换行、缩小或保持一行；每一项都能单独设字号；蛋白名和分子量可以分别选放左边或右边。
 - **导出前检查**：没填名字的行、过曝的曝光、太小的字、低于 300 dpi 的有效分辨率、超过双栏宽度，能改的一键修正。
 - **可追溯、可复现**：项目文件记录每张图的 SHA-256，处理日志、补充材料用的未裁切原图、可复用的样式文件，刷新后还能恢复的自动草稿。
 - **中英双语界面**：随时切换。成图标签可按需要使用中文或英文。
 
+## 相册、历史项目与预设
+
+第 1 步在中间拖动图片分膜组，右侧放大查看并指定 Marker 图／曝光图。返回修改时保留已有蛋白框。
+
+新实验用「文件 → 新建」或拖入图片后选「另建项目」，上一批自动保留在历史项目中。点顶栏的「历史项目」即可再打开；支持改名和删除。缓存属于当前浏览器，清理浏览器数据会清除缓存；换电脑、留备份请用 .blotfig 项目文件。
+
+「文件 → 参数预设」保存字号、版式、导出参数和 Marker 型号；可命名、套用、导出和导入。自定义 Marker 在第 4 步直接粘贴条带数字，或导入 TXT/CSV/JSON，预览后保存即可。
+
+<img src="docs/gallery-zh.png" alt="相册式分组和右侧放大浏览" width="900">
+
 ## 五个步骤
 
-左侧一次只展开一步，看过、需要就改，再点 **下一步**。做完的步骤收成一行摘要，可以随时点开再改；顶栏一直写着现在该做什么。
+新实验先按顺序确认；之后用各栏的「展开／收起」直接切换工具，修改会保留，无需重新走流程。「添加蛋白框」在第 3 栏顶部；选中蛋白框后按退格只删这个框，编辑文字时正常删字。
 
 1. **确认 Marker 图** —— 每张膜要有一张看得见 Marker 的图。猜的那张标 ★，不对就点对的那张下面的"设为 Marker 图"。
 2. **检查膜条** —— 蓝框是在 Marker 图上找到的膜条，直接在图上移动、缩放、旋转、新画或删除。
@@ -112,13 +122,13 @@
 
 ## 版本
 
-当前版本 **0.9.0**：增加一张 WB 图内的可选多列排版，各列分别设置泳道名、条件和标题；Marker 字号可全局或逐区域调整，可隐藏数字并保留校准；支持粘贴 Excel 条件表和竖排侧边标注。移动区域后曝光、亮度和裁切保持独立。详见[更新记录](CHANGELOG.md)。
+当前版本 **0.10.0**：新增中间相册＋右侧大图，步骤可直接展开修改；退格独立删框，名称统一在成图填写。支持自定义 Marker 导入、统一字号和固定短刻度、本机历史项目与参数预设。修复 iBright 名称以及 Chemi 文件名误导复合图分类的问题。详见[更新记录](CHANGELOG.md)。
 
 ## 隐私
 
 BlotFigure 是一个没有后端的静态网页。图片由浏览器里的 JavaScript 解码和处理，结果通过浏览器自己的下载功能保存。
 
-页面带有[内容安全策略（CSP）](index.html)，**禁止它连接任何其他服务器**（只能读取它自己的文件），这一点由浏览器强制执行，而不只是承诺。保存在你电脑上的只有偏好设置、自定义 Marker 和浏览器本地存储里的自动草稿。
+页面带有[内容安全策略（CSP）](index.html)，**禁止它连接任何其他服务器**（只能读取它自己的文件），这一点由浏览器强制执行，而不只是承诺。保存在你电脑上的只有偏好设置、自定义 Marker 和IndexedDB 中的历史项目。
 
 ## 区域独立，取消拼接
 
@@ -197,7 +207,7 @@ BlotFigure 帮你符合规范，但**遵守期刊规定的责任仍在你自己*
 
 Windows、macOS、Linux 上较新的 Chrome、Edge、Firefox 和 Safari 16.4 以上，用鼠标操作（暂无手机布局）。每次改动都会在 Chromium、Firefox 和 WebKit 里自动跑一遍测试。
 
-直接从硬盘打开下载的 HTML 时，有些浏览器对本地文件禁用 IndexedDB：除自动草稿外一切正常。需要草稿时请用在线版，或"保存项目"。
+直接从硬盘打开下载的 HTML 时，有些浏览器对本地文件禁用 IndexedDB：历史项目可能不可用。需要缓存时请用在线版，或"保存项目"。
 
 ## 已知局限
 
@@ -223,6 +233,8 @@ js/tiff.js          TIFF 解码                    js/engine.js     与 GelFigur
 js/wbengine.js      WB 分析：分类、归膜、膜条、蛋白行、泳道、Marker 拟合、曝光选择、图与图的对齐
 js/wbladders.js     预染 Marker 库               js/wbdemo.js     合成示例膜
 js/wbapp.js         状态、撤销、项目文件、草稿、对齐、行与框、规范检查、处理日志
+js/wblibrary.js     历史项目缓存和参数预设
+js/wbextras.js      历史/预设对话框、Marker 导入、图片浏览
 js/wbrender.js      排版成 SVG                   js/export.js     PNG / TIFF / SVG 导出
 js/wbview.js        中间的膜图交互               js/wbui.js       5 步面板、成图上直接编辑
 test/*.html         算法自测（合成膜）
