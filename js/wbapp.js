@@ -30,7 +30,62 @@
   }
 
   const App = { images: new Map(), analysis: {}, S: null, hist: [], future: [], listeners: [], selRow: null, selSeg: null, selLane: null, viewBlot: null, viewImg: null, mode: null };
-  App.VERSION = '0.8.2';
+  App.VERSION = '0.9.0';
+  App.activeColumn = 'main';
+  const columnFields = new Set(['lanes', 'range', 'hiCol', 'groups', 'conditions']);
+  App.layoutColumns = () => App.S.layoutColumns || (App.S.layoutColumns = [{ id: 'main', title: '', titleSide: 'top' }]);
+  App.rowColumn = r => r.column || 'main';
+  App.columnData = id => !id || id === 'main' ? App.S : App.layoutColumns().find(c => c.id === id) || App.S;
+  App.rowsInColumn = id => App.S.rows.filter(r => App.rowColumn(r) === (id || 'main'));
+  App.columnState = id => ({ ...App.S, ...Object.fromEntries([...columnFields].map(k => [k, App.columnData(id)[k]])), rows: App.rowsInColumn(id) });
+  App.uiState = () => App.S && new Proxy(App.S, {
+    get: (s, k) => columnFields.has(k) ? App.columnData(App.activeColumn)[k] : s[k],
+    set: (s, k, v) => { (columnFields.has(k) ? App.columnData(App.activeColumn) : s)[k] = v; return true; }
+  });
+  App.addColumn = () => {
+    const c = { id: uid('col'), title: '', titleSide: 'top', lanes: [], range: [1, 1], hiCol: 0, conditions: [], groups: [] };
+    App.layoutColumns().push(c); App.activeColumn = c.id; return c;
+  };
+  App.removeColumn = id => {
+    if (App.layoutColumns().length < 2 || App.rowsInColumn(id).length) return false;
+    const remaining = App.layoutColumns().filter(c => c.id !== id);
+    if (id === 'main') {
+      const next = remaining[0], oldId = next.id;
+      columnFields.forEach(k => { App.S[k] = next[k]; });
+      App.rowsInColumn(oldId).forEach(r => { r.column = 'main'; }); next.id = 'main';
+      columnFields.forEach(k => { delete next[k]; });
+    }
+    App.S.layoutColumns = remaining; App.activeColumn = 'main'; return true;
+  };
+  App.moveToColumn = (row, id, beforeId) => {
+    if (!row || !App.S.rows.includes(row) || !App.layoutColumns().some(c => c.id === id)) return false;
+    const from = App.rowColumn(row); row.column = id;
+    const rows = App.S.rows, old = rows.indexOf(row); rows.splice(old, 1);
+    let at = beforeId ? rows.findIndex(r => r.id === beforeId && App.rowColumn(r) === id) : -1;
+    if (at < 0) { const last = rows.map(r => App.rowColumn(r)).lastIndexOf(id); at = last < 0 ? rows.length : last + 1; }
+    rows.splice(at, 0, row); App.activeColumn = id;
+    if (from !== id) { App.fitLanes(true, from); App.fitLanes(true, id); }
+    return true;
+  };
+  App.copyColumnLabels = (from, to) => {
+    if (from === to) return;
+    const a = App.columnData(from), b = App.columnData(to), clone = x => JSON.parse(JSON.stringify(x));
+    const n = Math.max(0, ...App.rowsInColumn(to).flatMap(r => r.segs.map(App.segEnd))) || a.lanes.length;
+    b.lanes = Array.from({ length: n }, (_, i) => ({ name: (a.lanes[i] || {}).name || '', hidden: false }));
+    b.conditions = clone(a.conditions).map(c => ({ ...c, values: Array.from({ length: n }, (_, i) => c.values[i] || '') }));
+    b.groups = clone(a.groups).filter(g => g.from <= n).map(g => ({ ...g, to: Math.min(n, g.to) }));
+    App.fitLanes(true, to);
+  };
+  App.pasteConditions = (raw, id, replace) => {
+    const rows = String(raw).replace(/\r/g, '').replace(/\n+$/, '').split('\n');
+    if (!raw.trim()) return { error: L('先粘贴条件表格。', 'Paste a condition table first.') };
+    const fl = App.figLanes(id), data = App.columnData(id), cells = rows.map(s => s.split('\t'));
+    if (cells.some(r => r.length - 1 > fl.length)) return { error: L('表格的值多于本列显示的泳道，请检查泳道范围或表格。', 'More values than visible lanes in this column. Check the lane range or table.') };
+    const conditions = cells.map(r => { const values = data.lanes.map(() => ''); fl.forEach((j,i) => { values[j - 1] = (r[i + 1] || '').trim(); }); return { name: r[0].trim(), values }; });
+    data.conditions = replace ? conditions : data.conditions.concat(conditions);
+    return { count: conditions.length };
+  };
+  App.markerId = m => m.id || (m.id = uid('mark'));
   const retiredImages = new Map(); // reversible removal; only active images are saved/exported
   App.activeImageIds = () => new Set((App.S ? App.S.blots : []).flatMap(b => b.images));
   App.syncImages = () => {
@@ -87,11 +142,12 @@
    * label wider than its line wraps ('wrap'), shrinks down to minFontPt ('shrink') or stays ('none') */
   const defaultStyle = () => ({ mmPerLane: 5, fontPt: 7, lineWidthPt: 0.5, labelAngle: 'auto', rowGapPt: 2, blotGapPt: 5,
     tickLenPt: 2.5, labelGapPt: 2.5, unitHeader: true, showMW: true, panelLetter: '', dpi: 600, invert: true, border: false, mwSide: 'left', nameSide: 'right',
-    laneNumbers: false, lanePt: null, markerPt: null, namePt: null, groupFit: 'wrap', minFontPt: 5, groupTicks: false });
+    laneNumbers: false, lanePt: null, markerPt: null, namePt: null, groupFit: 'wrap', minFontPt: 5, groupTicks: false,
+    columnGapMm: 6, alignColumnRows: false });
   App.defaultStyle = defaultStyle;
   /* step: how far the user has come (1 Marker picture confirmed → 2 pieces confirmed → 3 boxes → 4 marker →
    * 5 names); each step works on what the one before established */
-  const newState = () => ({ step: 1, blots: [], rows: [], lanes: [], range: [1, 1], hiCol: 0, levels: {}, align: {}, conditions: [], groups: [], arrows: [], brackets: [], style: defaultStyle() });
+  const newState = () => ({ step: 1, blots: [], rows: [], lanes: [], range: [1, 1], hiCol: 0, levels: {}, align: {}, conditions: [], groups: [], arrows: [], brackets: [], layoutColumns: [{ id: 'main', title: '', titleSide: 'top' }], style: defaultStyle() });
 
   /* ---------- events / undo ---------- */
   App.on = fn => App.listeners.push(fn);
@@ -101,7 +157,11 @@
   App.commit = function () {
     if (!App.S) return;
     App.S.rows.forEach(r => r.segs.forEach(s => { App.boxId(s); App.boxLabel(s); }));
-    roomLeft(); trimLeft();
+    const columnIds = new Set(App.layoutColumns().map(c => c.id));
+    App.S.rows.forEach(r => { if (!columnIds.has(App.rowColumn(r))) r.column = 'main'; });
+    if (!App.layoutColumns().some(c => c.id === App.activeColumn)) App.activeColumn = 'main';
+    App.layoutColumns().forEach(c => { roomLeft(c.id); trimLeft(c.id); });
+    App.S.blots.forEach(b => (b.pieces || []).forEach(pc => (pc.marks || []).forEach(App.markerId)));
     if (App.S.arrows) App.S.arrows = App.S.arrows.filter(a => App.row(a.row));     // (a deleted row takes its arrows; undo brings both)
     if (App.S.brackets) App.S.brackets = App.S.brackets.filter(k => App.row(k.r0) && App.row(k.r1));
     App.fitLanes(false);
@@ -116,6 +176,7 @@
   function swapState(json) {
     if (App.onSwap) App.onSwap();
     App.S = JSON.parse(json);
+    if (!App.layoutColumns().some(c => c.id === App.activeColumn)) App.activeColumn = 'main';
     App.syncImages();
     App.selLane = null; App.selMark = null;
     if (App.selRow && !App.row(App.selRow)) { App.selRow = null; App.selSeg = null; }
@@ -267,7 +328,7 @@
     if (!App.S.arrows) App.S.arrows = [];
     if (!App.S.brackets) App.S.brackets = [];
     App.S.style = Object.assign(defaultStyle(), App.S.style || {});      // (settings added since: their defaults)
-    App.selRow = App.selSeg = App.selLane = App.selMark = null; App.mode = null;
+    App.selRow = App.selSeg = App.selLane = App.selMark = null; App.mode = null; App.activeColumn = 'main';
     App.viewBlot = App.blot(head.viewBlot) ? head.viewBlot : (App.S.blots[0] || {}).id; App.viewImg = null;
     App.loadWarnings = [];
     App.syncAlign();
@@ -822,9 +883,9 @@
   // matches the marker band along the box's tilt, not along the piece's), else of the piece
   function marksIn(pc, sg) {
     const ms = (pc.marks || []).filter(m => m.kda > 0);
-    if (!sg || !sg.rot) return ms.map(m => ({ v: m.v, kda: m.kda }));
+    if (!sg || !sg.rot) return ms.map(m => ({ id: App.markerId(m), v: m.v, kda: m.kda }));
     const F = pFrame(pc), B = App.segFrame(pc, sg);
-    return ms.map(m => ({ v: WB.toFrame(B, ...WB.toImg(F, m.u, m.v))[1], kda: m.kda }));
+    return ms.map(m => ({ id: App.markerId(m), v: WB.toFrame(B, ...WB.toImg(F, m.u, m.v))[1], kda: m.kda }));
   }
   /* size <-> position on one piece (sg: in that box's frame), from the marker bands the user marked on it —
    * nothing is read automatically (prestained ladders on real membranes are too varied for that).
@@ -839,7 +900,7 @@
     return { manual: true, c: c < 0 ? c : null, knots: K };
   };
   // kDa ticks a piece shows: its marks (sg: heights in that box's frame)
-  App.pieceTicks = (b, pc, sg) => (pc && pc.marks ? marksIn(pc, sg).map(m => ({ v: m.v, k: m.kda })) : []);
+  App.pieceTicks = (b, pc, sg) => (pc && pc.marks ? marksIn(pc, sg).map(m => ({ id: m.id, v: m.v, k: m.kda })) : []);
   App.rowKda = function (row) {
     const b = App.blot(row.blot); if (!b) return null;
     for (const sg of row.segs) {
@@ -1083,27 +1144,27 @@
    * and lines up each piece's lanes with the others' as needed (e.g. lanes 4-6 of one piece over lanes 1-3
    * of another, when the membrane was cut). */
   // room on the left: every column moves right by s, the lane names, conditions and groups with it
-  App.makeRoom = function (s) {
+  App.makeRoom = function (s, columnId) {
     if (!(s > 0)) return;
-    const S = App.S;
+    const S = App.columnState(columnId);
     S.rows.forEach(r => r.segs.forEach(sg => { sg.c0 += s; }));
     for (let k = 0; k < s; k++) S.lanes.unshift({ name: '', hidden: false });
     S.conditions.forEach(c => { for (let k = 0; k < s; k++) c.values.unshift(''); });
     S.groups.forEach(g => { g.from += s; g.to += s; });
     S.range = [S.range[0] <= 1 ? 1 : S.range[0] + s, S.range[1] + s];
-    S.hiCol += s;
+    S.hiCol += s; Object.assign(App.columnData(columnId), { lanes: S.lanes, range: S.range, hiCol: S.hiCol });
   };
   // first figure column of every box with sample lanes
-  const firstCols = () => App.S.rows.flatMap(r => r.segs.filter(s => App.nSample(s)).map(s => s.c0));
+  const firstCols = columnId => App.rowsInColumn(columnId).flatMap(r => r.segs.filter(s => App.nSample(s)).map(s => s.c0));
   // a box widened past column 1 (lanes gained on its left): room on the left for it
-  function roomLeft() {
-    const lo = Math.min(...firstCols());
-    if (lo < 1) App.makeRoom(1 - lo);
+  function roomLeft(columnId) {
+    const lo = Math.min(...firstCols(columnId));
+    if (lo < 1) App.makeRoom(1 - lo, columnId);
   }
   // columns on the left that no box fills and nothing was typed for: gone, everything moves left (a box moved
   // right and back again leaves no blank column behind)
-  function trimLeft() {
-    const S = App.S, cols = firstCols();
+  function trimLeft(columnId) {
+    const S = App.columnState(columnId), cols = firstCols(columnId);
     if (!cols.length) return;
     const k = Math.min(...cols) - 1;
     const blank = n => { const l = S.lanes[n - 1]; return !l || (!l.name && !l.hidden && S.conditions.every(c => !c.values[n - 1]) && S.groups.every(g => Math.min(g.from, g.to) > n)); };
@@ -1114,7 +1175,7 @@
     S.conditions.forEach(c => c.values.splice(0, s));
     S.groups.forEach(g => { g.from -= s; g.to -= s; });
     S.range = [Math.max(1, S.range[0] - s), Math.max(1, S.range[1] - s)];
-    S.hiCol = Math.max(0, S.hiCol - s);
+    S.hiCol = Math.max(0, S.hiCol - s); Object.assign(App.columnData(columnId), { lanes: S.lanes, range: S.range, hiCol: S.hiCol });
   }
   /* Move this box only, never its siblings on the same physical strip. The former onlyBox argument remains
    * accepted for saved test scenarios; it no longer changes the scope. Stop at column 1. */
@@ -1139,7 +1200,7 @@
   // one place up (-1) or down (+1) among the rows the figure shows (a hidden row: among all rows)
   App.moveRowBy = function (id, d) {
     const row = App.row(id); if (!row) return false;
-    const list = row.hidden ? App.S.rows : App.S.rows.filter(r => !r.hidden), i = list.indexOf(row), j = i + d;
+    const list = App.rowsInColumn(App.rowColumn(row)).filter(r => row.hidden || !r.hidden), i = list.indexOf(row), j = i + d;
     if (i < 0 || j < 0 || j >= list.length) return false;
     return App.moveRow(id, App.S.rows.indexOf(list[j]) + (d > 0 ? 1 : 0));
   };
@@ -1150,7 +1211,7 @@
     const p = App.segPitch(sg), mine = App.segCols(sg).filter(s => s.col != null);
     if (!mine.length) return;
     let refs = [];
-    App.S.rows.forEach(r => { if (r !== row) r.segs.forEach(t => { if (t.piece === sg.piece) App.segCols(t).forEach(s => { if (s.col != null) refs.push(s); }); }); });
+    App.S.rows.forEach(r => { if (r !== row && App.rowColumn(r) === App.rowColumn(row)) r.segs.forEach(t => { if (t.piece === sg.piece) App.segCols(t).forEach(s => { if (s.col != null) refs.push(s); }); }); });
     if (!refs.length) refs = App.pieceSlots(pc).filter(s => s.col != null);
     const offs = [];
     mine.forEach((s, k) => {
@@ -1200,7 +1261,7 @@
     return k;
   };
   // the rows a bracket spans, in the figure's order
-  App.bracketRows = k => { const ix = id => App.S.rows.findIndex(r => r.id === id), a = Math.min(ix(k.r0), ix(k.r1)), b = Math.max(ix(k.r0), ix(k.r1)); return a < 0 ? [] : App.S.rows.slice(a, b + 1); };
+  App.bracketRows = k => { const r = App.row(k.r0); if (!r) return []; const rows = App.rowsInColumn(App.rowColumn(r)), ix = id => rows.findIndex(r => r.id === id), a = Math.min(ix(k.r0), ix(k.r1)), b = Math.max(ix(k.r0), ix(k.r1)); return a < 0 ? [] : rows.slice(a, b + 1); };
   // an arrow's size from the marks of its row's first box ('≈' beyond the marked bands); '' without 2 marks
   App.arrowSize = function (a) {
     const row = App.row(a.row), sg = row && row.segs[0], b = row && App.blot(row.blot), pcal = sg && App.pieceCal(b, App.piece(b, sg.piece), sg);
@@ -1240,8 +1301,9 @@
     row.segs.forEach(sg => App.segCols(sg).forEach(s => { if (s.col == null) return; if (seen.has(s.col) && seen.get(s.col) !== sg) clash.push(s.col); seen.set(s.col, sg); }));
     return clash;
   };
-  App.fitLanes = function (resetRange) {
-    const S = App.S;
+  App.fitLanes = function (resetRange, columnId) {
+    if (columnId == null) { App.layoutColumns().forEach(c => App.fitLanes(resetRange, c.id)); return; }
+    const S = App.columnState(columnId);
     let hi = 1, hiVis = 0, lo = Infinity;
     S.rows.forEach(r => r.segs.forEach(sg => {
       if (!App.nSample(sg)) return;
@@ -1260,13 +1322,13 @@
     });
     if (resetRange || !S.range || S.range[0] > hiVis) S.range = [lo, hiVis];
     else if (S.hiCol && S.range[1] === S.hiCol && hiVis !== S.hiCol) S.range[1] = hiVis;   // the range ran to the last column: keep it so
-    S.hiCol = hiVis;
+    S.hiCol = hiVis; Object.assign(App.columnData(columnId), { lanes: S.lanes, range: S.range, hiCol: S.hiCol });
   };
-  App.figLanes = () => { const out = []; for (let j = App.S.range[0]; j <= App.S.range[1]; j++) if (App.S.lanes[j - 1] && !App.S.lanes[j - 1].hidden) out.push(j); return out; };
+  App.figLanes = (columnId = App.activeColumn) => { const S = App.columnData(columnId), out = []; for (let j = S.range[0]; j <= S.range[1]; j++) if (S.lanes[j - 1] && !S.lanes[j - 1].hidden) out.push(j); return out; };
   /* Figure columns shown, the source of every row in every column, and where a white gap separates
    * columns: wherever neighbouring columns are not neighbouring lanes of one box in some row. */
-  App.columns = function () {
-    const S = App.S, vis = App.figLanes(), rows = S.rows.filter(r => !r.hidden && App.blot(r.blot) && App.images.has(r.img));
+  App.columns = function (columnId = App.activeColumn) {
+    const S = App.columnState(columnId), vis = App.figLanes(columnId), rows = S.rows.filter(r => !r.hidden && App.blot(r.blot) && App.images.has(r.img));
     const src = rows.map(r => vis.map(j => App.colSource(r, j)));
     const gapAfter = new Set();
     for (let k = 0; k + 1 < vis.length; k++) {
@@ -1278,7 +1340,7 @@
     return { vis, rows, src, gapAfter, segs };
   };
   App.segments = () => App.columns().segs;
-  App.ensureLane = j => { while (App.S.lanes.length < j) App.S.lanes.push({ name: '', hidden: false }); };
+  App.ensureLane = (j, columnId = App.activeColumn) => { const S = App.columnData(columnId); while (S.lanes.length < j) S.lanes.push({ name: '', hidden: false }); };
 
   /* ---------- rows: geometry, exposures, levels ---------- */
   App.rowPieces = row => { const b = App.blot(row.blot); return [...new Set(row.segs.map(sg => App.piece(b, sg.piece)).filter(Boolean))]; };
@@ -1287,7 +1349,7 @@
   App.rowXY = row => { const b = App.blot(row.blot), sg = row.segs[0], pc = sg && App.piece(b, sg.piece); return pc ? WB.toImg(pFrame(pc), 0, sg.vc) : [0, 0]; };
   // the windows of a row on its boxes, over the lanes shown in the figure (all lanes if none is shown)
   App.rowParts = function (row, all) {
-    const b = App.blot(row.blot), vis = new Set(App.figLanes()), parts = [];
+    const b = App.blot(row.blot), vis = new Set(App.figLanes(App.rowColumn(row))), parts = [];
     row.segs.forEach(sg => {
       const pc = App.piece(b, sg.piece); if (!pc || !sg.lanes.length) return;
       const cs = App.segCols(sg).filter(s => s.col != null && (all || vis.has(s.col)));
@@ -1301,9 +1363,9 @@
   App.rowExpo = function (row) {
     const b = App.blot(row.blot); if (!b || b.dirty) return [];
     const ch = App.chemiOf(b);
-    const key = row.id + JSON.stringify([row.segs, row.above, row.below, App.S.range, App.figLanes()]) + ch.map(c => c.id);
+    const key = row.id + JSON.stringify([row.segs, row.above, row.below]) + ch.map(c => c.id);
     if (expoCache.has(key)) return expoCache.get(key);
-    const parts = App.rowParts(row);
+    const parts = App.rowParts(row, true);
     const res = parts.length ? ch.map(c => Object.assign(WB.evalExposure(c.img, c.cs, parts, c.factor || 1), { id: c.id })) : [];
     if (expoCache.size > 400) expoCache.clear();
     expoCache.set(key, res);
@@ -1392,7 +1454,7 @@
   App.rowThumb = function (row, imgId, maxW) {
     const rec = App.images.get(imgId), e = App.rowExpo(row).find(x => x.id === imgId);
     if (!rec || !e) return null;
-    const parts = App.rowParts(row), inv = App.S.style.invert;
+    const parts = App.rowParts(row, true), inv = App.S.style.invert;
     if (!parts.length) return null;
     const key = [row.id, imgId, JSON.stringify([row.above, row.below, parts.map(p => [p.u0, p.u1, p.vTop])]), inv, maxW].join('|');
     if (thumbCache.has(key)) return thumbCache.get(key);
@@ -1449,7 +1511,7 @@
     const bandH = hs.length ? hs[hs.length >> 1] : 16, margin = Math.min(100, Math.max(16, bandH * 2.5)), half = pc.h / 2;
     const lat = App.pieceLanes(b, pc, v);
     const sg = { piece: pc.id, vc: v, b0: -bandH / 2, b1: bandH / 2, lanes: lat.lanes, c0: lat.c0, p: lat.p, x0: -pc.w / 2, x1: pc.w / 2 };
-    const row = { id: uid('r'), blot: blotId, name: '', img: App.chemiOf(b)[0].id, auto: true, hidden: false, manual: true, segs: [sg],
+    const row = { id: uid('r'), column: App.activeColumn, blot: blotId, name: '', img: App.chemiOf(b)[0].id, auto: true, hidden: false, manual: true, segs: [sg],
       above: Math.max(bandH / 2 + 4, Math.min(bandH / 2 + margin, v + half - 2)), below: Math.max(bandH / 2 + 4, Math.min(bandH / 2 + margin, half - v - 2)) };
     if (!sg.lanes.length && !App.redetectBox(row, sg)) App.evenBox(row, sg, Math.max(1, Math.round(pc.w / (pc.pitch || 100))));
     App.snapBox(sg);
@@ -1464,7 +1526,7 @@
     if (!pc || !ch.length) return null;
     const half = Math.max(3, (v1 - v0) / 2);
     const sg = { piece: pc.id, vc: (v0 + v1) / 2, b0: -half / 2, b1: half / 2, lanes: [], c0: 1, p: pc.pitch || 100, x0: u0, x1: u1 };
-    const row = { id: uid('r'), blot: blotId, name: '', img: ch[ch.length - 1].id, auto: true, hidden: false, manual: true, segs: [sg], above: half, below: half };
+    const row = { id: uid('r'), column: App.activeColumn, blot: blotId, name: '', img: ch[ch.length - 1].id, auto: true, hidden: false, manual: true, segs: [sg], above: half, below: half };
     App.redetectBox(row, sg);
     const p = sg.lanes.length >= 2 ? App.segPitch(sg) : pc.pitch || 100;
     sg.x0 = u0; sg.x1 = u1;
@@ -1710,8 +1772,9 @@
       const on = S.blots.length > 1 ? App.blotName(App.blot(r.blot)) + ' ' : '', ls = App.rowPieces(r).map(pc => pc.letter).join('+');
       return L(`${on}膜条 ${ls} 的行`, `row on ${on}strip ${ls}`);
     };
-    const C = App.columns();
+    const grids = App.layoutColumns().map(c => App.columns(c.id));
     vis.forEach(r => {
+      const C = App.columns(App.rowColumn(r));
       const e = App.rowExpo(r).find(x => x.id === r.img);
       if (e && e.satFrac > 0.002) warn.push(L(`「${label(r)}」所选曝光中条带有过曝像素，定量不可靠，建议换短曝光`,
         `"${label(r)}": the bands have saturated pixels in the chosen exposure, so quantification is unreliable; use a shorter exposure`));
@@ -1744,8 +1807,8 @@
           `Marker ticks on ${App.pieceName(b, pc)} are out of order: molecular weights should decrease from top to bottom`));
       });
     });
-    const localCuts = C.src.some(rs => rs.some((a, i) => i > 0 && a && rs[i - 1] && (a.sg !== rs[i - 1].sg || a.i !== rs[i - 1].i + 1)));
-    if (C.gapAfter.size || localCuts) legend.push('White gaps indicate discontinuities between the displayed source lanes or crop fragments.');
+    const localCuts = grids.some(C => C.src.some(rs => rs.some((a, i) => i > 0 && a && rs[i - 1] && (a.sg !== rs[i - 1].sg || a.i !== rs[i - 1].i + 1))));
+    if (grids.some(C => C.gapAfter.size) || localCuts) legend.push('White gaps indicate discontinuities between the displayed source lanes or crop fragments.');
     if (S.style.invert) legend.push('Chemiluminescence images are shown inverted (dark bands on a light background).');
     // (levels of the whole picture, or a row's own: said as they are)
     const ownLv = vis.filter(r => r.lv).length;
@@ -1807,8 +1870,9 @@
     const f = G.BRender.build(false), minPt = Math.round((f.minPt || st.fontPt) * 10) / 10;
     if (minPt < 5) add('warn', L(`最小字号 ${minPt} pt 偏小（多数期刊要求 ≥ 5–6 pt）。`, `The smallest text is ${minPt} pt (most journals ask for ≥ 5–6 pt).`), { label: L('全部至少 6 pt', 'Make all text ≥ 6 pt'), run: () => {
       const up = v => (v && v < 6 ? 6 : v);
+      S.rows.forEach(r => { if (r.markerPt) r.markerPt = up(r.markerPt); });
       st.fontPt = Math.max(st.fontPt, 6); ['lanePt', 'markerPt', 'namePt'].forEach(k => { st[k] = up(st[k]); }); st.minFontPt = Math.max(st.minFontPt || 5, 6);
-      [S.groups, S.conditions, S.arrows, S.brackets].forEach(list => (list || []).forEach(o => { if (o.pt) o.pt = up(o.pt); }));
+      [...App.layoutColumns().flatMap(c => [App.columnData(c.id).groups, App.columnData(c.id).conditions]), S.arrows, S.brackets].forEach(list => (list || []).forEach(o => { if (o.pt) o.pt = up(o.pt); }));
     } });
     if (st.lineWidthPt < 0.25) add('warn', L(`线宽 ${st.lineWidthPt} pt 太细。`, `Line width ${st.lineWidthPt} pt is too thin.`), { label: L('改为 0.5 pt', 'Use 0.5 pt'), run: () => { st.lineWidthPt = 0.5; } });
     const wmm = f.w / MM;
@@ -1817,8 +1881,11 @@
     const unnamed = vis.filter(r => !r.name), nu = unnamed.length;
     if (nu) add('warn', L(`${nu} 行还没有蛋白名（成图上不显示名字）。`, `${nu} ${nu === 1 ? 'row has' : 'rows have'} no protein name yet (no name shows in the figure).`),
       { label: L('去填名字', 'Add names'), leave: true, run: () => { if (App.goNames) App.goNames(); } });
-    const lanesNoName = App.figLanes().filter(j => !(S.lanes[j - 1] || {}).name), nl = lanesNoName.length;
-    if (nl && nl < App.figLanes().length) add('info', L(`${nl} 条泳道还没有名字。`, `${nl} ${nl === 1 ? 'lane has' : 'lanes have'} no name yet.`));
+    const allLanes = App.layoutColumns().flatMap(c => App.figLanes(c.id).map(j => App.columnData(c.id).lanes[j - 1]));
+    const lanesNoName = allLanes.filter(l => !l.name), nl = lanesNoName.length;
+    if (App.layoutColumns().some(c => !App.rowsInColumn(c.id).some(r => !r.hidden))) add('info', L('空的排版列不会导出。', 'Empty layout columns are omitted from exports.'));
+    if ((S.brackets || []).some(k => !App.bracketRows(k).length)) add('warn', L('有括号的两端已移到不同列：该括号暂不显示，可将区域移回或重新标注。', 'A bracket spans different columns and is not displayed. Move its regions back or redraw it.'));
+    if (nl && nl < allLanes.length) add('info', L(`${nl} 条泳道还没有名字。`, `${nl} ${nl === 1 ? 'lane has' : 'lanes have'} no name yet.`));
     else if (nl) add('info', L('泳道还没有名字（成图上方只有空白）。', 'The lanes have no names yet (the top of the figure is blank).'),
       { label: L('去填泳道名', 'Add lane names'), leave: true, run: () => { if (App.goNames) App.goNames(true); } });
     // (checks() warnings that belong here, told by their words in either language)
@@ -1849,10 +1916,10 @@
       membranes: S.blots.map(b => ({ name: App.blotNameEn(b), markerPicture: (App.markerRec(b) || {}).name || null, ladder: (G.ProteinLadders.get(b.ladderId) || {}).name || null,
         piecesSetByHand: !!b.userStrips,
         pieces: (b.pieces || []).map(pc => ({ letter: pc.letter, centrePx: [r1(pc.cx), r1(pc.cy)], angleDeg: pc.angle, sizePx: [r1(pc.w), r1(pc.h)],
-          markerMarks: (pc.marks || []).filter(m => m.kda > 0).map(m => ({ kDa: m.kda, vPx: r1(m.v) })) })) })),
+          markerMarks: (pc.marks || []).filter(m => m.kda > 0).map(m => ({ id: App.markerId(m), kDa: m.kda, vPx: r1(m.v) })) })) })),
       rows: S.rows.map(r => {
         const b = App.blot(r.blot), e = App.rowExpo(r).find(x => x.id === r.img), lv = App.rowLevels(r);
-        return { name: r.name || null, shown: !r.hidden, membrane: App.blotNameEn(b), exposure: (App.images.get(r.img) || {}).name || null,
+        return { column: App.rowColumn(r), markerPt: r.markerPt || null, hiddenMarkers: r.hiddenMarkers || [], name: r.name || null, shown: !r.hidden, membrane: App.blotNameEn(b), exposure: (App.images.get(r.img) || {}).name || null,
           recommendedExposure: (App.images.get(App.bestExpo(r)) || {}).name || null, saturatedBandFrac: e ? +e.satFrac.toFixed(5) : null,
           apparentKDa: App.rowKda(r) ? r1(App.rowKda(r)) : null,
           levels: { black: lv.black, white: lv.white, ownToThisRow: !!r.lv },
@@ -1860,10 +1927,11 @@
             boxPx: { u0: r1(sg.x0), u1: r1(sg.x1), vTop: r1(sg.vc - App.boxAbove(r, sg)), vBottom: r1(sg.vc + App.boxBelow(r, sg)) },
             lanes: sg.lanes.map(l => ({ uPx: r1(l.u), role: l.r === 's' ? 'sample' : l.r === 'm' ? 'marker' : 'left out' })) })) };
       }),
-      figure: { widthMm: r1(f.w / MM), heightMm: r1(f.h / MM), columns: App.figLanes(), laneNames: App.figLanes().map(j => (S.lanes[j - 1] || {}).name || ''),
+      figure: { widthMm: r1(f.w / MM), heightMm: r1(f.h / MM), columns: App.figLanes('main'), laneNames: App.figLanes('main').map(j => (S.lanes[j - 1] || {}).name || ''),
+        layoutColumns: App.layoutColumns().map(c => ({ id: c.id, title: c.title, titleSide: c.titleSide, ...Object.fromEntries([...columnFields].map(k => [k, App.columnData(c.id)[k]])) })),
         effectiveBandDpi: Math.round(Math.min(99999, App.effectiveDpi())), exportDpi: S.style.dpi },
       arrows: (S.arrows || []).map(a => ({ row: (App.row(a.row) || {}).name || null, symbol: a.sym, side: a.side, text: a.text || null, size: a.sym === '◀' ? (a.sizeText || App.arrowSize(a) || null) : null, userSize: a.sizeText || null })),
-      brackets: (S.brackets || []).map(k => ({ fromRow: (App.row(k.r0) || {}).name || null, toRow: (App.row(k.r1) || {}).name || null, fromFrac: k.f0, toFrac: k.f1, side: k.side, text: k.text || null })),
+      brackets: (S.brackets || []).map(k => ({ fromRow: (App.row(k.r0) || {}).name || null, toRow: (App.row(k.r1) || {}).name || null, fromFrac: k.f0, toFrac: k.f1, side: k.side, vertical: !!k.vertical, line: !!k.line, text: k.text || null })),
       groups: S.groups, conditions: S.conditions, style: S.style,
       legendHints: ck.legend
     };
@@ -1875,7 +1943,7 @@
   App.resetAll = function () {
     if (!App.initial) return false;
     if (App.onSwap) App.onSwap();
-    App.S = JSON.parse(App.initial);
+    App.S = JSON.parse(App.initial); App.activeColumn = 'main';
     App.selRow = App.selSeg = App.selLane = App.selMark = null;
     App.syncPieces(); App.syncAlign();
     return true;
@@ -1883,8 +1951,10 @@
   /* a style file: what one figure of a series shares with the next — lane names, groups and condition rows
    * (relative to the figure's first column), the protein names top to bottom, the ladder and the layout */
   App.template = function () {
-    const S = App.S, fl = App.figLanes(), rel = j => fl.indexOf(j);
+    const S = App.S, fl = App.figLanes('main'), rel = j => fl.indexOf(j);
     return { blotfigTemplate: 1, app: 'BlotFigure ' + App.VERSION,
+      layoutColumns: App.layoutColumns().map(c => ({ id: c.id, title: c.title, titleSide: c.titleSide, lanes: App.columnData(c.id).lanes.map(l => ({name:l.name})), groups: App.columnData(c.id).groups, conditions: App.columnData(c.id).conditions })),
+      rowColumns: S.rows.filter(r => !r.hidden).map(App.rowColumn),
       lanes: fl.map(j => ({ name: (S.lanes[j - 1] || {}).name || '' })),
       groups: S.groups.map(g => ({ from: rel(Math.min(g.from, g.to)), to: rel(Math.max(g.from, g.to)), text: g.text || '', pt: g.pt || null })).filter(g => g.from >= 0 && g.to >= 0),
       conditions: S.conditions.map(c => ({ name: c.name || '', values: fl.map(j => c.values[j - 1] || ''), pt: c.pt || null })),
@@ -1894,7 +1964,7 @@
   };
   App.applyTemplate = function (t) {
     if (!t || !t.blotfigTemplate) throw new Error(L('不是 BlotFigure 样式文件', 'Not a BlotFigure style file'));
-    const S = App.S, fl = App.figLanes(), vis = S.rows.filter(r => !r.hidden);
+    const S = App.S, fl = App.figLanes('main'), vis = S.rows.filter(r => !r.hidden);
     const abs = k => fl[Math.max(0, Math.min(fl.length - 1, k))];
     (t.lanes || []).forEach((l, k) => { if (fl[k] != null) S.lanes[fl[k] - 1].name = l.name || ''; });
     S.groups = (t.groups || []).filter(g => g.from < fl.length).map(g => Object.assign({ from: abs(g.from), to: abs(g.to), text: g.text || '' }, g.pt ? { pt: g.pt } : {}));
@@ -1905,6 +1975,18 @@
     });
     (t.proteins || []).forEach((n, k) => { if (vis[k] && n) vis[k].name = n; });
     if (t.ladderId && G.ProteinLadders.get(t.ladderId)) S.blots.forEach(b => App.setLadder(b, t.ladderId));
+    if (t.layoutColumns?.length) {
+      const cs = JSON.parse(JSON.stringify(t.layoutColumns));
+      S.layoutColumns = cs.map(c => ({ ...c, lanes: (c.lanes || []).map(l => ({name:l.name || '', hidden:false})), range:[1,Math.max(1,c.lanes?.length || 1)], hiCol:0 }));
+      const main = S.layoutColumns.find(c => c.id === 'main');
+      if (!main) S.layoutColumns.unshift({ id:'main', title:'', titleSide:'top' });
+      else { S.lanes = main.lanes; S.groups = main.groups || []; S.conditions = main.conditions || []; S.range = main.range; }
+      const ids = new Set(S.layoutColumns.map(c => c.id));
+      vis.forEach((r,i) => { r.column = ids.has(t.rowColumns?.[i]) ? t.rowColumns[i] : 'main'; });
+      S.rows.forEach(r => { if (!ids.has(App.rowColumn(r))) r.column = 'main'; });
+      if (main) columnFields.forEach(k => { delete main[k]; });
+      App.fitLanes(true);
+    }
     S.style = Object.assign(defaultStyle(), t.style || {});
     return { lanes: (t.lanes || []).length, figLanes: fl.length, proteins: (t.proteins || []).filter(Boolean).length, rows: vis.length };
   };
@@ -1913,7 +1995,7 @@
     return JSON.stringify({
       tool: 'BlotFigure ' + App.VERSION,
       sources: [...new Set(vis.map(r => r.img))].map(id => App.images.get(id)).filter(Boolean).map(r => ({ file: r.name, sha256: r.sha256 || null })),
-      rows: vis.map(r => ({ name: r.name || null, exposure: (App.images.get(r.img) || {}).name, levels: App.rowLevels(r), tilts: r.segs.map(sg => sg.rot || 0) })),
+      rows: vis.map(r => ({ column: App.rowColumn(r), name: r.name || null, exposure: (App.images.get(r.img) || {}).name, levels: App.rowLevels(r), tilts: r.segs.map(sg => sg.rot || 0) })),
       effectiveBandDpi: Math.round(Math.min(99999, App.effectiveDpi())), disclosure: App.checks().legend.join(' ')
     });
   };

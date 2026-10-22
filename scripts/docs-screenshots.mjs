@@ -50,6 +50,21 @@ try {
     return c.toDataURL('image/png').split(',')[1];
   });
   fs.writeFileSync(path.join(root, 'docs/example-figure.png'), Buffer.from(png, 'base64'));
+  const beforeColumns = await page.evaluate(() => JSON.stringify(BApp.S));
+  await page.evaluate(() => {
+    const second = BApp.addColumn(); second.title = 'Nuclear fraction';
+    BApp.layoutColumns()[0].title = 'Time course';
+    BApp.S.rows.filter(r => r.blot === BApp.S.blots[1].id).slice().forEach(r => BApp.moveToColumn(r, second.id));
+    BApp.S.range = [1, 6]; second.range = [1, 3]; BApp.S.style.markerPt = 6; BApp.S.style.showMW = false;
+    BApp.S.groups = [{ from:1, to:3, text:'0 h' }, { from:4, to:6, text:'24 h' }];
+    BApp.S.conditions = [{name:'EGF',values:['−','+','+','−','+','+']}];
+    second.lanes.forEach((l,i) => { l.name = ['Ctrl','siC #1','siC #2'][i] || ''; });
+    second.conditions = [{name:'siC',values:['−','+','+']}];
+    BApp.S.style.alignColumnRows = false; BApp.commit();
+  });
+  const columnsPng = await page.evaluate(async () => { const f = BRender.build(false), c = await Export.svgToCanvas(f.svg, f.w, f.h, 300); return c.toDataURL('image/png').split(',')[1]; });
+  fs.writeFileSync(path.join(root, 'docs/example-columns.png'), Buffer.from(columnsPng, 'base64'));
+  await page.evaluate(s => { BApp.S = JSON.parse(s); BApp.activeColumn = 'main'; BApp.commit(); }, beforeColumns);
   await page.click('#btnLang');
   await page.waitForTimeout(300);
   await page.mouse.move(1590, 990);

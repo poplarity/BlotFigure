@@ -4,6 +4,28 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-22
+
+Lightweight column layout and more direct annotation controls.
+
+**中文摘要**
+- 第 4 步直接调 Marker 全局字号；点成图数字或蛋白名旁 ⋯ 可逐区域设字号、隐藏/恢复数字，保留校准点。修复密集刻度引线挡住数字和点击的问题。
+- 第 5 步可选多列排版：各列独立标题、泳道范围、名称、分组和条件。拖区域跨列移动或用菜单选择目的列；曝光、亮度、裁切保持独立，无自动拼接。
+- 默认顶部对齐，可按行对齐；可调列间距、复制列标签、删除空列。空列不导出。
+- 支持粘贴 Excel 条件表，保留空格和任意值；Shift+点击编辑时间/剂量。行旁括号增加竖排文字和直线样式。
+- 保存、撤销、样式文件、来源日志、未裁切原图与定量 CSV 支持多列；旧单列项目保持兼容。
+
+### Added
+- Optional columns inside one WB figure, with independent titles, lane labels/ranges, group labels and condition tables. Move regions explicitly between columns without combining their data or image settings.
+- Top or bottom titles, optional row alignment, adjustable spacing and label-only copying. Empty columns are omitted from exports.
+- Global and per-region Marker font controls, and hide/show labels without removing calibration marks. Tick leaders render behind labels and do not intercept clicks.
+- Excel/TSV condition tables, with explicit append or replace for the selected column, preserved blanks and editable time/dose values. Vertical side-label text and straight-line bracket style.
+
+### Changed
+- Exposure recommendations use the source region, independent of selected layout columns or display lane ranges.
+- Project, template, processing-log, uncropped-original and CSV exports record column placement. Previous single-column projects remain compatible.
+- Browser regression coverage includes actual cross-column drags, pixel invariance, IME editing, calibration retention and project round trips.
+
 ## [0.8.2] - 2026-10-22
 
 Simplify the workflow: independent protein regions, without joining.

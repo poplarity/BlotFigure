@@ -7,7 +7,7 @@
   const list = a => a.join(L('、', ', '));
   // English counts: pl(3, 'lane') = "3 lanes", pl(1, 'box', 'boxes') = "1 box"
   const pl = (n, one, many) => `${n} ${n === 1 ? one : many || one + 's'}`;
-  const S = () => App.S;
+  const S = () => App.uiState();
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const composing = e => e.isComposing || e.keyCode === 229;
@@ -730,10 +730,11 @@
   }
   /* step 5: the proteins' names in figure order (Enter: the next one) */
   function renderNames() {
-    const st = S(), box = $('nameList'), vis = st.rows.filter(r => !r.hidden);
+    const st = S(), box = $('nameList'), vis = App.rowsInColumn(App.activeColumn).filter(r => !r.hidden);
     box.innerHTML = vis.map(r => { const k = App.rowKda(r), sg = G.ProteinLadders.suggest(k);
       return `<div class="name-item" data-id="${r.id}"><span class="grip" style="--c:${App.rowColor(r)}">${esc(shortLabel(r))}</span><input type="text" value="${esc(r.name)}" placeholder="${esc(sg[0] ? sg[0] + L('？', '?') : L('蛋白名', 'Protein name'))}" list="protList"><span class="kda">${k ? '≈' + Math.round(k) + ' kDa' : ''}</span></div>`; }).join('');
     box.querySelectorAll('.name-item').forEach(it => {
+      const mb = document.createElement('button'); mb.className = 'btn sm ghost'; mb.textContent = '⋯'; mb.title = L('区域标注与排版', 'Region labels and layout'); mb.setAttribute('aria-label', mb.title); mb.onclick = () => markerPopover(App.row(it.dataset.id), mb.getBoundingClientRect()); it.appendChild(mb);
       const row = App.row(it.dataset.id), inp = it.querySelector('input');
       inp.addEventListener('focus', () => { fillDatalist(App.rowKda(row)); });
       inp.addEventListener('input', live(e => { row.name = e.target.value; }));
@@ -839,6 +840,7 @@
     return wrap;
   }
   function selectRow(id, showImage) {
+    if (id && App.row(id)) activateColumn(App.rowColumn(App.row(id)));
     if (App.selRow !== id) { App.selSeg = null; App.selLane = null; }
     App.selRow = id;
     const row = App.row(id);
@@ -876,7 +878,7 @@
     S().range = [a, b];
   });
   $('rangeA').addEventListener('change', onRange); $('rangeB').addEventListener('change', onRange);
-  $('btnRangeAuto').onclick = done(() => App.fitLanes(true));
+  $('btnRangeAuto').onclick = done(() => App.fitLanes(true, App.activeColumn));
   function applyBulk() {
     const raw = $('laneBulk').value.replace(/\r/g, '').trim(); if (!raw) return;
     let names = raw.includes('\t') ? raw.split(/\t|\n/) : raw.includes('\n') ? raw.split('\n') : raw.split(/[,，;；]/);
@@ -892,8 +894,67 @@
   }
   $('laneBulk').addEventListener('change', applyBulk);
 
+  const columnName = c => c.title || L(`第 ${App.layoutColumns().indexOf(c) + 1} 列`, `Column ${App.layoutColumns().indexOf(c) + 1}`);
+  function activateColumn(id) {
+    if (id === App.activeColumn) return;
+    if (edit) closeEd(false); closePop(); App.activeColumn = id; App.refresh();
+  }
+  let renderedColumn = null;
+  function renderColumns() {
+    renderedColumn = App.activeColumn;
+    const cs = App.layoutColumns(), active = cs.find(c => c.id === App.activeColumn) || cs[0];
+    App.activeColumn = active.id;
+    const box = $('columnControls'), wasOpen = !!box.querySelector('details')?.open;
+    box.innerHTML = cs.length === 1 && !active.title ? `<button class="btn sm ghost" id="addLayoutColumn">${L('+ 多列排版', '+ Add a layout column')}</button>` : `
+      <div class="column-tabs">${cs.map(c => `<button class="btn sm ${c === active ? 'primary' : ''}" data-column-pick="${c.id}">${esc(columnName(c))}</button>`).join('')}<button class="btn sm" id="addLayoutColumn">＋</button></div>
+      <p class="hint">${L('当前列的名称与标注如下。拖区域到另一列可移动；上下拖动只排序。', 'Names and annotations below belong to this column. Drag a region across to move it; up/down only reorders.')}</p>
+      <div class="field inline"><input id="columnTitle" value="${esc(active.title)}" placeholder="${L('列标题（可空）', 'Column title (optional)')}"><select id="columnTitleSide"><option value="top">${L('顶部', 'Top')}</option><option value="bottom">${L('底部', 'Bottom')}</option></select></div>
+      <details class="adv"><summary>${L('列设置', 'Column settings')}</summary><div class="field inline"><label>${L('列间距', 'Column gap')} <input id="columnGap" type="number" min="2" max="30" step="0.5" class="num" value="${S().style.columnGapMm ?? 6}"> mm</label><label class="switch"><input type="checkbox" id="alignColumnRows" ${S().style.alignColumnRows ? 'checked' : ''}>${L('按行对齐', 'Align rows')}</label></div>
+      <div class="field inline"><select id="copyColumn"><option value="">${L('复制另一列的标签…', 'Copy labels from…')}</option>${cs.filter(c => c !== active).map(c => `<option value="${c.id}">${esc(columnName(c))}</option>`).join('')}</select>${cs.length > 1 && !App.rowsInColumn(active.id).length ? `<button class="btn sm" id="removeColumn">${L('删除空列', 'Remove empty column')}</button>` : ''}</div></details>`;
+    $('addLayoutColumn').onclick = done(() => { closeEd(false); closePop(); App.addColumn(); });
+    box.querySelectorAll('[data-column-pick]').forEach(b => b.onclick = () => { activateColumn(b.dataset.columnPick); App.emit('change'); });
+    if (!$('columnTitle')) return;
+    box.querySelector('details').open = wasOpen;
+    $('columnTitle').oninput = live(e => { active.title = e.target.value; }); $('columnTitle').onchange = done();
+    $('columnTitleSide').value = active.titleSide || 'top'; $('columnTitleSide').onchange = done(e => { active.titleSide = e.target.value; });
+    $('columnGap').onchange = done(e => { S().style.columnGapMm = clamp(+e.target.value || 6, 2, 30); });
+    $('alignColumnRows').onchange = done(e => { S().style.alignColumnRows = e.target.checked; });
+    $('copyColumn').onchange = done(e => { if (e.target.value) App.copyColumnLabels(e.target.value, active.id); });
+    if ($('removeColumn')) $('removeColumn').onclick = done(() => App.removeColumn(active.id));
+  }
+  $('markerFontQuick').onchange = done(e => { S().style.markerPt = e.target.value === '' ? null : clamp(+e.target.value || 7, 4, 14); });
+  function markerPopover(row, at) {
+    if (!row) return;
+    const marks = new Map(); row.segs.forEach(sg => App.pieceTicks(App.blot(row.blot), App.piece(App.blot(row.blot), sg.piece), sg).forEach(t => marks.set(t.id, t.k)));
+    pop.innerHTML = `<h4>${esc(App.rowLabel(row))} · ${L('区域标注', 'Region labels')}</h4>
+      ${App.layoutColumns().length > 1 ? `<div class="field"><label>${L('移到排版列', 'Move to column')} <select id="regionColumn">${App.layoutColumns().map(c => `<option value="${c.id}">${esc(columnName(c))}</option>`).join('')}</select></label></div>` : ''}
+      <label>${L('本区域 Marker 字号', 'Marker font for this region')} <input id="regionMarkerPt" type="number" min="4" max="14" step="0.5" class="num" value="${row.markerPt || ''}" placeholder="${S().style.markerPt || S().style.fontPt}"> pt</label>
+      <p class="hint">${L('留空跟随全局。取消勾选只隐藏数字，不删除校准点。', 'Empty uses the global font. Unchecking hides the label; calibration is kept.')}</p>
+      <div class="marker-visibility">${[...marks].map(([id,k]) => `<label><input type="checkbox" data-mark-toggle="${id}" ${!(row.hiddenMarkers || []).includes(id) ? 'checked' : ''}>${k} kDa</label>`).join('')}</div>
+      <div class="actions"><button class="btn sm primary" id="markerDisplayDone">${L('完成', 'Done')}</button></div>`;
+    placePopNear(at);
+    const dest = pop.querySelector('#regionColumn'); if (dest) { dest.value = App.rowColumn(row); dest.onchange = () => { App.moveToColumn(row, dest.value); closePop(); App.commit(); }; }
+    pop.querySelector('#regionMarkerPt').onchange = done(e => { row.markerPt = e.target.value === '' ? null : clamp(+e.target.value || 7, 4, 14); });
+    pop.querySelectorAll('[data-mark-toggle]').forEach(i => i.onchange = done(() => { row.hiddenMarkers = (row.hiddenMarkers || []).filter(id => id !== i.dataset.markToggle); if (!i.checked) row.hiddenMarkers.push(i.dataset.markToggle); }));
+    pop.querySelector('#markerDisplayDone').onclick = closePop;
+  }
+  function pasteConditions(replace) {
+    const result = App.pasteConditions($('conditionBulk').value, App.activeColumn, replace);
+    if (result.error) { toast(result.error); return; }
+    $('conditionBulk').value = ''; App.commit(); toast(L(`已填入 ${result.count} 行条件`, `Added ${result.count} condition rows`));
+  }
+  $('condAppend').onclick = () => { if (S()) pasteConditions(false); };
+  $('condReplace').onclick = () => { if (S()) pasteConditions(true); };
+  function conditionPopover(r, j, at) {
+    const c = S().conditions[r];
+    pop.innerHTML = `<h4>${esc(c.name || L('条件值', 'Condition value'))}</h4><input id="conditionValue" type="text" value="${esc(c.values[j - 1] || '')}" placeholder="+, −, 24 h…"><div class="actions"><button class="btn sm primary" id="conditionDone">${L('完成', 'Done')}</button></div>`;
+    placePopNear(at); const input = pop.querySelector('input');
+    input.oninput = live(() => { c.values[j - 1] = input.value; }); input.onchange = done();
+    input.onkeydown = e => { if (e.key === 'Enter' && !composing(e)) closePop(); }; pop.querySelector('button').onclick = closePop; input.focus(); input.select();
+  }
+
   /* ---------- 4 annotations ---------- */
-  $('btnAddCond').onclick = done(() => { S().conditions.push({ name: '', values: S().lanes.map(() => '') }); toast(L('在成图上点每个格子切换 + / − / 空；点"条件"输入名称', 'Click each cell on the figure to switch + / − / blank; click "Condition" to name it'), 3200); });
+  $('btnAddCond').onclick = done(() => { S().conditions.push({ name: '', values: S().lanes.map(() => '') }); toast(L('点格子切换 + / − / 空；Shift+点击输入时间、剂量等。点条件名可编辑', 'Click cells for + / − / blank; Shift+click to type time, dose or other text. Click the condition name to edit it'), 3200); });
   $('btnAddGroup').onclick = () => { if (S()) App.setMode(App.mode === 'group' ? null : 'group'); };
   $('btnAddArrow').onclick = () => { if (S()) App.setMode(App.mode === 'arrow' ? null : 'arrow'); };
   $('btnAddBracket').onclick = () => { if (S()) App.setMode(App.mode === 'bracket' ? null : 'bracket'); };
@@ -909,10 +970,12 @@
       <div class="field inline"><label class="inline-label">${L('放在', 'Side')}</label><div class="seg"><button data-side="left" class="${bk.side !== 'right' ? 'on' : ''}">${L('左边', 'Left')}</button><button data-side="right" class="${bk.side === 'right' ? 'on' : ''}">${L('右边', 'Right')}</button></div></div>
       <div class="field inline"><label class="inline-label">${L('字号', 'Font size')}</label><input type="number" id="pbPt" min="4" max="14" step="0.5" class="num" placeholder="${S().style.fontPt}" value="${bk.pt || ''}"> pt
         <span class="hint" style="margin:0">${L('留空 = 跟随全局字号', 'Empty = the figure font size')}</span></div>
+      <div class="field inline"><label><input type="checkbox" id="pbVertical" ${bk.vertical ? 'checked' : ''}>${L('竖排文字', 'Vertical text')}</label><label><input type="checkbox" id="pbLine" ${bk.line ? 'checked' : ''}>${L('直线样式', 'Straight line')}</label></div>
       <p class="hint">${L('盖住的范围不对：删掉，再用"行旁括号"重新拖一个。', 'Wrong span? Delete it and drag a new one with "Side bracket".')}</p>
       <div class="actions"><button class="btn sm danger" id="pbDel">${L('删除', 'Delete')}</button><button class="btn sm primary" id="pbOk">${L('完成', 'Done')}</button></div>`;
     placePopNear(at);
     const q = id => pop.querySelector('#' + id);
+    q('pbVertical').onchange = done(e => { bk.vertical = e.target.checked; }); q('pbLine').onchange = done(e => { bk.line = e.target.checked; });
     q('pbText').addEventListener('input', live(e => { bk.text = e.target.value.replace(/\s*↵\s*/g, '\n'); }));
     q('pbText').addEventListener('change', done());
     q('pbText').addEventListener('keydown', e => { if (e.key === 'Enter' && !composing(e)) closePop(); });
@@ -970,12 +1033,17 @@
     st.groups.forEach((g, k) => rows.push(`<div class="item"><span class="kind">${L('分组', 'Group')}</span><span class="idx" style="width:auto">${g.from}–${g.to}</span><input type="text" data-g="${k}" value="${esc((g.text || '').replace(/\n/g, ' ↵ '))}" placeholder="${L('分组文字', 'Group label')}" title="${L('↵ = 换行', '↵ = line break')}"><button class="x" data-gdel="${k}" aria-label="${L('删除', 'Delete')}">×</button></div>`));
     st.conditions.forEach((c, r) => rows.push(`<div class="item"><span class="kind">${L('条件', 'Condition')}</span><input type="text" data-c="${r}" value="${esc(c.name)}" placeholder="${L('条件名，如 Dox', 'Condition name, e.g. Dox')}"><button class="x" data-cdel="${r}">×</button></div>`));
     (st.arrows || []).forEach((a, k) => {
-      const row = App.row(a.row); if (!row) return;
+      const row = App.row(a.row); if (!row || App.rowColumn(row) !== App.activeColumn) return;
       const what = a.sym === '◀' ? App.arrowLabel(a) || L('未标分子量', 'no size') : a.sym + (a.text ? ' ' + a.text : '');
       rows.push(`<div class="item"><span class="kind">${L('箭头', 'Arrow')}</span><button class="link anno-arrow" data-a="${k}" title="${L('点开修改', 'Click to edit')}">${esc(App.rowLabel(row))} · ${esc(what)}</button><button class="x" data-adel="${k}">×</button></div>`);
     });
     (st.brackets || []).forEach((bk, k) => {
-      const rs = App.bracketRows(bk); if (!rs.length) return;
+      const ends = [App.row(bk.r0), App.row(bk.r1)].filter(Boolean);
+      if (!ends.some(r => App.rowColumn(r) === App.activeColumn)) return;
+      const rs = App.bracketRows(bk);
+      if (!rs.length) {
+        rows.push(`<div class="item"><span class="kind">${L('括号', 'Bracket')}</span><span class="hint">${esc(bk.text || '')} · ${L('两端已分列，移回可恢复，或删除后重画', 'Ends moved to different columns. Move back to restore, or delete and redraw.')}</span><button class="x" data-bdel="${k}">×</button></div>`); return;
+      }
       const span = rs.length > 1 ? `${App.rowLabel(rs[0])} – ${App.rowLabel(rs[rs.length - 1])}` : App.rowLabel(rs[0]);
       rows.push(`<div class="item"><span class="kind">${L('括号', 'Bracket')}</span><button class="link anno-arrow" data-b="${k}" title="${L('点开修改', 'Click to edit')}">${esc(span)} · ${esc((bk.text || '').replace(/\n/g, ' ') || L('（没写文字）', '(no text)'))}</button><button class="x" data-bdel="${k}">×</button></div>`);
     });
@@ -991,7 +1059,7 @@
   }
 
   /* ---------- 5 layout ---------- */
-  const num = (id, key, lo, hi) => $(id).addEventListener('change', done(e => { S().style[key] = clamp(+e.target.value || S().style[key], lo, hi); }));
+  const num = (id, key, lo, hi) => $(id).addEventListener('change', done(e => { S().style[key] = clamp(e.target.value === '' || !Number.isFinite(+e.target.value) ? S().style[key] : +e.target.value, lo, hi); }));
   num('mmPerLane', 'mmPerLane', 2, 15); num('fontPt', 'fontPt', 4, 14); num('rowGap', 'rowGapPt', 0, 10); num('lineW', 'lineWidthPt', 0.25, 2); num('minFontPt', 'minFontPt', 4, 10);
   // per-kind text sizes: empty = the figure font
   ['lanePt', 'namePt', 'markerPt'].forEach(id => $(id).addEventListener('change', done(e => { const v = +e.target.value; S().style[id] = e.target.value === '' || !(v > 0) ? null : clamp(v, 4, 14); })));
@@ -1003,8 +1071,8 @@
   // a journal column = the figure's total width, labels included: solved for the lane width (as GelFigure)
   $('widthPreset').addEventListener('change', e => {
     const target = +e.target.value; e.target.value = '';
-    if (!S() || !target || !App.figLanes().length) return;
-    const st = S().style, n = App.figLanes().length;
+    if (!S() || !target || !S().rows.length) return;
+    const st = S().style, n = App.layoutColumns().reduce((n,c) => n + App.figLanes(c.id).length, 0);
     for (let k = 0; k < 4; k++) {          // (labels hardly depend on the lane width: a few rounds converge)
       const total = G.BRender.build(false).w / App.MM;
       st.mmPerLane = clamp(Math.round((st.mmPerLane + (target - total) / n) * 10) / 10, 2, 15);
@@ -1109,9 +1177,10 @@
     }
     if (edit) { const el = editEl(edit); if (el) el.classList.add('active'); }
   }
-  const getV = e => e.kind === 'lane' ? S().lanes[e.id - 1].name : e.kind === 'rowname' ? (App.row(e.id) || {}).name : e.kind === 'group' ? S().groups[e.id].text : S().conditions[e.id].name;
-  const setV = (e, v) => { if (e.kind === 'lane') S().lanes[e.id - 1].name = v; else if (e.kind === 'rowname') { const r = App.row(e.id); if (r) r.name = v; } else if (e.kind === 'group') S().groups[e.id].text = v; else S().conditions[e.id].name = v; };
-  const editEl = e => prev.querySelector(e.kind === 'lane' ? `g[data-edit="lane"][data-j="${e.id}"]` : e.kind === 'rowname' ? `g[data-edit="rowname"][data-row="${e.id}"]` : e.kind === 'group' ? `g[data-edit="group"][data-k="${e.id}"]` : `g[data-edit="condname"][data-r="${e.id}"]`);
+  const edState = e => App.columnData(e.column || App.activeColumn);
+  const getV = e => e.kind === 'lane' ? edState(e).lanes[e.id - 1].name : e.kind === 'rowname' ? (App.row(e.id) || {}).name : e.kind === 'group' ? edState(e).groups[e.id].text : edState(e).conditions[e.id].name;
+  const setV = (e, v) => { if (e.kind === 'lane') edState(e).lanes[e.id - 1].name = v; else if (e.kind === 'rowname') { const r = App.row(e.id); if (r) r.name = v; } else if (e.kind === 'group') edState(e).groups[e.id].text = v; else edState(e).conditions[e.id].name = v; };
+  const editEl = e => prev.querySelector((e.kind === 'lane' ? `g[data-edit="lane"][data-j="${e.id}"]` : e.kind === 'rowname' ? `g[data-edit="rowname"][data-row="${e.id}"]` : e.kind === 'group' ? `g[data-edit="group"][data-k="${e.id}"]` : `g[data-edit="condname"][data-r="${e.id}"]`) + `[data-column="${e.column || App.activeColumn}"]`);
   /* the text editor over the figure: one line (with the protein-name suggestions), or several for a group label
    * (Shift+Enter); under it a bar with the font size of what is edited (lane names and protein names share one
    * each, a group or a condition row has its own) and, for a group, a line break (as GelFigure) */
@@ -1148,7 +1217,7 @@
   function openEd(kind, id) {
     if (edit) closeEd(false);          // (a previous editor whose blur has not been handled yet)
     closePop();
-    const e = { kind, id }, el = editEl(e); if (!el) return;
+    const e = { kind, id, column: App.activeColumn }, el = editEl(e); if (!el) return;
     const r = el.getBoundingClientRect();
     edit = Object.assign(e, { orig: getV(e) || '' });
     const box = edBox();
@@ -1196,7 +1265,7 @@
         const fl = App.figLanes(), k = fl.indexOf(id) + (back ? -1 : 1);
         if (k >= 0 && k < fl.length) next('lane', fl[k]); else toast(L('泳道名称填完了', 'All lane names filled in'));
       } else if (kind === 'rowname') {
-        const vis = S().rows.filter(r => !r.hidden), k = vis.findIndex(r => r.id === id) + (back ? -1 : 1);
+        const vis = App.rowsInColumn(App.activeColumn).filter(r => !r.hidden), k = vis.findIndex(r => r.id === id) + (back ? -1 : 1);
         if (k >= 0 && k < vis.length) next('rowname', vis[k].id); else toast(L('蛋白名填完了', 'All protein names filled in'));
       }
     });
@@ -1222,12 +1291,12 @@
   };
 
   let press = null;
-  const laneAt = (x, y) => { const el = document.elementFromPoint(x, y), g = el && el.closest && el.closest('g[data-edit="lane"]'); return g ? +g.dataset.j : null; };
-  const hl = (a, b) => prev.querySelectorAll('g[data-edit="lane"]').forEach(g => { const j = +g.dataset.j; g.classList.toggle('active', a != null && j >= Math.min(a, b) && j <= Math.max(a, b)); });
+  const laneAt = (x, y) => { const el = document.elementFromPoint(x, y), g = el && el.closest && el.closest('g[data-edit="lane"]'); return g && g.dataset.column === App.activeColumn ? +g.dataset.j : null; };
+  const hl = (a, b) => prev.querySelectorAll('g[data-edit="lane"]').forEach(g => { const j = +g.dataset.j; g.classList.toggle('active', g.dataset.column === App.activeColumn && a != null && j >= Math.min(a, b) && j <= Math.max(a, b)); });
   prev.addEventListener('mousedown', e => {
     if (App.mode === 'bracket') return;
     const g = e.target.closest('g[data-edit="lane"]');
-    if (g) { press = { j: +g.dataset.j, end: +g.dataset.j, x: e.clientX, y: e.clientY, moved: false }; e.preventDefault(); }
+    if (g) { activateColumn(g.dataset.column); press = { j: +g.dataset.j, end: +g.dataset.j, x: e.clientX, y: e.clientY, moved: false }; e.preventDefault(); }
   });
   window.addEventListener('mousemove', e => {
     if (!press) return;
@@ -1271,8 +1340,8 @@
   /* a side bracket drawn on the figure (bracket tool): dragged along the rows, its ends snapping to a row's top or
    * bottom when near one (Alt: no snapping); a click covers that one row */
   let bdrag = null;
-  function rowAtY(my, alt) {
-    const rs = rowRects(lastFig);
+  function rowAtY(my, alt, columnId = App.activeColumn) {
+    const rs = rowRects(lastFig).filter(r => r.columnId === columnId);
     let best = null;
     rs.forEach(r => { if (my >= r.top && my <= r.bot) best = { r, f: (my - r.top) / Math.max(1, r.bot - r.top) }; });
     // (between the rows, or past them: the nearest row edge)
@@ -1287,7 +1356,7 @@
     let gh = ov.querySelector('.brk-ghost');
     if (!gh) { gh = document.createElement('div'); ov.appendChild(gh); }
     gh.className = 'brk-ghost ' + (right ? 'r' : 'l');
-    Object.assign(gh.style, { left: (right ? sr.right - pr.left + 2 : sr.left - pr.left - 9) + 'px', top: y1 + 'px', height: Math.max(2, y2 - y1) + 'px' });
+    Object.assign(gh.style, { left: (right ? columnScreenBounds(d.a.r.columnId).x1 + 2 : columnScreenBounds(d.a.r.columnId).x0 - 9) + 'px', top: y1 + 'px', height: Math.max(2, y2 - y1) + 'px' });
     const ids = new Set([d.a.r.id, d.b.r.id]), n = ids.size === 1 ? 1 : App.bracketRows({ r0: d.a.r.id, r1: d.b.r.id }).filter(r => !r.hidden).length;
     // (above the bracket: the rows below the pointer stay visible)
     tipAt(ov, (right ? sr.right - pr.left + 14 : sr.left - pr.left + 6), Math.max(2, y1 - 26), n > 1 ? L(`盖住 ${n} 行（如 IP / Input）`, `Covers ${n} rows (e.g. IP / Input)`)
@@ -1295,7 +1364,8 @@
   }
   prev.addEventListener('mousedown', e => {
     if (e.button !== 0 || !S() || App.mode !== 'bracket' || !lastFig) return;
-    const a = rowAtY(e.clientY - prev.getBoundingClientRect().top, e.altKey); if (!a) return;
+    const columnId = columnAtX(e.clientX); activateColumn(columnId);
+    const a = rowAtY(e.clientY - prev.getBoundingClientRect().top, e.altKey, columnId); if (!a) return;
     bdrag = { a, b: a, y0: e.clientY, moved: false };
     e.preventDefault();
   });
@@ -1303,7 +1373,7 @@
     if (!bdrag) return;
     if (Math.abs(e.clientY - bdrag.y0) > 4) bdrag.moved = true;
     if (!bdrag.moved) return;
-    bdrag.b = rowAtY(e.clientY - prev.getBoundingClientRect().top, e.altKey) || bdrag.b;
+    bdrag.b = rowAtY(e.clientY - prev.getBoundingClientRect().top, e.altKey, bdrag.a.r.columnId) || bdrag.b;
     bracketGhost(bdrag);
   });
   window.addEventListener('mouseup', () => {
@@ -1327,14 +1397,17 @@
     if (img) { selectRow(img.dataset.row, true); return; }
     const g = e.target.closest('[data-edit]');
     if (!g) { if (App.mode === 'arrow') toast(L('请点在成图里某一行的条带上', 'Click on the bands of a row in the figure')); return; }
+    activateColumn(g.dataset.column || App.activeColumn);
     const kind = g.dataset.edit;
-    if (kind === 'arrow') arrowPopover(+g.dataset.k, g.getBoundingClientRect());
+    if (kind === 'marker') markerPopover(App.row(g.dataset.row), g.getBoundingClientRect());
+    else if (kind === 'arrow') arrowPopover(+g.dataset.k, g.getBoundingClientRect());
     else if (kind === 'bracket') bracketPopover(+g.dataset.k, g.getBoundingClientRect());
     else if (kind === 'rowname') openEd('rowname', g.dataset.row);
     else if (kind === 'group') openEd('group', +g.dataset.k);
     else if (kind === 'condname') openEd('condname', +g.dataset.r);
     else if (kind === 'cond') {
       const c = S().conditions[+g.dataset.r], j = +g.dataset.j, cyc = { '': '+', '+': '−', '−': '' };
+      if (e.shiftKey || !['', '+', '−'].includes(c.values[j - 1] || '')) { conditionPopover(+g.dataset.r, j, g.getBoundingClientRect()); return; }
       while (c.values.length < j) c.values.push('');
       c.values[j - 1] = cyc[c.values[j - 1] || ''] != null ? cyc[c.values[j - 1] || ''] : '';
       App.commit();
@@ -1351,7 +1424,18 @@
     if (!m || !f || !f.rowBoxes) return [];
     const pr = prev.getBoundingClientRect(), p = svg.createSVGPoint();
     const at = (x, y) => { p.x = x; p.y = y; const q = p.matrixTransform(m); return { x: q.x - pr.left, y: q.y - pr.top }; };
-    return f.rowBoxes.map(rb => { const a = at(0, rb.y), b = at(f.figW, rb.y + rb.h); return { id: rb.id, x0: a.x, x1: b.x, top: a.y, bot: b.y }; });
+    return f.rowBoxes.map(rb => { const a = at(rb.x0 ?? 0, rb.y), b = at(rb.x1 ?? f.figW, rb.y + rb.h); return { id: rb.id, columnId: rb.columnId || 'main', x0: a.x, x1: b.x, top: a.y, bot: b.y }; });
+  }
+  function columnScreenBounds(id) {
+    const svg = prev.querySelector('svg'), m = svg?.getScreenCTM(), c = lastFig?.columnBoxes?.find(c => c.id === id), pr = prev.getBoundingClientRect();
+    if (!m || !c) return { x0: 0, x1: 100 };
+    return { x0: m.a * c.x0 + m.e - pr.left, x1: m.a * c.x1 + m.e - pr.left };
+  }
+  function columnAtX(clientX) {
+    const x = clientX - prev.getBoundingClientRect().left;
+    let best = App.activeColumn, dist = Infinity;
+    (lastFig?.columnBoxes || []).forEach(c => { const b = columnScreenBounds(c.id), d = x < b.x0 ? b.x0 - x : x > b.x1 ? x - b.x1 : 0; if (d < dist) { dist = d; best = c.id; } });
+    return best;
   }
   function drawRowTags(f) {
     const svg = prev.querySelector('svg'); if (!svg) return;
@@ -1363,7 +1447,7 @@
       t.className = 'rowtag' + (row.id === App.selRow ? ' sel' : ''); t.dataset.row = r.id; t.textContent = shortLabel(row);
       t.title = L(`蛋白框 ${modLabel(row)}。上下拖动只调整顺序；左右拖动对齐泳道，设置各自独立`,
         `Boxes ${modLabel(row)}. Drag up or down to reorder only; drag bands left or right to line up lanes. Settings stay independent`);
-      t.style.left = (left - 5) + 'px'; t.style.top = ((r.top + r.bot) / 2) + 'px';
+      t.style.left = (columnScreenBounds(r.columnId).x0 - 5) + 'px'; t.style.top = ((r.top + r.bot) / 2) + 'px';
       ov.appendChild(t);
     });
     ov.insertAdjacentHTML('beforeend', '<div class="dropline hidden"></div><div class="dropbox hidden"></div><div class="droptip hidden"></div>');
@@ -1406,18 +1490,20 @@
     if (!ov) return;
     const pr = prev.getBoundingClientRect(), mx = e.clientX - pr.left, my = e.clientY - pr.top;
     const line = ov.querySelector('.dropline'), boxEl = ov.querySelector('.dropbox');
-    if (pdrag.mode === 'order') {
-      ghost(`[data-row="${pdrag.id}"]`, 0, dy / prevScale);
-      const rs = rowRects(lastFig), me = rs.findIndex(r => r.id === pdrag.id);
+    const targetColumn = columnAtX(e.clientX), originColumn = App.rowColumn(App.row(pdrag.id));
+    pdrag.targetColumn = targetColumn;
+    if (pdrag.mode === 'order' || targetColumn !== originColumn) {
+      ghost(`[data-row="${pdrag.id}"]`, targetColumn !== originColumn ? dx / prevScale : 0, dy / prevScale);
+      const rs = rowRects(lastFig).filter(r => r.columnId === targetColumn && r.id !== pdrag.id);
       // Vertical dragging only reorders. Dropping over another row never combines its data/settings.
       let at = rs.findIndex(r => my < (r.top + r.bot) / 2);
       if (at < 0) at = rs.length;
-      pdrag.drop = { at };
+      pdrag.drop = { at, before: rs[at]?.id || null, columnId: targetColumn };
       line.classList.remove('hidden'); boxEl.classList.add('hidden');
       const a = rs[at - 1], b = rs[at], yy = !rs.length ? 0 : !a ? b.top - 3 : !b ? a.bot + 3 : (a.bot + b.top) / 2;
-      const ref = rs[0] || { x0: 0, x1: 100 };
+      const ref = rs[0] || columnScreenBounds(targetColumn);
       Object.assign(line.style, { left: ref.x0 - 8 + 'px', top: yy + 'px', width: ref.x1 - ref.x0 + 16 + 'px' });
-      tipAt(ov, mx + 14, my + 10, L('松开：调整上下顺序', 'Release to reorder'));
+      tipAt(ov, mx + 14, my + 10, targetColumn === originColumn ? L('松开：调整上下顺序', 'Release to reorder') : L('松开：移到这一列，图像设置保留', 'Release: move to this column, keeping image settings'));
 
     } else {
       const k = Math.round(dx / prevScale / lastFig.laneW), row = App.row(pdrag.id), pc = row && App.findPiece(pdrag.piece);
@@ -1435,10 +1521,8 @@
     swallowClick = true; setTimeout(() => { swallowClick = false; }, 0);
     const row = App.row(d.id);
     if (!row) { updatePreview(); return; }
-    if (d.mode === 'order' && d.drop) {
-      const rs = (lastFig.rowBoxes || []).map(b => b.id), rows = S().rows;
-      const to = d.drop.at < rs.length ? rows.findIndex(r => r.id === rs[d.drop.at]) : rows.findIndex(r => r.id === rs[rs.length - 1]) + 1;
-      if (App.moveRow(d.id, to)) { App.commit(); toast(L('已调整行的上下顺序', 'Row order changed')); } else updatePreview();
+    if (d.drop && (d.mode === 'order' || d.targetColumn !== App.rowColumn(row))) {
+      App.moveToColumn(row, d.drop.columnId, d.drop.before); App.commit(); toast(L('已移动区域，图像设置保持独立', 'Region moved; image settings stay independent'));
     } else if (d.mode === 'align' && d.k) {
       const sg = row.segs.find(s => s.id === d.box);
       if (!sg) { updatePreview(); return; }
@@ -1668,6 +1752,7 @@
 
   function syncLayout() {
     const y = S().style;
+    $('markerFontQuick').value = y.markerPt || ''; $('markerFontQuick').placeholder = y.fontPt;
     $('mmPerLane').value = y.mmPerLane; $('fontPt').value = y.fontPt; $('rowGap').value = y.rowGapPt; $('labelAngle').value = String(y.labelAngle);
     $('lineW').value = y.lineWidthPt;
     ['lanePt', 'namePt', 'markerPt'].forEach(id => { $(id).value = y[id] || ''; $(id).placeholder = y.fontPt; });
@@ -1715,9 +1800,9 @@
       const dev = qs.get('demo') || qs.get('srcdir') || qs.get('demomove');     // (scripted runs: only with &tour=1)
       if (!seen && (!dev || qs.get('tour'))) setTimeout(showTour, 400);
     }
-    if (what === 'refresh') { updatePreview(); return; }
-    if (what === 'select') { keepFocus(() => { renderBlots(); renderPieces(); renderMarker(); renderRows(); }); showSelRow(); renderStageHead(); renderSteps(); updatePreview(); G.View.draw(); return; }
-    keepFocus(() => { renderBlots(); renderPieces(); renderMarker(); renderRows(); renderNames(); renderLanes(); renderAnno(); });
+    if (what === 'refresh') { if (renderedColumn !== App.activeColumn) { renderNames(); renderColumns(); renderLanes(); renderAnno(); } updatePreview(); return; }
+    if (what === 'select') { if (App.selRow) activateColumn(App.rowColumn(App.row(App.selRow))); if (renderedColumn !== App.activeColumn) { renderNames(); renderColumns(); renderLanes(); renderAnno(); } keepFocus(() => { renderBlots(); renderPieces(); renderMarker(); renderRows(); }); showSelRow(); renderStageHead(); renderSteps(); updatePreview(); G.View.draw(); return; }
+    keepFocus(() => { renderBlots(); renderPieces(); renderMarker(); renderRows(); renderNames(); renderColumns(); renderLanes(); renderAnno(); });
     showSelRow(); renderStageHead(); syncLayout(); renderSteps(); updateCoach(); updatePreview();
   });
   window.addEventListener('resize', () => { if (S()) updatePreview(); });
@@ -1743,8 +1828,9 @@
       ctx.fillStyle = '#000'; ctx.font = `bold ${fs * 0.8}px Arial`;
       ctx.fillText(`${App.blotNameEn(p.b)} — ${p.rec.kind === 'marker' ? 'white-light marker image' : 'exposure ' + App.expoLabel(p.rec)} — ${p.rec.name}`, 14, y0 + fs * 1.4);
       ctx.drawImage(G.View.dispCanvas(p.rec, true), 0, top, Wout, h);
-      const vis = new Set(App.figLanes());
+
       st.rows.filter(r => !r.hidden && r.blot === p.b.id && (p.rec.kind === 'marker' || r.img === p.rec.id)).forEach(r => {
+        const vis = new Set(App.figLanes(App.rowColumn(r)));
         let last = null;
         r.segs.forEach(sg => {
           const pc = App.piece(p.b, sg.piece); if (!pc || !sg.lanes.length) return;
@@ -1761,7 +1847,7 @@
           });
           ctx.textAlign = 'left';
         });
-        if (last) { ctx.fillStyle = '#e03131'; ctx.font = `bold ${fs * 0.7}px Arial`; ctx.fillText(`${r.name || '?'}`, last[0] * sc + 6, top + last[1] * sc + fs * 0.7); }
+        if (last) { ctx.fillStyle = '#e03131'; ctx.font = `bold ${fs * 0.7}px Arial`; ctx.fillText(`${r.name || '?'}${App.layoutColumns().length > 1 ? ' [' + columnName(App.layoutColumns().find(c => c.id === App.rowColumn(r))) + ']' : ''}`, last[0] * sc + 6, top + last[1] * sc + fs * 0.7); }
       });
       y0 += heights[k];
     });
@@ -1769,7 +1855,11 @@
     toast(L(`已导出未裁切原图（${pages.length} 张）`, `Exported the uncropped originals (${pl(pages.length, 'picture')})`));
   }
   function exportQuant() {
-    const st = S(), C = App.columns(), fl = C.vis;
+    const lines = [];
+    App.layoutColumns().forEach(column => {
+    const st = App.columnData(column.id), C = App.columns(column.id), fl = C.vis;
+    if (!C.rows.length) return;
+    if (App.layoutColumns().length > 1) lines.push(['layout column', column.id, columnName(column)]);
     const data = C.rows.map((r, ri) => {
       const b = App.blot(r.blot), rec = App.images.get(r.img);
       // (in the box's own frame: a tilted box is read along its tilt, as in the figure)
@@ -1778,7 +1868,7 @@
       return { r, b, rec, d: WB.densitometry(rec.img, rec.cs, lanes) };
     });
     const head = ['protein', 'membrane', 'exposure'].concat(fl.map(j => st.lanes[j - 1].name || 'lane ' + j));
-    const lines = [head];
+    lines.push(head);
     data.forEach(x => lines.push([x.r.name || '?', App.blotNameEn(x.b), App.expoLabel(x.rec)].concat(x.d.map(v => (v ? v.volume.toFixed(2) + (v.saturated ? ' (SAT)' : '') : '')))));
     // normalized to a same-membrane loading control, then to the first lane
     const ctrls = data.filter(x => App.isLoading(x.r));
@@ -1787,7 +1877,8 @@
       const ratio = x.d.map((v, i) => (v && c.d[i] ? v.volume / Math.max(1e-9, c.d[i].volume) : null)), r0 = ratio.find(v => v) || 1;
       lines.push([`${x.r.name}/${c.r.name} (rel. lane 1)`, App.blotNameEn(x.b), ''].concat(ratio.map(v => (v == null ? '' : (v / r0).toFixed(3)))));
     });
-    lines.push([]); lines.push(['Volumes = sum of (pixel - local background) over the band, on the exposure shown in the figure. SAT = saturated pixels: do not quantify.']);
+    lines.push([]); });
+    lines.push(['Volumes = sum of (pixel - local background) over the band, on the exposure shown in the figure. SAT = saturated pixels: do not quantify.']);
     const csv = lines.map(l => l.map(v => /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v).join(',')).join('\r\n');
     G.Export.download(new Blob(['﻿' + csv], { type: 'text/csv' }), 'blot_quantification.csv');
     toast(L('已导出定量 CSV（用于参考；正式定量请用 ≥3 次独立实验）', 'Exported the densitometry CSV (for reference; quantify from ≥3 independent experiments)'), 3600);

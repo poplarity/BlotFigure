@@ -161,3 +161,13 @@ msedge --headless=new --disable-gpu --user-data-dir=$env:TEMP\wb_dbg --allow-fil
 - `App.bindingGroups(row)` 按源框分组；同一个 `cut.id` 的片段代表原来一个蛋白区域剔除内部泳道后的片段，不是不同区域的绑定。`boundRows()` 找旧版绑定，`splitRow()`/`unbindAll()` 将其分成独立行，保留当前图片、名称、亮度和裁切范围，锁定当前曝光以免解绑瞬间自动换图。旧版已丢失的独立设置无法恢复。
 - 自动生成的 `S.levels[imageId].stable` 防止一个区域换曝光后，其他区域所用图片的显示范围跟着重算。全图调整只在用户明确选择高级控制后生效；浏览不匹配的图片时禁用滑块并提供返回所选区域曝光的入口。
 - 测试增加真实鼠标的落行排序、解绑保留设置、改一个区域后另一区域像素不变，以及移动膜条样例不自动合并的检查。
+
+
+## 0.9.0：轻量多列与 Marker 显示
+
+- `S.layoutColumns` 是排版列元数据；`row.column` 为所属列，旧项目未设时等于 `main`。为兼容旧项目，主列的 `lanes/range/hiCol/groups/conditions` 保存在根状态，其余列保存在各自记录中。读写请走 `columnData(id)`，局部渲染走 `columnState(id)`。`App.columns(id)` 仍表示该排版列中的泳道格点，不能和 `layoutColumns()` 混淆。
+- `App.uiState()` 只将上述标签字段路由到当前列；原图、蛋白区域、Marker 校准和图像设置仍属于各自对象。导出必须显式遍历所有列，不依赖 `activeColumn`。`moveToColumn()` 只改归属和顺序；曝光推荐使用整个源区域而不受成图泳道范围影响。
+- `wbrender.js` 逐列生成 SVG 内容，再水平排放。顶部对齐指图像区域顶部；可选按行对齐只改变 y 位置，不缩放条带。`columnBoxes`、`rowBoxes` 供鼠标拖动及标注定位使用。不同列不合并源区域；空列不导出。
+- 校准点有稳定的 `mark.id`；区域的 `hiddenMarkers` 只控制显示，`markerPt` 只覆盖该区域字号。隐藏数字不影响 `pieceCal()`。引线绘制在所有文字背后，不拦截文字点击。恢复隐藏数字的入口始终在区域名称旁 ⋯。
+- 跨列括号暂不渲染，但保留数据、提示及删除按钮；移回原列即可恢复。条件 TSV 只写当前列，明确追加或替换，空格不丢失，超出可见泳道的值拒绝导入。
+- `node tests/run.mjs --suite=layout` 覆盖跨列真实拖动、像素不变、输入法、条件表、Marker 校准保留、括号、项目/样式/旧格式、多列 PNG/原图/CSV。WebKit 的 text-only SVG quad 在嵌套变换下有坐标差异；点击测试使用带背景的标签组，与用户实际点击区域相同。

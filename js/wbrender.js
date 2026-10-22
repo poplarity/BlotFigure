@@ -80,14 +80,14 @@
     return best;
   }
 
-  function build(preview) {
+  function buildSingle(preview, column, slots) {
     usedMin = Infinity;
-    const S = App.S, st = S.style, pt = st.fontPt, lw = st.lineWidthPt, P = !!preview;
+    const S = App.columnState(column.id), st = S.style, pt = st.fontPt, lw = st.lineWidthPt, P = !!preview;
     // per-kind sizes (null = the figure font)
     const lp = st.lanePt || pt, mp = st.markerPt || pt, np = st.namePt || pt;
     const ph = ` fill="${PH}"`;
-    const ed = (attrs, inner) => (P ? `<g ${attrs} class="ed">${inner}</g>` : inner);
-    const C = App.columns(), segs = C.segs, lanes = segs.flat();
+    const ed = (attrs, inner) => (P ? `<g ${attrs} data-column="${column.id}" class="ed">${inner}</g>` : inner);
+    const C = App.columns(column.id), segs = C.segs, lanes = segs.flat();
     const laneW = st.mmPerLane * MM, gap = 1.6;
     // x of each figure lane centre
     const X = new Map(); let x = 0;
@@ -106,7 +106,8 @@
     let y = 0, prevBlot = null, maxLeft = 0, maxRight = 0, tickLabW = 0;
     const rowBoxes = [];   // the kDa header sits just above the first row
     rows.forEach((row, ri) => {
-      if (prevBlot !== null) y += row.blot === prevBlot ? st.rowGapPt : st.blotGapPt;
+      if (slots) y = slots[ri];
+      else if (prevBlot !== null) y += row.blot === prevBlot ? st.rowGapPt : st.blotGapPt;
       prevBlot = row.blot;
       const pitch = App.rowPitch(row), sc = laneW / pitch;       // pt per image px
       const h = (row.above + row.below) * sc;
@@ -123,7 +124,7 @@
           const gR = right && (right.sg !== cur.sg || right.i !== cur.i1 + 1) ? gap / 2 : 0;
           const x0 = X.get(cur.j0) - laneW / 2 + gL, w = (cur.i1 - cur.i0 + 1) * laneW - gL - gR;
           const iy = y + (row.above - App.boxAbove(row, cur.sg)) * sc, ih = (App.boxAbove(row, cur.sg) + App.boxBelow(row, cur.sg)) * sc;
-          const tag = P ? `data-row="${row.id}" data-piece="${cur.sg.piece}" data-box="${App.boxId(cur.sg)}" ` : '';
+          const tag = P ? `data-column="${column.id}" data-row="${row.id}" data-piece="${cur.sg.piece}" data-box="${App.boxId(cur.sg)}" ` : '';
           els.push(`<image ${tag}x="${f(x0)}" y="${f(iy)}" width="${f(w)}" height="${f(ih)}" preserveAspectRatio="none" href="${ras.href}" xlink:href="${ras.href}"/>`);
           if (st.border) els.push(`<rect ${tag}x="${f(x0)}" y="${f(iy)}" width="${f(w)}" height="${f(ih)}" fill="none" stroke="#000" stroke-width="${f(lw)}" pointer-events="none"/>`);
           cur = null;
@@ -151,30 +152,33 @@
       if (st.showMW) row.segs.forEach(sg => {
         const all = App.pieceTicks(b, App.piece(b, sg.piece), sg);
         const inside = all.filter(t => t.v >= sg.vc - App.boxAbove(row, sg) && t.v <= sg.vc + App.boxBelow(row, sg));
-        inside.forEach(t => {
+        inside.filter(t => !(row.hiddenMarkers || []).includes(t.id)).forEach(t => {
           const yy = y + (t.v - sg.vc + row.above) * sc;
           if (ticksOut.some(o => o.row === row.id && o.k === t.k && Math.abs(o.y - yy) < 0.6)) return;
-          ticksOut.push({ k: t.k, y: yy, row: row.id, box: App.boxId(sg) });
-          tickLabW = Math.max(tickLabW, measure(String(t.k), mp));
+          ticksOut.push({ id: t.id, k: t.k, pt: row.markerPt || mp, y: yy, row: row.id, box: App.boxId(sg) });
+          tickLabW = Math.max(tickLabW, measure(String(t.k), row.markerPt || mp));
         });
         if (all.length && !inside.length) warnings.push(L(`框 ${App.boxLabel(sg)} 内没有已标的 Marker 刻度；可扩大框的上下范围或在附近补标。`,
           `Box ${App.boxLabel(sg)} has no marked ticks within its crop; enlarge its vertical range or mark a nearby band.`));
       });
-      rowBoxes.push({ id: row.id, y, h });
+      rowBoxes.push({ id: row.id, columnId: column.id, x0: 0, x1: W, y, h });
       y += h;
     });
     const H = y;
     // beside the bands, outwards: the kDa scale, the target-band arrows, the names (each on its own side)
     // Use another label column for close ticks instead of silently dropping a manual annotation.
-    const tracks = [st.unitHeader ? -mp * 0.6 : -Infinity], stride = tickLabW + mp * 0.7;
+    const tracks = [-Infinity], stride = tickLabW + mp * 0.7;
     ticksOut.sort((a,b) => a.y-b.y).forEach(t => {
-      let track = 0; while (tracks[track] != null && t.y - tracks[track] < mp * 1.15) track++;
-      tracks[track] = t.y;
+      let track = 0; while (tracks[track] != null && t.y - t.pt * 0.7 < tracks[track] + 1) track++;
+      tracks[track] = t.y + t.pt * 0.55;
       const d = st.tickLenPt + 2.5 + track * stride, tx = mwRight ? W + d : -d;
-      const mark = line(mwRight ? W + 1 : -d + 1, t.y, mwRight ? W + d - 1 : -1, t.y, lw)
-        + text(String(t.k), tx, t.y + mp * 0.35, mp, mwRight ? 'start' : 'end');
-      els.push(`<g data-marker-box="${t.box}" data-marker-size="${t.k}">${mark}</g>`);
-      grow(mwRight ? W : tx - tickLabW, t.y - mp * 0.7, mwRight ? tx + tickLabW : 0, t.y + mp * 0.55);
+      // Leaders sit behind all labels: a crowded tick must never draw through (or steal clicks from) a number.
+      els.unshift(line(mwRight ? W + 1 : -d + 1, t.y, mwRight ? W + d - 1 : -1, t.y, lw).replace('/>', ' pointer-events="none"/>'));
+      const tw = measure(String(t.k), t.pt);
+      const mark = `<rect x="${f(mwRight ? tx - 0.5 : tx - tw - 0.5)}" y="${f(t.y - t.pt * 0.7)}" width="${f(tw + 1)}" height="${f(t.pt * 1.25)}" fill="#fff"/>`
+        + text(String(t.k), tx, t.y + t.pt * 0.35, t.pt, mwRight ? 'start' : 'end');
+      els.push(`<g data-marker-box="${t.box}" data-marker-size="${t.k}">${ed(`data-edit="marker" data-row="${t.row}" data-mark="${t.id}"`, mark)}</g>`);
+      grow(mwRight ? W : tx - tickLabW, t.y - t.pt * 0.7, mwRight ? tx + tickLabW : 0, t.y + t.pt * 0.55);
     });
     const scaleW = ticksOut.length ? st.tickLenPt + 2.5 + tickLabW + (tracks.length - 1) * stride : 0;
     if (mwRight) maxRight = scaleW; else maxLeft = scaleW;
@@ -239,16 +243,17 @@
     brs.sort((p, q) => (p.y2 - p.y1) - (q.y2 - q.y1)).forEach(o => {
       const side = o.bk.side === 'right' ? 'right' : 'left', dir = side === 'right' ? 1 : -1, bp = o.bk.pt || pt, tk = pt * 0.45;
       const txt = o.bk.text || (P ? L('点击输入', 'Click to type') : ''), ls = txt ? String(txt).split('\n') : [];
-      const tw = Math.max(0, ...ls.map(t => measure(t, bp))), th = ls.length ? bp + (ls.length - 1) * bp * LEAD : 0;
+      const vertical = !!o.bk.vertical, textW = Math.max(0, ...ls.map(t => measure(t, bp))), textH = ls.length ? bp + (ls.length - 1) * bp * LEAD : 0;
+      const tw = vertical ? textH : textW, th = vertical ? textW : textH;
       const ym = (o.y1 + o.y2) / 2, yy1 = Math.min(o.y1, ym - th / 2), yy2 = Math.max(o.y2, ym + th / 2);
       let off = base[side] + 3;
       // (groups one above the other, IP over Input, share a column: only a real overlap steps out)
       placedBr[side].filter(q => yy1 < q.y2 - 0.5 && yy2 > q.y1 + 0.5).forEach(q => { off = Math.max(off, q.end + 2.5); });
       const xb = (side === 'right' ? W : 0) + dir * (off + tk), tx = xb + dir * 2;
-      const path = `M${f(xb - dir * tk)} ${f(o.y1)}L${f(xb)} ${f(o.y1)}L${f(xb)} ${f(o.y2)}L${f(xb - dir * tk)} ${f(o.y2)}`;
+      const path = o.bk.line ? `M${f(xb)} ${f(o.y1)}L${f(xb)} ${f(o.y2)}` : `M${f(xb - dir * tk)} ${f(o.y1)}L${f(xb)} ${f(o.y1)}L${f(xb)} ${f(o.y2)}L${f(xb - dir * tk)} ${f(o.y2)}`;
       const hit = P ? `<rect x="${f(Math.min(xb - dir * tk, tx + dir * tw) - 1)}" y="${f(yy1 - 1)}" width="${f(tk + 2 + tw + 2)}" height="${f(yy2 - yy1 + 2)}" fill="transparent"/>` : '';
       els.push(ed(`data-edit="bracket" data-k="${o.k}"`, hit + `<path d="${path}" fill="none" stroke="#000" stroke-width="${f(lw)}"/>` +
-        (ls.length ? textLines(ls, tx, ym + bp * 0.35 + (ls.length - 1) * bp * LEAD / 2, bp, side === 'right' ? 'start' : 'end', o.bk.text ? '' : ph) : '')));
+        (ls.length ? (vertical ? `<g transform="translate(${f(tx + dir * tw / 2)},${f(ym)}) rotate(-90)">${textLines(ls, 0, bp * 0.35 + (ls.length - 1) * bp * LEAD / 2, bp, 'middle', o.bk.text ? '' : ph)}</g>` : textLines(ls, tx, ym + bp * 0.35 + (ls.length - 1) * bp * LEAD / 2, bp, side === 'right' ? 'start' : 'end', o.bk.text ? '' : ph)) : '')));
       const end = off + tk + 2 + tw;
       placedBr[side].push({ y1: yy1, y2: yy2, end });
       if (side === 'right') maxRight = Math.max(maxRight, end); else maxLeft = Math.max(maxLeft, end);
@@ -349,12 +354,59 @@
       });
       yTop = tierY(tiers.length);
     }
-    if (st.panelLetter) { const px = box.x0 - 2, py = box.y0 - 1; els.push(text(st.panelLetter, px, py + 8, 8, 'end', ' font-weight="bold"')); grow(px - measure(st.panelLetter, 8, true), py, px, py + 8); }
+    if (column.title) {
+      const ls = String(column.title).split('\n'), yy = column.titleSide === 'bottom' ? box.y1 + pt * 1.6 + (ls.length - 1) * pt * LEAD : box.y0 - pt * 0.6;
+      const tw = Math.max(...ls.map(t => measure(t, pt)));
+      els.push(textLines(ls, W / 2, yy, pt, 'middle')); grow(W / 2 - tw / 2, yy - pt - (ls.length - 1) * pt * LEAD, W / 2 + tw / 2, yy + 1);
+    }
+    if (st.panelLetter && column.id === 'main') { const px = box.x0 - 2, py = box.y0 - 1; els.push(text(st.panelLetter, px, py + 8, 8, 'end', ' font-weight="bold"')); grow(px - measure(st.panelLetter, 8, true), py, px, py + 8); }
 
     const m = 2, vx = box.x0 - m, vy = box.y0 - m, vw = box.x1 - box.x0 + 2 * m, vh = box.y1 - box.y0 + 2 * m;
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${f(vw / MM)}mm" height="${f(vh / MM)}mm" viewBox="${f(vx)} ${f(vy)} ${f(vw)} ${f(vh)}" font-family="Arial, Helvetica, sans-serif" fill="#000">` +
       `<rect x="${f(vx)}" y="${f(vy)}" width="${f(vw)}" height="${f(vh)}" fill="#fff"/>` + els.join('') + '</svg>';
-    return { svg, w: vw, h: vh, warnings, overlaps, angle, rowBoxes, laneX: X, laneW, figW: W, minPt: usedMin === Infinity ? pt : usedMin };
+    return { svg, content: els.join(''), vx, vy, w: vw, h: vh, warnings, overlaps, angle, rowBoxes, laneX: X, laneW, figW: W, minPt: usedMin === Infinity ? pt : usedMin };
+  }
+
+  // A column is an independent lane grid. Composition changes position only, never image data.
+  function build(preview) {
+    const cs = App.layoutColumns().filter(c => preview || App.rowsInColumn(c.id).some(r => !r.hidden));
+    let slots = null;
+    if (App.S.style.alignColumnRows && cs.length > 1) {
+      const heights = [], gaps = [], st = App.S.style;
+      cs.forEach(c => App.columns(c.id).rows.forEach((r, i, rows) => {
+        heights[i] = Math.max(heights[i] || 0, (r.above + r.below) * st.mmPerLane * MM / App.rowPitch(r));
+        gaps[i] = Math.max(gaps[i] || 0, i ? (rows[i - 1].blot === r.blot ? st.rowGapPt : st.blotGapPt) : 0);
+      }));
+      let y = 0; slots = heights.map((h, i) => { y += gaps[i]; const top = y; y += h; return top; });
+    }
+    const parts = cs.map(c => {
+      let p = buildSingle(preview, c, slots);
+      if (!p.rowBoxes?.length && preview) {
+        const w = 75, h = 40;
+        p = { ...p, vx: 0, vy: -12, w, h: h + 12, figW: w, rowBoxes: [], laneX: new Map(), laneW: App.S.style.mmPerLane * MM,
+          content: `<rect x="0" y="0" width="${w}" height="${h}" fill="#f5f8fc" stroke="#9caec3" stroke-dasharray="3 2"/>${text(c.title || L('拖入蛋白区域', 'Drop a region here'), w / 2, 22, 7, 'middle', ' fill="#6a7b90"')}` };
+      }
+      return { c, p };
+    });
+    if (!parts.length) return { svg: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>', w: 10, h: 10, warnings: [], overlaps: [], rowBoxes: [] };
+    if (parts.length === 1 && parts[0].p.content && parts[0].p.svg && parts[0].p.rowBoxes.length) {
+      const { c, p } = parts[0];
+      return { ...p, columnBoxes: [{ id: c.id, x0: p.vx, x1: p.vx + p.w, y0: p.vy, y1: p.vy + p.h, laneX: p.laneX }] };
+    }
+    const top = Math.min(...parts.map(({p}) => p.vy)), bottom = Math.max(...parts.map(({p}) => p.vy + p.h));
+    const gap = (App.S.style.columnGapMm ?? 6) * MM, rowBoxes = [], columnBoxes = [], content = [];
+    let x = 0;
+    parts.forEach(({c, p}) => {
+      const dx = x - p.vx;
+      content.push(`<g data-layout-column="${c.id}" transform="translate(${f(dx)},0)">${p.content || ''}</g>`);
+      columnBoxes.push({ id: c.id, x0: x, x1: x + p.w, y0: top, y1: bottom, laneX: new Map([...p.laneX || []].map(([j, v]) => [j, v + dx])) });
+      (p.rowBoxes || []).forEach(r => rowBoxes.push({ ...r, x0: r.x0 + dx, x1: r.x1 + dx }));
+      x += p.w + gap;
+    });
+    const w = x - gap, h = bottom - top;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${f(w / MM)}mm" height="${f(h / MM)}mm" viewBox="0 ${f(top)} ${f(w)} ${f(h)}" font-family="Arial, Helvetica, sans-serif" fill="#000"><rect x="0" y="${f(top)}" width="${f(w)}" height="${f(h)}" fill="#fff"/>${content.join('')}</svg>`;
+    return { svg, w, h, rowBoxes, columnBoxes, laneX: columnBoxes.find(c => c.id === App.activeColumn)?.laneX || new Map(), laneW: App.S.style.mmPerLane * MM, figW: w,
+      warnings: parts.flatMap(o => o.p.warnings), overlaps: parts.flatMap(o => o.p.overlaps), minPt: Math.min(...parts.map(o => o.p.minPt)), angle: parts[0].p.angle };
   }
 
   G.BRender = { build, measure, wrapText };

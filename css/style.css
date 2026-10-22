@@ -103,10 +103,13 @@ body.dragging #dropHint.hidden { display: flex !important; z-index: 5; }
 #preview { margin: auto; padding: 24px 24px 24px 64px; position: relative; }     /* (room for the row tags on the left) */
 #preview svg { display: block; background: #fff; box-shadow: 0 2px 16px rgba(16,24,40,.13); }
 #preview .ed { cursor: text; }
-#preview .ed:hover { filter: drop-shadow(0 0 0.6px #2f6feb) drop-shadow(0 0 0.6px #2f6feb); }
+/* Highlight editable labels without blurring small text. */
+#preview .ed:hover text, #preview .ed.active text { fill: #2f6feb; }
+#preview g[data-edit="arrow"]:hover path { fill: #2f6feb; }
+#preview g[data-edit="bracket"]:hover path { stroke: #2f6feb; }
 #preview g[data-edit="cond"] { cursor: pointer; }
 #preview g[data-edit="arrow"] { cursor: ns-resize; }
-#preview .ed.active { filter: drop-shadow(0 0 1px #2f6feb) drop-shadow(0 0 1px #2f6feb); }
+
 #preview.arming image[data-edit="gel"] { cursor: crosshair; }
 #preview .ghost-group { pointer-events: none; }
 .mode-banner { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: #16202c; color: #fff; border-radius: 16px;
@@ -525,3 +528,14 @@ html[lang=en] .sec.step.reach .sec-head::after { content: "Continue →"; }
 .tour-card b { display: block; color: var(--text); font-size: 14px; margin-bottom: 4px; }
 #tourOk { position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%); padding: 9px 26px; font-size: 14px; }
 .dlg-body .link { border: none; background: none; color: var(--accent); cursor: pointer; padding: 0; text-decoration: underline; font-size: inherit; }
+
+/* Optional columns stay inside the final naming step. */
+.column-controls { margin: 0 0 10px; }
+.column-tabs { display:flex; flex-wrap:wrap; gap:5px; }
+.column-tabs button { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.column-controls .field input[type="text"], #columnTitle { min-width:0; flex:1; width:130px; }
+.column-controls select { width:auto; max-width:100%; }
+.name-item .kda:empty { display:none; }
+.column-controls .adv { margin-top:6px; }
+.marker-visibility { display:flex; flex-wrap:wrap; gap:12px; margin:12px 0; }
+.marker-visibility label { display:flex; align-items:center; gap:4px; }

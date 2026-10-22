@@ -68,7 +68,7 @@
         <div class="inline"><button class="btn sm primary" id="btnDraftRestore" data-en="Restore">恢复</button><button class="btn sm ghost" id="btnDraftDrop" data-en="Discard">丢弃</button></div>
       </div>
       <p class="privacy" data-en-html="Pictures are processed only in this browser and never uploaded.<br>A saved project: File → Open project (top right).">图片只在本机浏览器处理，不会上传。<br>保存过的项目：右上角"文件 → 打开项目"。</p>
-      <p class="hint" id="offlineDownload"><a href="https://github.com/poplarity/BlotFigure/releases/download/v0.8.2/BlotFigure-v0.8.2.html" data-en="Download for offline use: one HTML file">下载离线版：只需一个 HTML 文件</a><br><span data-en="Save it to your computer, then open it in your browser. No installation or extraction.">保存到电脑，用浏览器打开；不用安装、不用解压。</span></p>
+      <p class="hint" id="offlineDownload"><a href="https://github.com/poplarity/BlotFigure/releases/download/v0.9.0/BlotFigure-v0.9.0.html" data-en="Download for offline use: one HTML file">下载离线版：只需一个 HTML 文件</a><br><span data-en="Save it to your computer, then open it in your browser. No installation or extraction.">保存到电脑，用浏览器打开；不用安装、不用解压。</span></p>
       <p class="hint storage-note hidden" data-en="Browser storage is unavailable. You can still edit and export; preferences and custom ladders stay in this tab only and there is no autosaved draft. Save a project before closing.">浏览器存储不可用，仍可编辑和导出；偏好与自定义 Marker 仅在本页暂存，也没有自动草稿。关闭前请保存项目。</p>
     </div>
 
@@ -114,6 +114,8 @@
         <div class="step-sum" id="sum4"></div>
         <div class="step-body">
           <div id="markerPanel"></div>
+          <div class="field inline"><label class="inline-label"><span data-en="Marker font">Marker 字号</span> <input id="markerFontQuick" type="number" min="4" max="14" step="0.5" class="num"> pt</label></div>
+          <p class="hint" data-en="Click a number on the figure to set a region's font or hide a label; calibration is kept.">点成图上的数字，可单独调整该区域字号或隐藏数字；校准点仍保留。</p>
           <div class="step-next"><button class="btn primary big" id="next4" data-en="Done. Next: names →">标好了，下一步：填名称 →</button><button class="btn ghost" id="skip4" title="成图不显示分子量刻度（以后可以在第 4 步补标）" data-en-title="The figure shows no molecular-weight ticks (you can mark them in step 4 later)" data-en="No molecular weights this time">这次不标分子量</button></div>
         </div>
       </section>
@@ -122,6 +124,7 @@
         <div class="sec-head"><span class="sec-n">5</span><span data-en="Names, lanes and export">名称、泳道与导出</span><span class="sec-status" id="stLanes"></span></div>
         <div class="step-sum" id="sum5"></div>
         <div class="step-body">
+          <div id="columnControls" class="column-controls"></div>
           <div class="sub-title"><span data-en="Protein names">蛋白名</span> <span class="h3-note" data-en="Enter jumps to the next; or click the grey text on the figure">回车跳下一个；也可以在右侧成图上点灰字</span></div>
           <div id="nameList"></div>
           <div class="sub-title" data-en="Lane names">泳道名</div>
@@ -129,14 +132,19 @@
           <textarea id="laneBulk" rows="2" placeholder="Ctrl, siA#1, siA#2 …（逗号、Tab、换行均可）" data-en-placeholder="Ctrl, siA#1, siA#2 … (commas, tabs or new lines)"></textarea>
           <div class="field inline range-row"><span data-en="Figure uses columns">成图用第</span> <select id="rangeA"></select> – <select id="rangeB"></select> <span data-en="">列</span> <button class="btn sm ghost" id="btnRangeAuto" data-en="Auto">自动</button></div>
           <details class="adv"><summary data-en="Cut single columns">逐列剪除</summary><div id="laneList" class="list"></div>
-            <p class="hint" data-en="Untick &quot;Show&quot; to cut that column from the figure: every row loses it, with a gap left (say so in the legend).">取消"显示" = 从成图剪除这一列，所有行同步剪除并留白间隔（图注需说明）。</p></details>
+            <p class="hint" data-en="Untick &quot;Show&quot; to cut that column from the figure: every row in the selected layout column loses it, with a gap left (say so in the legend).">取消"显示" = 从成图剪除这一列，本排版列的所有行同步剪除并留白间隔（图注需说明）。</p></details>
           <div class="sub-title"><span data-en="Annotations">标注</span> <span class="h3-note" data-en="optional">可选</span></div>
           <div class="tools">
             <button class="tool" id="btnAddArrow"><span class="ti">◀</span><span data-en="Target band">目标条带</span><small data-en="Click a band on the figure; its size is estimated">点成图上的条带，自动标分子量</small></button>
-            <button class="tool" id="btnAddCond"><span class="ti">±</span><span data-en="Condition row">条件行</span><small data-en="+ / − matrix">+ / − 矩阵</small></button>
+            <button class="tool" id="btnAddCond"><span class="ti">±</span><span data-en="Condition row">条件行</span><small data-en="+ / −, time or dose">+ / −、时间或剂量</small></button>
             <button class="tool" id="btnAddGroup"><span class="ti">⎴</span><span data-en="Group line">分组横线</span><small data-en="Drag across lane names on the figure">在成图上拖过泳道名</small></button>
             <button class="tool" id="btnAddBracket"><span class="ti">[</span><span data-en="Side bracket">行旁括号</span><small data-en="IP / Input groups, or a (Ub)n smear">IP / Input 分组，或 (Ub)n 拖尾</small></button>
           </div>
+          <details class="adv"><summary data-en="Paste a condition table (Excel)">粘贴条件表格（Excel）</summary>
+            <p class="hint" data-en="Each row: condition name, then one value per visible lane. Tabs separate cells; blanks are kept. Only the selected column is changed. Shift+click a figure cell to type text.">每行第一格为条件名，后面每格对应一条显示的泳道；保留空格。只应用到当前排版列；Shift+点击成图格子可输入文字。</p>
+            <textarea id="conditionBulk" rows="3" placeholder="Dox&#9;−&#9;+&#10;Time (h)&#9;0&#9;24"></textarea>
+            <div class="actions"><button class="btn sm" id="condAppend" data-en="Append">追加</button><button class="btn sm" id="condReplace" data-en="Replace this column's conditions">替换本列条件</button></div>
+          </details>
           <div id="annoList" class="list"></div>
           <div class="sub-title" data-en="Layout">版式</div>
           <div class="field inline">
@@ -264,6 +272,9 @@
   </ol>
   <h3 data-en="Common situations">常见情况</h3>
   <ul>
+    <li data-en-html="<b>Optional columns in one WB figure</b>: step 5 → Add a layout column. Each has its own lane names, range, conditions and title (top or bottom). Drag a region across to move it, or use its ⋯ menu → Move to column. Exposure and levels stay independent. Column settings controls spacing, row alignment and copying labels. Empty columns are omitted from export."><b>一张 WB 图内分列</b>：第 5 步点「多列排版」，每列分别填泳道、范围、条件和标题（顶端或底端）。把区域拖到另一列，或在名称旁 ⋯ 中选「移到排版列」；曝光、亮度仍各自独立。「列设置」可调间距、按行对齐、复制标签；空列不导出。</li>
+    <li data-en-html="<b>Marker font and visibility</b>: step 4 has a global font control. Click a Marker number on the figure, or ⋯ beside a protein name, to set that region's font and show/hide numbers. Hidden labels retain their calibration; reopen ⋯ to restore them."><b>Marker 字号和显示</b>：第 4 步可设全局字号。点成图的 Marker 数字，或蛋白名旁 ⋯，可单独设该区域字号、隐藏或恢复数字。隐藏数字不删除校准点。</li>
+    <li data-en-html="<b>Conditions and side labels</b>: paste a table copied from Excel in step 5 (first cell is the condition name, then one cell per visible lane; blanks are retained). Append or replace the current column. Shift+click a figure cell to type any value. Side brackets support vertical text and a straight-line style."><b>条件表和侧边标注</b>：第 5 步粘贴从 Excel 复制的表格（第一格条件名，后面对应显示的泳道；保留空格），选追加或替换本列。Shift+点击成图格子可输入任意值。行旁括号支持竖排文字和直线样式。</li>
     <li data-en-html="<b>The size of one band</b> (target band, as in GelFigure): in step 5 under &quot;Annotations&quot; click &quot;Target band&quot;, then the band on the figure: the arrow snaps onto it and its size is estimated from the marker marked in step 4. Click the arrow to add a name (shown as &quot;name (52 kDa)&quot;), type a size yourself, switch to * # † (* often marks a non-specific band), move it to the other side or delete it; drag it up or down onto another band of the row."><b>给某条带标分子量</b>（目标条带，和 GelFigure 一样）：第 5 步"标注"里点"目标条带"，再在右侧成图上点那条带：箭头吸附到条带上，按第 4 步标的 Marker 自动标分子量。点箭头可以加名称（显示成"名称 (52 kDa)"）、换成 * # †（* 常用来标非特异条带）、放到左边或右边、删除。</li>
     <li data-en-html="<b>IP / Input groups, ubiquitin smears</b> (side brackets, as in GelFigure): in step 5 under &quot;Annotations&quot; click &quot;Side bracket&quot; and drag along the rows on the figure: the rows covered form a group (e.g. the two IP: Flag rows, the three Input rows); a stretch within one row marks just that stretch (e.g. a (Ub)n smear); a click on a row covers the whole row. Ends near a row edge snap to it (hold Alt to place freely). Then type the text (↵ for a new line); it can go left or right and have its own size; click the bracket on the figure to change it."><b>IP / Input 分组、泛素化拖尾</b>（行旁括号，和 GelFigure 一样）：第 5 步"标注"里点"行旁括号"，在右侧成图上沿着行上下拖：盖住几行就是一组（如 IP: Flag 的两行、Input 的三行），在一行里拖一段就标出这一段（如 (Ub)n 拖尾）；在一行上点一下 = 盖住整行。两端靠近行边时自动对齐（按住 Alt 不吸附）。松开后输入文字（↵ 换行），可以放左边或右边、单独设字号；点成图上的括号再改。</li>
     <li data-en-html="<b>A * in text</b>: *italic* is written between two asterisks (e.g. *p*-ERK); a single * (as in WT*, K48R*) is printed as it is."><b>文字里的 *</b>：*斜体* 写成两个星号夹住（如 *p*-ERK）；单个的 *（如 WT*、K48R*）照原样显示。</li>
