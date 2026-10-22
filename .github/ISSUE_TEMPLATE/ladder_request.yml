@@ -1,0 +1,34 @@
+name: Add a protein ladder / 添加 Marker 型号
+description: Ask for a prestained protein ladder to be built in. 申请把某个预染 Marker 加入内置库。
+labels: [ladder]
+body:
+  - type: input
+    id: name
+    attributes:
+      label: Vendor, product and catalogue number / 厂商、产品名与货号
+      placeholder: e.g. Thermo PageRuler Plus Prestained Protein Ladder (26619)
+    validations:
+      required: true
+  - type: input
+    id: sizes
+    attributes:
+      label: Band sizes in kDa, largest to smallest / 条带大小（kDa，从大到小）
+      placeholder: 250, 130, 100, 70, 55, 35, 25, 15, 10
+    validations:
+      required: true
+  - type: input
+    id: ref
+    attributes:
+      label: Coloured or brighter reference bands, if any / 彩色或加亮的参考带（如有）
+  - type: input
+    id: buffer
+    attributes:
+      label: Gel system the sizes are calibrated in / 标定分子量的胶体系
+      placeholder: e.g. Tris-glycine; Bis-Tris MES; Tricine
+  - type: input
+    id: source
+    attributes:
+      label: Link to the manufacturer's datasheet / 厂商说明书链接
+      description: Required; sizes cannot be added without a source. 必填，没有出处无法加入。
+    validations:
+      required: true

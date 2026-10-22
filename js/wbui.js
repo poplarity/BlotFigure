@@ -2,6 +2,11 @@
 (function (G) {
   'use strict';
   const App = G.BApp, WB = G.WB, $ = id => document.getElementById(id);
+  // the interface language (i18n.js): L('中文', 'English'), called when the text is built
+  const L = G.L || (zh => zh);
+  const list = a => a.join(L('、', ', '));
+  // English counts: pl(3, 'lane') = "3 lanes", pl(1, 'box', 'boxes') = "1 box"
+  const pl = (n, one, many) => `${n} ${n === 1 ? one : many || one + 's'}`;
   const S = () => App.S;
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -10,8 +15,8 @@
   const done = fn => e => { if (!S()) return; if (fn) fn(e); App.commit(); };
   // the pieces (modules) a row comes from: "B", "A+B"; with several membranes "2·B"
   const modLabel = row => {
-    const L = App.rowPieces(row).map(pc => pc.letter || '?').join('+') || '—';
-    return S().blots.length > 1 ? `${S().blots.indexOf(App.blot(row.blot)) + 1}·${L}` : L;
+    const lab = App.rowPieces(row).map(pc => pc.letter || '?').join('+') || '—';
+    return S().blots.length > 1 ? `${S().blots.indexOf(App.blot(row.blot)) + 1}·${lab}` : lab;
   };
 
   /* ---------- feedback ---------- */
@@ -27,7 +32,7 @@
     const box = $('warnings'); box.innerHTML = '';
     [...new Set(list)].filter(w => !dismissed.has(w)).slice(0, 4).forEach(w => {
       const d = document.createElement('div'); d.innerHTML = `<span>⚠ ${esc(w)}</span>`;
-      const x = document.createElement('button'); x.textContent = '×'; x.title = '不再提示'; x.onclick = () => { dismissed.add(w); d.remove(); };
+      const x = document.createElement('button'); x.textContent = '×'; x.title = L('不再提示', 'Dismiss'); x.onclick = () => { dismissed.add(w); d.remove(); };
       d.appendChild(x); box.appendChild(d);
     });
   }
@@ -42,21 +47,33 @@
     const onView = m === 'addrow' || m === 'marks' || m === 'align' || m === 'pieces';
     $('modeBanner').classList.toggle('hidden', !m || onView);
     $('viewBanner').classList.toggle('hidden', !onView);
-    $('modeText').textContent = m === 'group' ? '在成图上从第一个泳道名拖到最后一个' : m === 'arrow' ? '在成图上点目标条带：箭头吸附到条带，按 Marker 标分子量'
-      : m === 'bracket' ? '在成图上沿着行上下拖出括号 · 点一行 = 整行 · Alt 不吸附行边' : '';
-    $('viewModeText').textContent = m === 'addrow' ? '移到蛋白条带上点一下放下框（或按住拖出任意大小）· Esc 取消'
-      : m === 'marks' ? '第 4 步：点一条 Marker 带，选它的分子量 · 拖动对准（自动吸附，Alt 不吸附）· 点数字改'
-      : m === 'align' ? '拖动图片让条带落进框里 · Shift+拖动或 [ ] 旋转 · 方向键微调'
-      : m === 'pieces' ? '第 2 步：拖动蓝框移动 · 拖边角改大小 · 拖 ↻ 旋转 · 空白处拖出新膜条 · Delete 删除' : '';
+    $('modeText').textContent = m === 'group' ? L('在成图上从第一个泳道名拖到最后一个', 'On the figure, drag from the first lane name to the last')
+      : m === 'arrow' ? L('在成图上点目标条带：箭头吸附到条带，按 Marker 标分子量',
+        'Click the target band on the figure: the arrow snaps to the band and gets its size from the marker')
+      : m === 'bracket' ? L('在成图上沿着行上下拖出括号 · 点一行 = 整行 · Alt 不吸附行边',
+        'Drag up or down along the rows on the figure · click a row = the whole row · Alt: no snapping to row edges') : '';
+    $('viewModeText').textContent = m === 'addrow' ? L('移到蛋白条带上点一下放下框（或按住拖出任意大小）· Esc 取消',
+      'Click on a protein band to place a box (or drag one out at any size) · Esc to cancel')
+      : m === 'marks' ? L('第 4 步：点一条 Marker 带，选它的分子量 · 拖动对准（自动吸附，Alt 不吸附）· 点数字改',
+        'Step 4: click a marker band and pick its size · drag to line it up (snaps; Alt: no snapping) · click a number to change it')
+      : m === 'align' ? L('拖动图片让条带落进框里 · Shift+拖动或 [ ] 旋转 · 方向键微调',
+        'Drag the picture so the bands sit in the boxes · Shift+drag or [ ] to rotate · arrow keys to nudge')
+      : m === 'pieces' ? L('第 2 步：拖动蓝框移动 · 拖边角改大小 · 拖 ↻ 旋转 · 空白处拖出新膜条 · Delete 删除',
+        'Step 2: drag a blue box to move it · drag its edges to resize · drag ↻ to rotate · drag on empty space for a new strip · Delete removes') : '';
     const vb = App.S && App.blot(App.viewBlot);
     // (the modes of steps 2 and 4 end with the step: their banners lead on to the next one)
-    $('viewModeExtra').innerHTML = m === 'align' ? '<button id="vmAuto" title="按白光图和条带自动对齐（整张膜的图都重新对齐）">自动对齐</button><button id="vmNone" title="按原样使用这张图，不移动">不对齐</button>'
-      : m === 'pieces' ? `${vb && vb.userStrips ? '<button id="vmPcAuto" title="丢掉手动调整，按 Marker 图重新自动找膜条">恢复自动</button>' : ''}<button id="vmPcNext" class="go">${pcUnseen() ? '这张对了，看下一张膜 →' : '下一步 →'}</button>`
-      : m === 'marks' ? '<button id="vmMkNext" class="go">下一步 →</button>' : '';
+    $('viewModeExtra').innerHTML = m === 'align' ? `<button id="vmAuto" title="${L('按白光图和条带自动对齐（整张膜的图都重新对齐）', 'Align automatically by the white-light picture and the bands (every picture of this membrane is aligned again)')}">${L('自动对齐', 'Auto-align')}</button>`
+        + `<button id="vmNone" title="${L('按原样使用这张图，不移动', 'Use this picture as taken, without moving it')}">${L('不对齐', "Don't align")}</button>`
+      : m === 'pieces' ? `${vb && vb.userStrips ? `<button id="vmPcAuto" title="${L('丢掉手动调整，按 Marker 图重新自动找膜条', 'Discard the changes made by hand and find the strips on the marker picture again')}">${L('恢复自动', 'Back to automatic')}</button>` : ''}`
+        + `<button id="vmPcNext" class="go">${pcUnseen() ? L('这张对了，看下一张膜 →', 'This one is right. Next membrane →') : L('下一步 →', 'Next →')}</button>`
+      : m === 'marks' ? `<button id="vmMkNext" class="go">${L('下一步 →', 'Next →')}</button>` : '';
     if (m === 'align') {
       const id = App.alignImg;
-      $('vmAuto').onclick = () => { G.View.alignEnd(); App.mode = null; App.busy(true, '自动对齐…'); setTimeout(() => { App.autoAlign(id); App.busy(false); App.commit(); App.setMode('align'); G.View.alignStart(id); toast('已重新自动对齐这张膜的图'); }, 20); };
-      $('vmNone').onclick = () => { G.View.alignEnd(); App.setAlign(id, null); App.commit(); G.View.alignStart(id); toast('这张图按原样使用（不移动）'); };
+      $('vmAuto').onclick = () => {
+        G.View.alignEnd(); App.mode = null; App.busy(true, L('自动对齐…', 'Aligning…'));
+        setTimeout(() => { App.autoAlign(id); App.busy(false); App.commit(); App.setMode('align'); G.View.alignStart(id); toast(L('已重新自动对齐这张膜的图', "Aligned this membrane's pictures automatically again")); }, 20);
+      };
+      $('vmNone').onclick = () => { G.View.alignEnd(); App.setAlign(id, null); App.commit(); G.View.alignStart(id); toast(L('这张图按原样使用（不移动）', 'This picture is used as taken (not moved)')); };
     }
     if (m === 'pieces') {
       $('vmPcNext').onclick = () => nextStep(2);
@@ -64,7 +81,7 @@
     }
     if (m === 'marks') $('vmMkNext').onclick = () => nextStep(4);
     $('viewModeCancel').classList.toggle('hidden', m === 'pieces' || m === 'marks');
-    $('viewModeCancel').textContent = m === 'align' ? '完成' : '取消 (Esc)';
+    $('viewModeCancel').textContent = m === 'align' ? L('完成', 'Done') : L('取消 (Esc)', 'Cancel (Esc)');
     $('btnAddRow').classList.toggle('primary', m === 'addrow');
     $('btnAddGroup').classList.toggle('on', m === 'group');
     $('btnAddArrow').classList.toggle('on', m === 'arrow');
@@ -91,7 +108,8 @@
     App.emit('select');
     if (pc) G.View.fitPiece(pc); else G.View.fitFull();
     $('editorBox').focus({ preventScroll: true });
-    if (!mk) toast('这张膜没有 Marker 图：在曝光图上标 Marker 带也可以（看得见 Marker 的话）', 4200);
+    if (!mk) toast(L('这张膜没有 Marker 图：在曝光图上标 Marker 带也可以（看得见 Marker 的话）',
+      'This membrane has no marker picture: you can mark the marker bands on an exposure instead (if the marker shows there)'), 4200);
   }
   /* the membrane's pieces by hand (step 2): on its Marker picture (the outlines show best there). Several
    * membranes: one after the other ("next" goes on to the next one not looked at yet). */
@@ -115,11 +133,11 @@
    * staying where they are; toAuto: the pieces found automatically again. then: once done. */
   function applyPieces(b, pcs, toAuto, then) {
     if (!b || (!pcs && !toAuto)) { if (then) then(); return; }
-    App.busy(true, '按膜条重新分析…');
+    App.busy(true, L('按膜条重新分析…', 'Analysing again by the strips…'));
     setTimeout(() => {
       App.setPieces(b, toAuto ? null : pcs);
       App.busy(false); App.commit();
-      if (toAuto) { toast('膜条已恢复自动识别'); if (App.curStep === 2) startPieces(b); }
+      if (toAuto) { toast(L('膜条已恢复自动识别', 'Strips are detected automatically again')); if (App.curStep === 2) startPieces(b); }
       if (then) then();
     }, 20);
   }
@@ -129,14 +147,20 @@
     const n = await App.addFiles(files);
     if (!n) return;
     const st = S(), moved = st.blots.reduce((s, b) => s + nMoved(b), 0);
-    toast(`已载入 ${n} 张图片（${st.blots.length} 张膜）` + (moved ? `，${moved} 张拍摄时膜的位置不同，已自动对齐` : '') + '。第 1 步：确认每张膜的 Marker 图', moved ? 5200 : 4000);
+    const nb = st.blots.length;
+    toast(L(`已载入 ${n} 张图片（${nb} 张膜）`, `Loaded ${pl(n, 'picture')} (${pl(nb, 'membrane')})`)
+      + (moved ? L(`，${moved} 张拍摄时膜的位置不同，已自动对齐`, `; ${moved} ${moved === 1 ? 'was' : 'were'} taken with the membrane elsewhere and aligned automatically`) : '')
+      + L('。第 1 步：确认每张膜的 Marker 图', '. Step 1: check the marker picture of each membrane'), moved ? 5200 : 4000);
     // (8-bit pictures: said once, not once per file)
     const lw = App.loadWarnings || [];
-    if (lw.length) toast(lw.length > 1 ? `有 ${lw.length} 张不是 16 位 TIFF，按 8 位处理：动态范围低，过曝像素不好判断；有成像仪导出的 16 位 TIFF 的话建议用它` : lw[0], 6000);
+    if (lw.length) {
+      toast(lw.length > 1 ? L(`有 ${lw.length} 张不是 16 位 TIFF，按 8 位处理：动态范围低，过曝像素不好判断；有成像仪导出的 16 位 TIFF 的话建议用它`,
+        `${lw.length} pictures are not 16-bit TIFF and are read as 8-bit: low dynamic range, saturated pixels are hard to tell. If your imager exports 16-bit TIFF, use that`) : lw[0], 6000);
+    }
   }
   ['fileInput', 'fileInput2', 'fileInput3'].forEach(id => $(id).addEventListener('change', e => { $('fileMenu').classList.add('hidden'); addFiles(e.target.files); e.target.value = ''; }));
   async function loadDemo() {
-    App.busy(true, '生成示例膜图…');
+    App.busy(true, L('生成示例膜图…', 'Making the example blots…'));
     await new Promise(r => setTimeout(r, 30));
     const files = G.WBDemo.files(G.WBDemo.cutSession()).concat(G.WBDemo.files(G.WBDemo.scatterSession()));
     await addFiles(files);
@@ -158,24 +182,41 @@
   $('fileMenu').addEventListener('click', e => e.stopPropagation());
   $('exportMenu').addEventListener('click', e => { if (e.target.closest('.menu-check')) e.stopPropagation(); });   // (a tick keeps the menu open)
   document.addEventListener('click', () => { $('exportMenu').classList.add('hidden'); $('fileMenu').classList.add('hidden'); });
+  /* the interface language: what is open was built in the old one — finished first (a popover, the text editor
+   * on the figure, the menus); then everything the script writes is written again (the static page: i18n.js) */
+  if (G.I18N) {
+    if ($('btnLang')) {
+      $('btnLang').onclick = () => {
+        closePop(); if (edit) closeEd(false);
+        $('exportMenu').classList.add('hidden'); $('fileMenu').classList.add('hidden');
+        G.I18N.set(G.I18N.lang === 'en' ? 'zh' : 'en');
+      };
+    }
+    G.I18N.onChange(() => {
+      if (S()) { App.setMode(App.mode); App.emit('change'); }    // (the open mode's banner, then every panel)
+      else offerDraft();
+    });
+  }
   /* ---------- projects ---------- */
   async function saveProject() {
     $('fileMenu').classList.add('hidden');
-    if (!S()) { toast('还没有内容可保存'); return; }
-    App.busy(true, '保存项目…');
+    if (!S()) { toast(L('还没有内容可保存', 'Nothing to save yet')); return; }
+    App.busy(true, L('保存项目…', 'Saving project…'));
     try {
       const blob = await App.saveProject();
       G.Export.download(blob, 'blot_project.blotfig');
       App.saved = App.hist[App.hist.length - 1];
-      toast(`已保存项目（${(blob.size / 1048576).toFixed(1)} MB）：下次"文件 → 打开项目"接着做`, 3600);
-    } catch (e) { alert('保存失败：' + e.message); } finally { App.busy(false); }
+      const mb = (blob.size / 1048576).toFixed(1);
+      toast(L(`已保存项目（${mb} MB）：下次"文件 → 打开项目"接着做`, `Saved project (${mb} MB). Open it later with File → Open project.`), 3600);
+    } catch (e) { alert(L('保存失败：', 'Could not save: ') + e.message); } finally { App.busy(false); }
   }
   $('btnSaveProj').onclick = saveProject;
   $('projInput').addEventListener('change', async e => {
     const f = e.target.files[0]; e.target.value = ''; $('fileMenu').classList.add('hidden');
     if (!f) return;
-    if (S() && App.hist[App.hist.length - 1] !== App.saved && !confirm('打开项目会替换现在的内容（没保存的改动会丢掉）。继续？')) return;
-    try { const n = await App.openProject(f); toast(`已打开项目：${n} 张图片`); } catch (err) { alert('打开失败：' + err.message); }
+    if (S() && App.hist[App.hist.length - 1] !== App.saved && !confirm(L('打开项目会替换现在的内容（没保存的改动会丢掉）。继续？',
+      'Opening a project replaces what is open now (unsaved changes are lost). Continue?'))) return;
+    try { const n = await App.openProject(f); toast(L(`已打开项目：${n} 张图片`, `Opened project: ${pl(n, 'picture')}`)); } catch (err) { alert(L('打开失败：', 'Could not open: ') + err.message); }
   });
   window.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveProject(); } });
   // leaving with work not saved as a project: the browser asks first (the draft keeps it too, if it can)
@@ -183,36 +224,45 @@
   /* ---------- style files, resets (as GelFigure's file menu) ---------- */
   $('btnSaveTpl').onclick = () => {
     $('fileMenu').classList.add('hidden');
-    if (!S() || !S().rows.length) { toast('先做出一张图，再保存它的样式'); return; }
+    if (!S() || !S().rows.length) { toast(L('先做出一张图，再保存它的样式', 'Make a figure first, then save its style')); return; }
     G.Export.download(new Blob([JSON.stringify(App.template(), null, 2)], { type: 'application/json' }), 'blot_style.json');
-    toast('已保存样式：下一张同类的图"文件 → 载入样式"一键套用', 3600);
+    toast(L('已保存样式：下一张同类的图"文件 → 载入样式"一键套用', 'Saved style. Use it on the next figure of the series with File → Apply style.'), 3600);
   };
   $('tplInput').addEventListener('change', async e => {
     const f = e.target.files[0]; e.target.value = ''; $('fileMenu').classList.add('hidden');
     if (!f) return;
-    if (!S() || !S().rows.length) { toast('先做到第 3 步（有了蛋白框），再套用样式'); return; }
+    if (!S() || !S().rows.length) { toast(L('先做到第 3 步（有了蛋白框），再套用样式', 'Get to step 3 (protein boxes) first, then apply a style')); return; }
     try {
       const t = JSON.parse(await f.text());
-      if (!t || !t.blotfigTemplate) throw new Error('不是 BlotFigure 样式文件');
+      if (!t || !t.blotfigTemplate) throw new Error(L('不是 BlotFigure 样式文件', 'Not a BlotFigure style file'));
       const fl = App.figLanes().length, vis = S().rows.filter(r => !r.hidden).length;
-      if ((t.lanes || []).length !== fl || (t.proteins || []).length !== vis) {
-        if (!confirm(`样式里有 ${(t.lanes || []).length} 条泳道、${(t.proteins || []).length} 个蛋白，这张图是 ${fl} 条泳道、${vis} 个蛋白。\n会从第一条泳道、第一行起按顺序对应，多出来的忽略。继续？`)) return;
+      const tl = (t.lanes || []).length, tp = (t.proteins || []).length;
+      if (tl !== fl || tp !== vis) {
+        if (!confirm(L(`样式里有 ${tl} 条泳道、${tp} 个蛋白，这张图是 ${fl} 条泳道、${vis} 个蛋白。\n会从第一条泳道、第一行起按顺序对应，多出来的忽略。继续？`,
+          `The style has ${pl(tl, 'lane')} and ${pl(tp, 'protein')}; this figure has ${pl(fl, 'lane')} and ${pl(vis, 'protein')}.\nThey are matched in order from the first lane and the first row; any extra are ignored. Continue?`))) return;
       }
       App.applyTemplate(t); App.commit();
-      toast('样式已套用（Ctrl+Z 可撤销）');
-    } catch (err) { alert('样式载入失败：' + err.message); }
+      toast(L('样式已套用（Ctrl+Z 可撤销）', 'Style applied (Ctrl+Z to undo)'));
+    } catch (err) { alert(L('样式载入失败：', 'Could not apply the style: ') + err.message); }
   });
   $('btnResetAll').onclick = () => {
     $('fileMenu').classList.add('hidden');
     if (!S()) return;
-    if (App.hist[App.hist.length - 1] === App.initial) { toast(App.initialAsOpened ? '现在就是打开项目时的样子' : '现在就是刚导入时的样子，没有要撤回的改动'); return; }
-    const when = App.initialAsOpened ? '打开这个项目时（它保存时还没有记录导入时的状态）' : '刚导入图片时';
-    if (!confirm(`回到${when}的样子：膜条、蛋白框、名字、Marker 刻度和标注都会回到那时的状态。\n这一步可以用 Ctrl+Z 撤销。继续？`)) return;
-    if (App.resetAll()) { App.curStep = S().step; App.commit(); openStep(App.curStep); toast('已回到刚导入时（Ctrl+Z 可撤销）'); }
+    if (App.hist[App.hist.length - 1] === App.initial) {
+      toast(App.initialAsOpened ? L('现在就是打开项目时的样子', 'This is already how the project was when opened')
+        : L('现在就是刚导入时的样子，没有要撤回的改动', 'This is already how it was after import: nothing to take back'));
+      return;
+    }
+    const when = App.initialAsOpened ? L('打开这个项目时（它保存时还没有记录导入时的状态）', 'when this project was opened (it was saved before the state after import was recorded)')
+      : L('刚导入图片时', 'right after the pictures were imported');
+    if (!confirm(L(`回到${when}的样子：膜条、蛋白框、名字、Marker 刻度和标注都会回到那时的状态。\n这一步可以用 Ctrl+Z 撤销。继续？`,
+      `Go back to how it was ${when}: strips, protein boxes, names, marker ticks and annotations all return to that state.\nCtrl+Z undoes this. Continue?`))) return;
+    if (App.resetAll()) { App.curStep = S().step; App.commit(); openStep(App.curStep); toast(L('已回到刚导入时（Ctrl+Z 可撤销）', 'Back to import (Ctrl+Z to undo)')); }
   };
   $('btnNew').onclick = async () => {
     $('fileMenu').classList.add('hidden');
-    if (S() && App.hist[App.hist.length - 1] !== App.saved && !confirm('新建会清空现在的图片和所有调整（没保存成项目的话就找不回来了）。继续？')) return;
+    if (S() && App.hist[App.hist.length - 1] !== App.saved && !confirm(L('新建会清空现在的图片和所有调整（没保存成项目的话就找不回来了）。继续？',
+      'New clears the pictures and every change (they cannot be recovered unless saved as a project). Continue?'))) return;
     await App.dropDraft();
     App.leaving = true; location.reload();
   };
@@ -235,9 +285,9 @@
   });
   $('dpiTop').addEventListener('change', done(e => { S().style.dpi = +e.target.value; }));
   const baseName = () => 'blot_figure';
-  const needFigure = () => { if (S() && S().rows.some(r => !r.hidden)) return false; toast('还没有可导出的行'); return true; };
+  const needFigure = () => { if (S() && S().rows.some(r => !r.hidden)) return false; toast(L('还没有可导出的行', 'No rows to export yet')); return true; };
   /* ---------- export, with a check first (as GelFigure) ---------- */
-  const pref = (k, v) => { try { if (v === undefined) return localStorage.getItem('blotfig.' + k); localStorage.setItem('blotfig.' + k, v); } catch (e) { /* storage off */ } return null; };
+  const pref = (k, v) => { if (v === undefined) return G.PrefStorage.getItem('blotfig.' + k); G.PrefStorage.setItem('blotfig.' + k, v); return null; };
   $('preflightOn').checked = pref('preflight') !== '0';
   $('preflightOn').addEventListener('change', e => pref('preflight', e.target.checked ? '1' : '0'));
   // true = go ahead, false = the user went back to fix something
@@ -246,13 +296,13 @@
       if (pref('preflight') === '0') return resolve(true);
       const items = App.preflight(), serious = items.filter(i => i.level === 'block' || i.level === 'warn');
       if (!serious.length) return resolve(true);
-      const lab = { block: '需处理', warn: '注意', info: '提示' };
+      const lab = { block: L('需处理', 'Fix'), warn: L('注意', 'Warning'), info: L('提示', 'Note') };
       $('pfList').innerHTML = items.map((it, k) => `<div class="pf-item"><span class="lv ${it.level}">${lab[it.level]}</span><span class="tx">${esc(it.text)}</span>${it.fix ? `<button class="btn sm" data-fix="${k}">${esc(it.fix.label)}</button>` : ''}</div>`).join('');
       const close = ok => { $('preflightDlg').classList.add('hidden'); if ($('pfOff').checked) { pref('preflight', '0'); $('preflightOn').checked = false; } resolve(ok); };
       $('pfList').querySelectorAll('[data-fix]').forEach(b => b.onclick = () => {
         const fx = items[+b.dataset.fix].fix;
         if (fx.leave) { close(false); fx.run(); return; }
-        fx.run(); App.commit(); b.disabled = true; b.textContent = '已修正';
+        fx.run(); App.commit(); b.disabled = true; b.textContent = L('已修正', 'Fixed');
       });
       $('pfOff').checked = false;
       $('preflightDlg').classList.remove('hidden');
@@ -263,26 +313,27 @@
   const exportTexts = () => ({ Software: 'BlotFigure ' + App.VERSION, Description: App.summaryText() });
   async function exportRaster(kind) {
     if (needFigure() || !(await preflight())) return;
-    App.busy(true, '导出中…');
+    App.busy(true, L('导出中…', 'Exporting…'));
     try {
       const f = G.BRender.build(false), dpi = S().style.dpi, eff = Math.round(App.effectiveDpi());
       if (kind === 'tiff') await G.Export.exportTIFF(f.svg, f.w, f.h, dpi, `${baseName()}_${dpi}dpi.tif`, exportTexts());
       else await G.Export.exportPNG(f.svg, f.w, f.h, dpi, `${baseName()}_${dpi}dpi.png`, exportTexts());
-      toast(`已导出 ${dpi} dpi ${kind === 'tiff' ? 'TIFF' : 'PNG'}` + (eff < dpi ? `（条带本身 ${eff} dpi）` : ''));
+      const fmt = kind === 'tiff' ? 'TIFF' : 'PNG';
+      toast(L(`已导出 ${dpi} dpi ${fmt}`, `Exported ${dpi} dpi ${fmt}`) + (eff < dpi ? L(`（条带本身 ${eff} dpi）`, ` (the bands themselves are ${eff} dpi)`) : ''));
     } catch (e) { alert(e.message); } finally { App.busy(false); }
   }
   $('btnPNG').onclick = () => exportRaster('png');
   $('btnTIFF').onclick = () => exportRaster('tiff');
-  $('btnSVG').onclick = async () => { if (needFigure() || !(await preflight())) return; G.Export.exportSVG(G.BRender.build(false).svg, baseName() + '.svg'); toast('已导出 SVG'); };
+  $('btnSVG').onclick = async () => { if (needFigure() || !(await preflight())) return; G.Export.exportSVG(G.BRender.build(false).svg, baseName() + '.svg'); toast(L('已导出 SVG', 'Exported SVG')); };
   $('btnLog').onclick = () => {
     if (needFigure()) return;
     G.Export.download(new Blob([JSON.stringify(App.processingLog(), null, 2)], { type: 'application/json' }), baseName() + '_processing_log.json');
-    toast('已导出处理日志（含每张原图的 SHA-256）');
+    toast(L('已导出处理日志（含每张原图的 SHA-256）', 'Exported the processing log (with the SHA-256 of every original)'));
   };
   $('btnLegend').onclick = async () => {
     if (!S()) return;
     const t = App.checks().legend.join(' ');
-    try { await navigator.clipboard.writeText(t); toast('图注文字已复制'); } catch (e) { prompt('复制下面的图注文字：', t); }
+    try { await navigator.clipboard.writeText(t); toast(L('图注文字已复制', 'Legend text copied')); } catch (e) { prompt(L('复制下面的图注文字：', 'Copy the legend text below:'), t); }
   };
   $('btnRaw').onclick = () => { if (S()) exportRaw(); };
   $('btnQuant').onclick = () => { if (S()) exportQuant(); };
@@ -314,11 +365,13 @@
       const card = document.createElement('div');
       card.className = 'blot-card' + (b.id === App.viewBlot ? ' view' : '');
       const nCh = App.chemiOf(b).length, nM = App.markersOf(b).length, mk = App.markerRec(b);
-      card.innerHTML = `<div class="blot-head"><input type="text" value="${esc(b.name)}" placeholder="${esc(App.blotName(b))}" title="膜的名字（几张膜时用来区分）"></div>
-        <div class="blot-sub">${nCh} 张曝光 · ${nM} 张白光 / 复合图${nMoved(b) ? ` · <span title="拍摄之间膜的位置变过：这些图已对齐到同一位置">${nMoved(b)} 张已对齐</span>` : ''}</div>
-        ${mk ? '' : '<p class="hint warn-t">没认出 Marker 图：点看得见 Marker 的那张下面的"设为 Marker 图"。确实没有的话也可以继续，只是不能标分子量。</p>'}
-        <div class="th-label">白光 / 复合图 <span>${nM}</span></div><div class="thumbs" data-kind="marker"></div>
-        <div class="th-label">曝光图 <span>${nCh}</span></div><div class="thumbs" data-kind="chemi"></div>`;
+      const nMv = nMoved(b);
+      card.innerHTML = `<div class="blot-head"><input type="text" value="${esc(b.name)}" placeholder="${esc(App.blotName(b))}" title="${L('膜的名字（几张膜时用来区分）', 'Membrane name (tells several membranes apart)')}"></div>
+        <div class="blot-sub">${L(`${nCh} 张曝光 · ${nM} 张白光 / 复合图`, `${pl(nCh, 'exposure')} · ${nM} white-light / merged`)}${nMv ? ` · <span title="${L('拍摄之间膜的位置变过：这些图已对齐到同一位置', 'The membrane moved between captures: these pictures are aligned to one position')}">${L(`${nMv} 张已对齐`, `${nMv} aligned`)}</span>` : ''}</div>
+        ${mk ? '' : `<p class="hint warn-t">${L('没认出 Marker 图：点看得见 Marker 的那张下面的"设为 Marker 图"。确实没有的话也可以继续，只是不能标分子量。',
+          'No marker picture recognised: click "Set as marker picture" under the one that shows the marker. If there is none you can go on, only without molecular weights.')}</p>`}
+        <div class="th-label">${L('白光 / 复合图', 'White light / merged')} <span>${nM}</span></div><div class="thumbs" data-kind="marker"></div>
+        <div class="th-label">${L('曝光图', 'Exposures')} <span>${nCh}</span></div><div class="thumbs" data-kind="chemi"></div>`;
       // white-light pictures (often one per capture, all alike): the Marker picture and the grid's, the rest
       // behind "+N" unless opened or shown
       const wl = App.markersOf(b), keep = r => wlOpen.has(b.id) || wl.length <= 3 || r.id === b.marker || r.id === b.frame || (r.id === App.viewImg && b.id === App.viewBlot);
@@ -326,56 +379,71 @@
         const th = card.querySelector(`.thumbs[data-kind="${rec.kind}"]`);
         const t = document.createElement('div');
         t.className = 'thumb' + (rec.id === App.viewImg && b.id === App.viewBlot ? ' on' : '') + (rec.id === b.marker ? ' mk' : '');
-        t.title = rec.name + (rec.resampled ? '（已缩放到与曝光图相同尺寸）' : '');
+        t.title = rec.name + (rec.resampled ? L('（已缩放到与曝光图相同尺寸）', " (resized to the exposures' size)") : '');
         t.appendChild(thumbCanvas(rec));
         // which figure rows take their bands from this exposure (row colours)
         const users = rec.kind === 'chemi' ? st.rows.filter(r => !r.hidden && r.img === rec.id) : [];
-        const usesHtml = users.length ? `<span class="uses" title="成图中用这张曝光的行：${esc(users.map(r => r.name || (App.rowKda(r) ? '≈' + Math.round(App.rowKda(r)) + ' kDa' : '未命名')).join('、'))}">${users.map(r => `<i style="background:${App.rowColor(r)}"></i>`).join('')}</span>` : '';
+        const usesHtml = users.length ? `<span class="uses" title="${L('成图中用这张曝光的行：', 'Rows in the figure that use this exposure: ')}${esc(list(users.map(r => r.name || (App.rowKda(r) ? '≈' + Math.round(App.rowKda(r)) + ' kDa' : L('未命名', 'unnamed')))))}">${users.map(r => `<i style="background:${App.rowColor(r)}"></i>`).join('')}</span>` : '';
         // the membrane lay elsewhere in this picture: aligned onto the others (the grid's own picture: 基准)
-        const al = App.alignOf(rec.id), alHtml = App.isMoved(rec.id) ? `<span class="aligned" title="${esc(alignWords(rec, b))}；在 ⋯ 里可手动调整">${al.how === 'manual' ? '手动' : '已对齐'}</span>`
-          : b.frame === rec.id && b.images.some(id => App.isMoved(id)) ? '<span class="aligned base" title="基准：这张膜的其他图都对齐到这张">基准</span>' : '';
+        const al = App.alignOf(rec.id), alHtml = App.isMoved(rec.id) ? `<span class="aligned" title="${esc(alignWords(rec, b))}${L('；在 ⋯ 里可手动调整', '; adjust by hand in ⋯')}">${al.how === 'manual' ? L('手动', 'Manual') : L('已对齐', 'Aligned')}</span>`
+          : b.frame === rec.id && b.images.some(id => App.isMoved(id)) ? `<span class="aligned base" title="${L('基准：这张膜的其他图都对齐到这张', 'Reference: the other pictures of this membrane are aligned to this one')}">${L('基准', 'Reference')}</span>` : '';
         // the Marker picture (★), else its label and "set as the Marker picture"
-        const cap = rec.id === b.marker ? '<span class="isx" title="膜条从这张图找，Marker 在这张图上标">★ Marker 图</span>'
-          : `${rec.kind === 'marker' ? '白光' : `<b>${esc(App.expoLabel(rec))}</b>`}<br><button class="setmk" title="膜条从这张图找，Marker 在这张图上标">设为 Marker 图</button>`;
-        t.insertAdjacentHTML('beforeend', `${usesHtml}${alHtml}<div class="cap">${cap}</div><button class="more" title="类型、曝光时间、对齐、移到别的膜、移除">⋯</button>`);
+        const mkTip = L('膜条从这张图找，Marker 在这张图上标', 'The strips are found in this picture and the marker is marked on it');
+        const cap = rec.id === b.marker ? `<span class="isx" title="${mkTip}">${L('★ Marker 图', '★ Marker picture')}</span>`
+          : `${rec.kind === 'marker' ? L('白光', 'White light') : `<b>${esc(App.expoLabel(rec))}</b>`}<br><button class="setmk" title="${mkTip}">${L('设为 Marker 图', 'Set as marker picture')}</button>`;
+        t.insertAdjacentHTML('beforeend', `${usesHtml}${alHtml}<div class="cap">${cap}</div><button class="more" title="${L('类型、曝光时间、对齐、移到别的膜、移除', 'Kind, exposure time, alignment, move to another membrane, remove')}">⋯</button>`);
         t.onclick = e => { if (e.target.classList.contains('more') || e.target.classList.contains('setmk')) return; App.viewBlot = b.id; App.viewImg = rec.id; App.emit('select'); G.View.fitFull(); };
         t.querySelector('.more').onclick = e => { e.stopPropagation(); imagePopover(rec, b, t); };
         const sm = t.querySelector('.setmk');
         if (sm) sm.onclick = e => {
           e.stopPropagation();
-          App.busy(true, '按这张图重新找膜条…');
-          setTimeout(() => { App.setMarkerImage(b, rec.id); App.viewBlot = b.id; App.viewImg = rec.id; App.busy(false); App.commit(); G.View.fitFull(); toast(`${App.blotName(b)} 的 Marker 图改成了 ${rec.name}`); }, 20);
+          App.busy(true, L('按这张图重新找膜条…', 'Finding the strips on this picture…'));
+          setTimeout(() => {
+            App.setMarkerImage(b, rec.id); App.viewBlot = b.id; App.viewImg = rec.id; App.busy(false); App.commit(); G.View.fitFull();
+            toast(L(`${App.blotName(b)} 的 Marker 图改成了 ${rec.name}`, `The marker picture of ${App.blotName(b)} is now ${rec.name}`));
+          }, 20);
         };
         th.appendChild(t);
       });
       const hidden = wl.filter(r => !keep(r)).length;
       if (hidden || (wlOpen.has(b.id) && wl.length > 3)) {
         const more = document.createElement('button');
-        more.className = 'thumb-more'; more.textContent = hidden ? `+${hidden} 张` : '收起';
-        more.title = hidden ? '其余的白光图（每次拍摄一张，通常看起来一样）' : '';
+        more.className = 'thumb-more'; more.textContent = hidden ? L(`+${hidden} 张`, `+${hidden}`) : L('收起', 'Fewer');
+        more.title = hidden ? L('其余的白光图（每次拍摄一张，通常看起来一样）', 'The other white-light pictures (one per capture, usually alike)') : '';
         more.onclick = () => { if (wlOpen.has(b.id)) wlOpen.delete(b.id); else wlOpen.add(b.id); renderBlots(); };
         card.querySelector('.thumbs[data-kind="marker"]').appendChild(more);
       }
       card.querySelector('.blot-head input').addEventListener('change', done(e => { b.name = e.target.value.trim(); }));
       box.appendChild(card);
     });
-    $('stBlots').textContent = `${st.blots.length} 张膜 · ${App.images.size} 张图`;
-    $('sum1').innerHTML = st.blots.map(b => { const mk = App.markerRec(b); return `${esc(App.blotName(b))}：Marker 图 <b>${mk ? esc(mk.name) : '没有'}</b>，${App.chemiOf(b).length} 张曝光`; }).join('<br>');
+    $('stBlots').textContent = L(`${st.blots.length} 张膜 · ${App.images.size} 张图`, `${pl(st.blots.length, 'membrane')} · ${pl(App.images.size, 'picture')}`);
+    $('sum1').innerHTML = st.blots.map(b => {
+      const mk = App.markerRec(b), mkName = mk ? esc(mk.name) : L('没有', 'none'), nc = App.chemiOf(b).length;
+      return L(`${esc(App.blotName(b))}：Marker 图 <b>${mkName}</b>，${nc} 张曝光`, `${esc(App.blotName(b))}: marker picture <b>${mkName}</b>, ${pl(nc, 'exposure')}`);
+    }).join('<br>');
   }
   /* step 2: the pieces of each membrane (outlines edited on the picture); several membranes: one at a time */
   function renderPieces() {
     const st = S(), box = $('pieceList');
-    box.innerHTML = st.blots.map(b => `<div class="pc-blot${b.id === App.viewBlot ? ' view' : ''}" data-blot="${b.id}">${st.blots.length > 1 ? `<b>${esc(App.blotName(b))}</b>` : ''}
-      <span>${(b.pieces || []).length} 条膜条（${(b.pieces || []).map(p => p.letter).sort().join(' ')}）${b.userStrips ? '<span class="tag-hand">手动调整过</span>' : ''}</span>
-      ${st.blots.length > 1 && b.id !== App.viewBlot ? '<button class="link" data-act="show">看这张膜</button>' : ''}</div>`).join('');
+    box.innerHTML = st.blots.map(b => {
+      const np = (b.pieces || []).length, ls = (b.pieces || []).map(p => p.letter).sort().join(' ');
+      return `<div class="pc-blot${b.id === App.viewBlot ? ' view' : ''}" data-blot="${b.id}">${st.blots.length > 1 ? `<b>${esc(App.blotName(b))}</b>` : ''}
+      <span>${L(`${np} 条膜条（${ls}）`, `${pl(np, 'strip')} (${ls})`)}${b.userStrips ? `<span class="tag-hand">${L('手动调整过', 'adjusted by hand')}</span>` : ''}</span>
+      ${st.blots.length > 1 && b.id !== App.viewBlot ? `<button class="link" data-act="show">${L('看这张膜', 'Show this membrane')}</button>` : ''}</div>`;
+    }).join('');
     box.querySelectorAll('[data-act="show"]').forEach(btn => btn.onclick = () => {
       const to = App.blot(btn.closest('.pc-blot').dataset.blot), from = App.blot(App.viewBlot);
       // (the outlines edited on the membrane shown are applied first)
       applyPieces(from, App.curStep === 2 ? G.View.piecesEnd(true) : null, false, () => startPieces(to));
     });
-    $('stPieces').textContent = `${st.blots.reduce((s, b) => s + (b.pieces || []).length, 0)} 条膜条`;
-    $('next2').textContent = App.curStep === 2 && pcUnseen() ? '这张膜对了，看下一张 →' : st.rows.length ? '膜条对了，回到蛋白框 →' : '膜条对了，下一步：生成蛋白框 →';
-    $('sum2').innerHTML = st.blots.map(b => `${st.blots.length > 1 ? esc(App.blotName(b)) + '：' : ''}<b>${(b.pieces || []).length}</b> 条膜条${b.userStrips ? '（手动调整过）' : ''}`).join('<br>');
+    const nAll = st.blots.reduce((s, b) => s + (b.pieces || []).length, 0);
+    $('stPieces').textContent = L(`${nAll} 条膜条`, pl(nAll, 'strip'));
+    $('next2').textContent = App.curStep === 2 && pcUnseen() ? L('这张膜对了，看下一张 →', 'This membrane is right. Next membrane →')
+      : st.rows.length ? L('膜条对了，回到蛋白框 →', 'Strips are right. Back to the protein boxes →') : L('膜条对了，下一步：生成蛋白框 →', 'Strips are right. Next: protein boxes →');
+    $('sum2').innerHTML = st.blots.map(b => {
+      const np = (b.pieces || []).length;
+      return `${st.blots.length > 1 ? esc(App.blotName(b)) + L('：', ': ') : ''}<b>${np}</b>${L(' 条膜条', np === 1 ? ' strip' : ' strips')}${b.userStrips ? L('（手动调整过）', ' (adjusted by hand)') : ''}`;
+    }).join('<br>');
   }
 
   /* ---------- popover ---------- */
@@ -415,15 +483,16 @@
     const lad = G.ProteinLadders.get(b.ladderId);
     const sizes = lad ? lad.sizes : [250, 180, 150, 130, 100, 75, 70, 55, 50, 40, 37, 35, 25, 20, 15, 10];
     const sug = mark.kda > 0 ? mark.kda : App.suggestKda(b, pc, mark.v);
-    pop.innerHTML = `<h4>膜条 ${esc(pc.letter)}：这条 Marker 带是多少 kDa？</h4>
-      <div class="kda-grid">${sizes.map(k => `<button data-k="${k}" class="${k === sug ? 'on' : ''}${lad && (lad.ref || []).includes(k) ? ' ref' : ''}"${lad && (lad.ref || []).includes(k) ? ' title="参考带（彩色 / 加粗）"' : ''}>${k}</button>`).join('')}</div>
-      <div class="field inline"><label class="inline-label">其他</label><input type="number" id="pKda" class="num" step="any" min="0" placeholder="${sug || 'kDa'}"> kDa${sug ? `<span class="hint" style="margin:0 0 0 auto">回车 = ${sug}</span>` : ''}</div>
-      <p class="hint">${lad ? `按 ${esc(shortName(lad.name))} 列出（橙色 = 参考带）` : '还没选 Marker 型号（左侧第 4 步最上面），列出的是常见分子量'}</p>
-      <div class="actions">${isNew ? '<button class="btn sm" id="pNo">不加了</button>' : '<button class="btn sm danger" id="pDelMark">删除这条</button>'}<button class="btn sm primary" id="pOk">确定</button></div>`;
+    pop.innerHTML = `<h4>${L(`膜条 ${esc(pc.letter)}：这条 Marker 带是多少 kDa？`, `Strip ${esc(pc.letter)}: what size is this marker band (kDa)?`)}</h4>
+      <div class="kda-grid">${sizes.map(k => `<button data-k="${k}" class="${k === sug ? 'on' : ''}${lad && (lad.ref || []).includes(k) ? ' ref' : ''}"${lad && (lad.ref || []).includes(k) ? ` title="${L('参考带（彩色 / 加粗）', 'Reference band (coloured / bold)')}"` : ''}>${k}</button>`).join('')}</div>
+      <div class="field inline"><label class="inline-label">${L('其他', 'Other')}</label><input type="number" id="pKda" class="num" step="any" min="0" placeholder="${sug || 'kDa'}"> kDa${sug ? `<span class="hint" style="margin:0 0 0 auto">${L('回车', 'Enter')} = ${sug}</span>` : ''}</div>
+      <p class="hint">${lad ? L(`按 ${esc(shortName(lad.name))} 列出（橙色 = 参考带）`, `Sizes of ${esc(shortName(lad.name))} (orange = reference bands)`)
+        : L('还没选 Marker 型号（左侧第 4 步最上面），列出的是常见分子量', 'No ladder chosen yet (top of step 4 on the left): these are common sizes')}</p>
+      <div class="actions">${isNew ? `<button class="btn sm" id="pNo">${L('不加了', "Don't add")}</button>` : `<button class="btn sm danger" id="pDelMark">${L('删除这条', 'Delete this one')}</button>`}<button class="btn sm primary" id="pOk">${L('确定', 'OK')}</button></div>`;
     placePopAt(cx + 14, cy - 30);
     const back = () => $('editorBox').focus({ preventScroll: true });
     const drop = () => { if (pc.marks) pc.marks = pc.marks.filter(m => m !== mark); App.selMark = null; };
-    const done1 = k => { if (!(k > 0)) { toast('先选一个分子量'); return; } mark.kda = k; popCancel = popAccept = null; closePop(); App.commit(); back(); };
+    const done1 = k => { if (!(k > 0)) { toast(L('先选一个分子量', 'Pick a size first')); return; } mark.kda = k; popCancel = popAccept = null; closePop(); App.commit(); back(); };
     popCancel = () => { if (isNew || !(mark.kda > 0)) drop(); if (was === null) { pc.marks = null; App.selMark = null; } App.commit(); };
     popAccept = () => { if (!(mark.kda > 0)) drop(); App.commit(); };
     pop.querySelectorAll('[data-k]').forEach(btn => btn.onclick = () => done1(+btn.dataset.k));
@@ -437,14 +506,14 @@
     const no = pop.querySelector('#pNo');
     if (no) no.onclick = () => { closePop(); back(); };
     const del = pop.querySelector('#pDelMark');
-    if (del) del.onclick = () => { drop(); popCancel = popAccept = null; closePop(); App.commit(); back(); toast('已删除这条刻度（Ctrl+Z 可撤销）'); };
+    if (del) del.onclick = () => { drop(); popCancel = popAccept = null; closePop(); App.commit(); back(); toast(L('已删除这条刻度（Ctrl+Z 可撤销）', 'Tick deleted (Ctrl+Z to undo)')); };
     setTimeout(() => inp.focus({ preventScroll: true }), 0);
   }
 
   /* ---------- 4 marker ---------- */
   // the ladder of each membrane and the marks of every piece (set by hand: nothing is read automatically).
   // Clicking a piece's chip marks that piece, zoomed in.
-  const MARK_STATE = { manual: '可算分子量', few: '再标 1 条', none: '未标' };
+  const markState = s => ({ manual: L('可算分子量', 'MW ready'), few: L('再标 1 条', 'Mark 1 more'), none: L('未标', 'Not marked') })[s];
   // the ladder menu, grouped by maker
   const ladderOptions = sel => G.ProteinLadders.groups().map(g => `<optgroup label="${esc(g.vendor)}">${g.ladders.map(l => `<option value="${l.id}"${l.id === sel ? ' selected' : ''}>${esc(l.name)}</option>`).join('')}</optgroup>`).join('');
   /* while marking: the ladder as its maker shows it — the bands spaced by log size (about how a gradient gel runs
@@ -461,10 +530,10 @@
       return `<rect x="8" y="${(y(k) - (ref ? 3 : 2)).toFixed(1)}" width="40" height="${ref ? 6 : 4}" rx="2" fill="${ref ? '#e8590c' : '#4263eb'}" opacity="${ref ? 1 : 0.85}"/>` +
         `<text x="56" y="${(y(k) + 4).toFixed(1)}" font-size="12" font-weight="${ref ? 700 : 500}" fill="${ref ? '#c2410c' : '#24324a'}">${k}${got ? ' ✓' : ''}</text>`;
     }).join('');
-    card.innerHTML = `<div class="lc-head"><b>Marker 参考</b><button id="lcHide" title="收起（左侧第 4 步里可再打开）">×</button></div>
+    card.innerHTML = `<div class="lc-head"><b>${L('Marker 参考', 'Marker reference')}</b><button id="lcHide" title="${L('收起（左侧第 4 步里可再打开）', 'Hide (show it again in step 4 on the left)')}">×</button></div>
       <div class="lc-name" title="${esc(lad.name)}">${esc(shortName(lad.name))}</div>
       <svg width="116" height="${H + 2 * top}" viewBox="0 0 116 ${H + 2 * top}"><rect x="6" y="2" width="44" height="${H + 2 * top - 4}" rx="4" fill="#f1f4fa"/>${bands}</svg>
-      <p class="lc-note">按 log 分子量等距的示意，实际间距随胶浓度而变；<b>橙色</b> = 彩色 / 加粗的参考带${pc ? `；✓ = 膜条 ${esc(pc.letter)} 已标` : ''}</p>`;
+      <p class="lc-note">${L('按 log 分子量等距的示意，实际间距随胶浓度而变；<b>橙色</b> = 彩色 / 加粗的参考带', 'A sketch spaced by log size; the real spacing depends on the gel; <b>orange</b> = coloured / bold reference bands')}${pc ? L(`；✓ = 膜条 ${esc(pc.letter)} 已标`, `; ✓ = marked on strip ${esc(pc.letter)}`) : ''}</p>`;
     card.classList.remove('hidden');
     $('lcHide').onclick = () => { cardHidden = true; card.classList.add('hidden'); renderMarker(); };
   }
@@ -472,25 +541,28 @@
    * the marks of each piece — the pieces the figure uses first */
   function renderMarker() {
     const st = S(), box = $('markerPanel');
-    let html = `<p class="lead">在中间的 Marker 图上<b>点一条 Marker 带</b>，选它的分子量（会吸附到条带上，按住 Alt 不吸附）。每条膜条标 <b>2 条以上</b>就能算出各行的分子量，之后其余大小的位置用虚线提示，点一下就加上。</p>`;
+    let html = `<p class="lead">${L('在中间的 Marker 图上<b>点一条 Marker 带</b>，选它的分子量（会吸附到条带上，按住 Alt 不吸附）。每条膜条标 <b>2 条以上</b>就能算出各行的分子量，之后其余大小的位置用虚线提示，点一下就加上。',
+      "On the marker picture in the middle, <b>click a marker band</b> and pick its size (it snaps to the band; hold Alt to stop that). With <b>2 or more</b> per strip the rows' sizes are worked out; the other sizes then show as dashed hints: click one to add it.")}</p>`;
     let todo = 0;
     st.blots.forEach(b => {
       const hasM = !!App.markerRec(b), lad = G.ProteinLadders.get(b.ladderId);
       const used = new Set(App.usedPieces(b).map(pc => pc.id));
       const pcs = (b.pieces || []).slice().sort((p, q) => (used.has(q.id) - used.has(p.id)) || (p.letter || '').localeCompare(q.letter || ''));
       html += `<div class="mk-blot" data-blot="${b.id}">${st.blots.length > 1 ? `<div class="mk-title">${esc(App.blotName(b))}</div>` : ''}
-        <label class="mk-label">Marker 型号${b.ladderId && b.ladderId === App.prefLadder ? '<span class="mk-note">上次用的</span>' : ''}</label>
-        <select class="ladder-sel${lad ? '' : ' todo'}"><option value=""${lad ? '' : ' selected'}>— 选你用的 Marker —</option>${ladderOptions(lad ? b.ladderId : null)}</select>
-        ${lad ? `<div class="mk-sizes" title="这个型号的条带（官方列表），橙色是彩色 / 加粗的参考带">${lad.sizes.map(k => `<span class="${(lad.ref || []).includes(k) ? 'ref' : ''}">${k}</span>`).join('')}</div>` : ''}
-        ${hasM ? '' : '<p class="hint warn-t">这张膜没有 Marker 图（第 1 步）：在曝光图上看得见 Marker 的话也可以标。</p>'}
+        <label class="mk-label">${L('Marker 型号', 'Ladder')}${b.ladderId && b.ladderId === App.prefLadder ? `<span class="mk-note">${L('上次用的', 'used last time')}</span>` : ''}</label>
+        <select class="ladder-sel${lad ? '' : ' todo'}"><option value=""${lad ? '' : ' selected'}>${L('— 选你用的 Marker —', '— Choose your ladder —')}</option>${ladderOptions(lad ? b.ladderId : null)}</select>
+        ${lad ? `<div class="mk-sizes" title="${L('这个型号的条带（官方列表），橙色是彩色 / 加粗的参考带', "This ladder's bands (the maker's list); orange = coloured / bold reference bands")}">${lad.sizes.map(k => `<span class="${(lad.ref || []).includes(k) ? 'ref' : ''}">${k}</span>`).join('')}</div>` : ''}
+        ${hasM ? '' : `<p class="hint warn-t">${L('这张膜没有 Marker 图（第 1 步）：在曝光图上看得见 Marker 的话也可以标。', 'This membrane has no marker picture (step 1): if the marker shows on an exposure, you can mark it there.')}</p>`}
         <div class="mk-chips">${pcs.map(pc => {
-          const mi = App.markInfo(b, pc);
+          const mi = App.markInfo(b, pc), ms = markState(mi.state), ks = mi.ks.join(' / ');
           if (mi.state !== 'manual' && used.has(pc.id)) todo++;
-          return `<button class="mk-chip ${mi.state}${used.has(pc.id) ? '' : ' unused'}" data-pc="${pc.id}" title="膜条 ${esc(pc.letter)}：${MARK_STATE[mi.state]}${mi.ks.length ? '，' + mi.ks.join(' / ') + ' kDa' : ''}${used.has(pc.id) ? '' : '（成图没有用到这条膜条）'}。点一下放大到它"><b>${esc(pc.letter)}</b><span>${mi.ks.length ? mi.ks.slice(0, 4).map(k => +k.toPrecision(3)).join('·') + (mi.ks.length > 4 ? '…' : '') : '—'}</span><i>${MARK_STATE[mi.state]}</i></button>`;
+          const tip = L(`膜条 ${esc(pc.letter)}：${ms}${mi.ks.length ? '，' + ks + ' kDa' : ''}${used.has(pc.id) ? '' : '（成图没有用到这条膜条）'}。点一下放大到它`,
+            `Strip ${esc(pc.letter)}: ${ms}${mi.ks.length ? ', ' + ks + ' kDa' : ''}${used.has(pc.id) ? '' : ' (not used in the figure)'}. Click to zoom to it`);
+          return `<button class="mk-chip ${mi.state}${used.has(pc.id) ? '' : ' unused'}" data-pc="${pc.id}" title="${tip}"><b>${esc(pc.letter)}</b><span>${mi.ks.length ? mi.ks.slice(0, 4).map(k => +k.toPrecision(3)).join('·') + (mi.ks.length > 4 ? '…' : '') : '—'}</span><i>${ms}</i></button>`;
         }).join('')}</div>
-        ${pcs.some(pc => pc.marks && pc.marks.length) ? '<div class="mk-links"><button class="link mk-clear" title="这张膜上标的所有刻度都去掉（Ctrl+Z 可撤销）">清除这张膜的刻度</button></div>' : ''}</div>`;
+        ${pcs.some(pc => pc.marks && pc.marks.length) ? `<div class="mk-links"><button class="link mk-clear" title="${L('这张膜上标的所有刻度都去掉（Ctrl+Z 可撤销）', 'Remove every tick marked on this membrane (Ctrl+Z to undo)')}">${L('清除这张膜的刻度', "Clear this membrane's ticks")}</button></div>` : ''}</div>`;
     });
-    if (cardHidden && App.mode === 'marks') html += '<p><button class="link mk-card-on">显示 Marker 参考图</button></p>';
+    if (cardHidden && App.mode === 'marks') html += `<p><button class="link mk-card-on">${L('显示 Marker 参考图', 'Show the marker reference')}</button></p>`;
     box.innerHTML = html;
     box.querySelectorAll('.mk-blot').forEach(div => {
       const b = App.blot(div.dataset.blot);
@@ -500,37 +572,48 @@
         // (the other membranes without one yet: most likely the same ladder)
         const more = id ? S().blots.filter(o => o !== b && !o.ladderId) : [];
         more.forEach(o => App.setLadder(o, id));
-        if (id) toast(`已选 ${shortName(G.ProteinLadders.get(id).name)}${more.length ? '，其他膜也用它（不同就在那张膜下面改）' : ''}；以后新载入的膜默认用它`, 3600);
+        const nm = id && shortName(G.ProteinLadders.get(id).name);
+        if (id) {
+          toast(L(`已选 ${nm}${more.length ? '，其他膜也用它（不同就在那张膜下面改）' : ''}；以后新载入的膜默认用它`,
+            `Chose ${nm}${more.length ? ' for the other membranes too (change it under a membrane if it differs)' : ''}; membranes loaded later use it by default`), 3600);
+        }
       }));
       div.querySelectorAll('.mk-chip').forEach(c => c.onclick = () => { if (App.curStep !== 4) openStep(4); startMarks(b, App.piece(b, c.dataset.pc)); });
       const cl = div.querySelector('.mk-clear');
-      if (cl) cl.onclick = done(() => { App.clearMarks(b); toast('已清除这张膜的刻度（Ctrl+Z 可撤销）'); });
+      if (cl) cl.onclick = done(() => { App.clearMarks(b); toast(L('已清除这张膜的刻度（Ctrl+Z 可撤销）', "Cleared this membrane's ticks (Ctrl+Z to undo)")); });
     });
     const con = box.querySelector('.mk-card-on');
     if (con) con.onclick = () => { cardHidden = false; renderMarker(); };
-    $('stMarker').textContent = todo ? `${todo} 条膜条没标完` : '';
+    $('stMarker').textContent = todo ? L(`${todo} 条膜条没标完`, `${pl(todo, 'strip')} to mark`) : '';
     $('stMarker').classList.toggle('warn', !!todo);
-    $('sum4').innerHTML = st.style.showMW ? st.blots.map(b => `${st.blots.length > 1 ? esc(App.blotName(b)) + '：' : ''}${(b.pieces || []).map(pc => `${esc(pc.letter)} ${App.markInfo(b, pc).ks.length} 条`).join(' · ')}`).join('<br>') : '这次不标分子量';
+    $('sum4').innerHTML = st.style.showMW ? st.blots.map(b => `${st.blots.length > 1 ? esc(App.blotName(b)) + L('：', ': ') : ''}${(b.pieces || []).map(pc => {
+      const n = App.markInfo(b, pc).ks.length;
+      return `${esc(pc.letter)} ${L(`${n} 条`, pl(n, 'tick'))}`;
+    }).join(' · ')}`).join('<br>') : L('这次不标分子量', 'No molecular weights this time');
     // the ladder's own pattern beside the picture while marking
     ladderCard(App.blot(App.viewBlot));
   }
   // where a picture lies on its membrane's grid, in words
   function alignWords(rec, b) {
     const al = App.alignOf(rec.id), anyMoved = b.images.some(id => App.isMoved(id));
-    if (App.isMoved(rec.id)) return `${al.how === 'manual' ? '手动对齐' : '拍这张时膜的位置不同，已自动对齐'}（${App.alignText(rec.id)}）`;
-    if (al && al.how === 'manual') return '按原样使用（不移动）';
-    return b.frame === rec.id && anyMoved ? '基准：这张膜的其他图都对齐到这张' : '与其他图位置一致';
+    if (App.isMoved(rec.id)) {
+      return `${al.how === 'manual' ? L('手动对齐', 'Aligned by hand') : L('拍这张时膜的位置不同，已自动对齐', 'The membrane lay elsewhere in this picture: aligned automatically')}`
+        + L(`（${App.alignText(rec.id)}）`, ` (${App.alignText(rec.id)})`);
+    }
+    if (al && al.how === 'manual') return L('按原样使用（不移动）', 'Used as taken (not moved)');
+    return b.frame === rec.id && anyMoved ? L('基准：这张膜的其他图都对齐到这张', 'Reference: the other pictures of this membrane are aligned to this one')
+      : L('与其他图位置一致', 'Same position as the other pictures');
   }
   function imagePopover(rec, b) {
     const others = S().blots.filter(x => x !== b), al = App.alignOf(rec.id);
     pop.innerHTML = `<h4>${esc(rec.name)}</h4>
-      <div class="field inline"><label class="inline-label">类型</label>
-        <div class="seg"><button data-k="chemi" class="${rec.kind === 'chemi' ? 'on' : ''}">曝光图</button><button data-k="marker" class="${rec.kind === 'marker' ? 'on' : ''}">Marker 白光</button></div></div>
-      ${rec.kind === 'chemi' ? `<div class="field inline"><label class="inline-label">曝光时间</label><input type="number" id="pExpo" class="num" step="any" value="${rec.exposure != null ? rec.exposure : ''}" placeholder="秒"> s</div>` : ''}
-      <div class="field inline"><label class="inline-label">移到</label><select id="pMove" style="flex:1"><option value="">—</option>${others.map(o => `<option value="${o.id}">${esc(App.blotName(o))}</option>`).join('')}<option value="new">新的一张膜</option></select></div>
-      <div class="field inline align-row"><label class="inline-label">位置</label><span class="align-info">${esc(alignWords(rec, b))}</span></div>
-      <div class="actions left"><button class="btn sm" id="pAlign" title="在膜图上拖动这张图，让条带落进框里">手动对齐…</button>${al && al.how === 'manual' ? '<button class="btn sm" id="pAutoAlign">恢复自动对齐</button>' : ''}</div>
-      <div class="actions"><button class="btn sm danger" id="pDel">移除这张图</button><button class="btn sm primary" id="pOk">完成</button></div>`;
+      <div class="field inline"><label class="inline-label">${L('类型', 'Kind')}</label>
+        <div class="seg"><button data-k="chemi" class="${rec.kind === 'chemi' ? 'on' : ''}">${L('曝光图', 'Exposure')}</button><button data-k="marker" class="${rec.kind === 'marker' ? 'on' : ''}">${L('Marker 白光', 'Marker / white light')}</button></div></div>
+      ${rec.kind === 'chemi' ? `<div class="field inline"><label class="inline-label">${L('曝光时间', 'Exposure time')}</label><input type="number" id="pExpo" class="num" step="any" value="${rec.exposure != null ? rec.exposure : ''}" placeholder="${L('秒', 'seconds')}"> s</div>` : ''}
+      <div class="field inline"><label class="inline-label">${L('移到', 'Move to')}</label><select id="pMove" style="flex:1"><option value="">—</option>${others.map(o => `<option value="${o.id}">${esc(App.blotName(o))}</option>`).join('')}<option value="new">${L('新的一张膜', 'A new membrane')}</option></select></div>
+      <div class="field inline align-row"><label class="inline-label">${L('位置', 'Position')}</label><span class="align-info">${esc(alignWords(rec, b))}</span></div>
+      <div class="actions left"><button class="btn sm" id="pAlign" title="${L('在膜图上拖动这张图，让条带落进框里', 'Drag this picture on the membrane view so the bands sit in the boxes')}">${L('手动对齐…', 'Align by hand…')}</button>${al && al.how === 'manual' ? `<button class="btn sm" id="pAutoAlign">${L('恢复自动对齐', 'Back to auto-align')}</button>` : ''}</div>
+      <div class="actions"><button class="btn sm danger" id="pDel">${L('移除这张图', 'Remove this picture')}</button><button class="btn sm primary" id="pOk">${L('完成', 'Done')}</button></div>`;
     placePop(event.target);
     pop.querySelector('#pAlign').onclick = () => {
       closePop();
@@ -541,14 +624,14 @@
       $('editorBox').focus({ preventScroll: true });
     };
     const aa = pop.querySelector('#pAutoAlign');
-    if (aa) aa.onclick = () => { App.busy(true, '自动对齐…'); setTimeout(() => { App.autoAlign(rec.id); App.busy(false); App.commit(); closePop(); toast('已恢复自动对齐'); }, 20); };
-    pop.querySelectorAll('[data-k]').forEach(btn => btn.onclick = () => { App.busy(true, '重新分析…'); setTimeout(() => { App.setKind(rec.id, btn.dataset.k); App.busy(false); App.commit(); closePop(); }, 20); });
+    if (aa) aa.onclick = () => { App.busy(true, L('自动对齐…', 'Aligning…')); setTimeout(() => { App.autoAlign(rec.id); App.busy(false); App.commit(); closePop(); toast(L('已恢复自动对齐', 'Aligned automatically again')); }, 20); };
+    pop.querySelectorAll('[data-k]').forEach(btn => btn.onclick = () => { App.busy(true, L('重新分析…', 'Analysing again…')); setTimeout(() => { App.setKind(rec.id, btn.dataset.k); App.busy(false); App.commit(); closePop(); }, 20); });
     const ex = pop.querySelector('#pExpo');
     if (ex) ex.addEventListener('change', done(e => { App.setExposure(rec.id, +e.target.value); }));
     pop.querySelector('#pMove').addEventListener('change', e => {
       if (!e.target.value) return;
-      App.busy(true, '重新分析…');
-      setTimeout(() => { App.moveImage(rec.id, e.target.value); App.busy(false); App.commit(); closePop(); toast('已移动并重新分析'); }, 20);
+      App.busy(true, L('重新分析…', 'Analysing again…'));
+      setTimeout(() => { App.moveImage(rec.id, e.target.value); App.busy(false); App.commit(); closePop(); toast(L('已移动并重新分析', 'Moved and analysed again')); }, 20);
     });
     pop.querySelector('#pDel').onclick = () => { App.removeImage(rec.id); closePop(); App.commit(); };
     pop.querySelector('#pOk').onclick = closePop;
@@ -569,12 +652,12 @@
       el.dataset.id = row.id;
       const sugg = G.ProteinLadders.suggest(kda);
       // the tag: the row's colour on the membrane and the pieces it comes from; dragged = order in the figure
-      el.innerHTML = `<span class="grip" style="--c:${App.rowColor(row)}" title="来自膜条 ${esc(modLabel(row))}。上下拖动调整这一行在成图里的位置（或选中后 Alt+↑↓）">${esc(modLabel(row))}</span>
-        <input type="text" value="${esc(row.name)}" placeholder="${esc(sugg[0] ? sugg[0] + '？' : '蛋白名')}" list="protList">
+      el.innerHTML = `<span class="grip" style="--c:${App.rowColor(row)}" title="${L(`来自膜条 ${esc(modLabel(row))}。上下拖动调整这一行在成图里的位置（或选中后 Alt+↑↓）`, `From strip ${esc(modLabel(row))}. Drag up or down to move this row in the figure (or select it and press Alt+↑↓)`)}">${esc(modLabel(row))}</span>
+        <input type="text" value="${esc(row.name)}" placeholder="${esc(sugg[0] ? sugg[0] + L('？', '?') : L('蛋白名', 'Protein name'))}" list="protList">
         <span class="kda">${kda ? '≈' + Math.round(kda) + ' kDa' : ''}</span>
-        <button class="expo-chip${isBest ? ' best' : ' other'}${App.expoVerdict(curE) === 'sat' ? ' sat' : ''}" data-act="expo" title="${cur ? esc(App.expoLabel(cur)) + '：' : ''}${isBest ? '正在用推荐的曝光' : '正在用的不是推荐曝光'}｜点开对比全部曝光">${isBest ? '★ ' : ''}${cur ? esc(App.expoLabel(cur)) : '—'}</button>
-        <button class="x" data-act="hide" title="${row.hidden ? '显示' : '隐藏'}这一行">${row.hidden ? '◌' : '●'}</button>
-        <button class="x" data-act="del" title="删除这一行">×</button>`;
+        <button class="expo-chip${isBest ? ' best' : ' other'}${App.expoVerdict(curE) === 'sat' ? ' sat' : ''}" data-act="expo" title="${cur ? esc(App.expoLabel(cur)) + L('：', ': ') : ''}${isBest ? L('正在用推荐的曝光', 'Using the recommended exposure') : L('正在用的不是推荐曝光', 'Not the recommended exposure')}${L('｜点开对比全部曝光', ' | click to compare all exposures')}">${isBest ? '★ ' : ''}${cur ? esc(App.expoLabel(cur)) : '—'}</button>
+        <button class="x" data-act="hide" title="${row.hidden ? L('显示这一行', 'Show this row') : L('隐藏这一行', 'Hide this row')}">${row.hidden ? '◌' : '●'}</button>
+        <button class="x" data-act="del" title="${L('删除这一行', 'Delete this row')}">×</button>`;
       const inp = el.querySelector('input');
       // (selecting the row draws the list again: the field is focused again there, see keepFocus)
       inp.addEventListener('focus', () => { fillDatalist(kda); if (App.selRow !== row.id) selectRow(row.id, false); });
@@ -586,25 +669,29 @@
         const ids = [...box.querySelectorAll('.row-item')].map(it => it.dataset.id), next = ids[ids.indexOf(row.id) + 1];
         inp.blur();
         const nx = next && $('rowList').querySelector(`.row-item[data-id="${next}"] input`);
-        if (nx) nx.focus(); else toast('蛋白名填完了');
+        if (nx) nx.focus(); else toast(L('蛋白名填完了', 'All protein names filled in'));
       });
       el.querySelector('[data-act="expo"]').onclick = () => selectRow(sel ? null : row.id, !sel);
       el.querySelector('[data-act="hide"]').onclick = done(() => { row.hidden = !row.hidden; });
-      el.querySelector('[data-act="del"]').onclick = done(() => { st.rows = st.rows.filter(r => r !== row); if (App.selRow === row.id) App.selRow = null; toast('已删除该行（Ctrl+Z 可撤销）'); });
+      el.querySelector('[data-act="del"]').onclick = done(() => { st.rows = st.rows.filter(r => r !== row); if (App.selRow === row.id) App.selRow = null; toast(L('已删除该行（Ctrl+Z 可撤销）', 'Row deleted (Ctrl+Z to undo)')); });
       el.onclick = e => { if (e.target === el || e.target.classList.contains('kda') || e.target.classList.contains('grip')) selectRow(row.id, true); };
       box.appendChild(el);
       if (sel) box.appendChild(rowDetail(row, ex, best));
     });
-    if (!st.rows.length) box.innerHTML = '<p class="hint">没有找到蛋白条带：点下面的"+ 添加一个蛋白框"，再到膜上点一下放下。</p>';
+    if (!st.rows.length) {
+      box.innerHTML = `<p class="hint">${L('没有找到蛋白条带：点下面的"+ 添加一个蛋白框"，再到膜上点一下放下。',
+        'No protein bands found: click "+ Add a protein box" below, then click on the membrane to place it.')}</p>`;
+    }
     const vis = st.rows.filter(r => !r.hidden).length, hid = st.rows.length - vis;
-    $('stRows').textContent = st.rows.length ? `${vis} 行${hid ? ` · ${hid} 行隐藏` : ''}` : '';
-    $('sum3').innerHTML = `<b>${vis}</b> 个蛋白框${hid ? `（另有 ${hid} 个很弱的隐藏了）` : ''}`;
+    $('stRows').textContent = st.rows.length ? L(`${vis} 行${hid ? ` · ${hid} 行隐藏` : ''}`, `${pl(vis, 'row')}${hid ? ` · ${hid} hidden` : ''}`) : '';
+    $('sum3').innerHTML = L(`<b>${vis}</b> 个蛋白框${hid ? `（另有 ${hid} 个很弱的隐藏了）` : ''}`,
+      `<b>${vis}</b> protein box${vis === 1 ? '' : 'es'}${hid ? ` (${hid} very faint ${hid === 1 ? 'one' : 'ones'} hidden)` : ''}`);
   }
   /* step 5: the proteins' names in figure order (Enter: the next one) */
   function renderNames() {
     const st = S(), box = $('nameList'), vis = st.rows.filter(r => !r.hidden);
     box.innerHTML = vis.map(r => { const k = App.rowKda(r), sg = G.ProteinLadders.suggest(k);
-      return `<div class="name-item" data-id="${r.id}"><span class="grip" style="--c:${App.rowColor(r)}">${esc(modLabel(r))}</span><input type="text" value="${esc(r.name)}" placeholder="${esc(sg[0] ? sg[0] + '？' : '蛋白名')}" list="protList"><span class="kda">${k ? '≈' + Math.round(k) + ' kDa' : ''}</span></div>`; }).join('');
+      return `<div class="name-item" data-id="${r.id}"><span class="grip" style="--c:${App.rowColor(r)}">${esc(modLabel(r))}</span><input type="text" value="${esc(r.name)}" placeholder="${esc(sg[0] ? sg[0] + L('？', '?') : L('蛋白名', 'Protein name'))}" list="protList"><span class="kda">${k ? '≈' + Math.round(k) + ' kDa' : ''}</span></div>`; }).join('');
     box.querySelectorAll('.name-item').forEach(it => {
       const row = App.row(it.dataset.id), inp = it.querySelector('input');
       inp.addEventListener('focus', () => { fillDatalist(App.rowKda(row)); });
@@ -616,57 +703,66 @@
         const nx = it.nextElementSibling && it.nextElementSibling.querySelector('input');
         inp.blur();
         const again = nx && $('nameList').querySelector(`.name-item[data-id="${nx.closest('.name-item').dataset.id}"] input`);
-        if (again) again.focus(); else toast('蛋白名填完了');
+        if (again) again.focus(); else toast(L('蛋白名填完了', 'All protein names filled in'));
       });
     });
     const named = vis.filter(r => r.name).length, fl = App.figLanes(), ln = fl.filter(j => st.lanes[j - 1].name).length;
-    $('stLanes').textContent = `蛋白名 ${named}/${vis.length} · 泳道名 ${ln}/${fl.length}`;
-    $('sum5').innerHTML = `蛋白名 <b>${named}/${vis.length}</b> · 泳道名 <b>${ln}/${fl.length}</b>`;
+    $('stLanes').textContent = L(`蛋白名 ${named}/${vis.length} · 泳道名 ${ln}/${fl.length}`, `Proteins ${named}/${vis.length} · lanes ${ln}/${fl.length}`);
+    $('sum5').innerHTML = L(`蛋白名 <b>${named}/${vis.length}</b> · 泳道名 <b>${ln}/${fl.length}</b>`, `Protein names <b>${named}/${vis.length}</b> · lane names <b>${ln}/${fl.length}</b>`);
   }
   /* the selected row, opened: its exposures (weakest to strongest; ★ = recommended, red pixels = clipped) and
    * its boxes on the membrane — how many lanes each has, the figure columns they fill, and the lane tools */
   function rowDetail(row, ex, best) {
     const wrap = document.createElement('div'); wrap.className = 'expo-compare row-detail';
     const bestE = ex.find(e => e.id === best), vb = App.expoVerdict(bestE);
-    const TAG = { sat: '过曝', weak: '太弱', faint: '偏弱', ok: '' };
-    const why = !ex.length ? '' : vb === 'ok' ? '★ 推荐：条带清晰、没有过曝'
-      : vb === 'sat' ? '★ 推荐：每张曝光里这条带都有过曝像素，★ 是过曝最少又清楚的一张；这一行不要拿来定量'
-      : '★ 推荐：信号都偏弱，★ 是相对最清楚的一张；可以考虑补拍更长曝光';
+    const TAG = { sat: L('过曝', 'saturated'), weak: L('太弱', 'too weak'), faint: L('偏弱', 'weak'), ok: '' };
+    const why = !ex.length ? '' : vb === 'ok' ? L('★ 推荐：条带清晰、没有过曝', '★ recommended: clear bands, not saturated')
+      : vb === 'sat' ? L('★ 推荐：每张曝光里这条带都有过曝像素，★ 是过曝最少又清楚的一张；这一行不要拿来定量',
+        '★ recommended: this band has saturated pixels in every exposure; ★ is the clear one with the fewest. Do not quantify this row')
+      : L('★ 推荐：信号都偏弱，★ 是相对最清楚的一张；可以考虑补拍更长曝光', '★ recommended: the signal is weak in all of them; ★ is the clearest. Consider a longer exposure');
     const b = App.blot(row.blot), cur = App.curSeg(row), clash = App.rowClash(row).length > 0;
     // the pieces this row runs across side by side (one protein on a membrane cut through), and splitting them
-    const segLine = row.segs.length > 1 ? `<div class="seg-line">并排来自膜条 <b>${esc(modLabel(row))}</b>（膜在这里竖着剪开过）<button class="link" data-act="split" title="每条膜条各成一行">拆开</button></div>` : '';
+    const segLine = row.segs.length > 1 ? `<div class="seg-line">${L(`并排来自膜条 <b>${esc(modLabel(row))}</b>（膜在这里竖着剪开过）`, `Side by side from strips <b>${esc(modLabel(row))}</b> (the membrane was cut through here)`)}<button class="link" data-act="split" title="${L('每条膜条各成一行', 'One row per strip')}">${L('拆开', 'Split')}</button></div>` : '';
     const boxes = row.segs.map(sg => {
       const pc = App.piece(b, sg.piece), n = App.nSample(sg), nm = sg.lanes.filter(l => l.r === 'm').length, nx = sg.lanes.filter(l => l.r === 'x').length;
       const cols = n > 1 ? `${sg.c0}–${App.segEnd(sg)}` : n ? String(sg.c0) : '—';
       return `<div class="bt-seg${sg === cur ? ' sel' : ''}${clash ? ' clash' : ''}" data-seg="${sg.piece}">
-        <div class="bt-line"><span class="ptag" title="膜条 ${esc(pc ? pc.letter : '?')}">${esc(pc ? pc.letter : '?')}</span>
-          <span class="bt-n"><b>${n}</b> 道${nm ? ` <span class="tag-m">+${nm} M</span>` : ''}${nx ? ` <span class="tag-x">+${nx} 不用</span>` : ''}</span>
-          <span class="bt-cols">成图第 <b>${cols}</b> 列</span>
-          <button class="pnav" data-shift="-1" title="这个框的泳道在成图里往左挪一列（最左到第 1 列，不会推动其他行）"${sg.c0 <= 1 ? ' disabled' : ''}>‹</button><button class="pnav" data-shift="1" title="往右挪一列">›</button></div>
-        <div class="bt-line"><span class="bt-even">泳道数 <input type="number" class="num" min="1" max="60" value="${sg.lanes.length}"> <button class="btn sm primary" data-act="even" title="最左、最右两条泳道线不动，中间按泳道数均匀排开">首尾对齐</button></span>
-          <button class="btn sm ghost" data-act="redetect" title="只看框里的像素，重新找泳道">框内重新识别</button></div>
-        <div class="bt-line"><span class="bt-rot">倾斜 <button class="pnav" data-rot="-0.1" title="逆时针 0.1°（选中框后按 [ ）">−</button><b>${(sg.rot || 0).toFixed(1)}°</b><button class="pnav" data-rot="0.1" title="顺时针 0.1°（选中框后按 ] ）">+</button></span>
-          <button class="btn sm ghost" data-act="level" title="按框里的条带把框摆正（条带和膜条不完全水平时）">按条带摆正</button>${sg.rot ? '<button class="link" data-act="rot0">归零</button>' : ''}</div>
+        <div class="bt-line"><span class="ptag" title="${L('膜条', 'Strip')} ${esc(pc ? pc.letter : '?')}">${esc(pc ? pc.letter : '?')}</span>
+          <span class="bt-n"><b>${n}</b>${L(' 道', n === 1 ? ' lane' : ' lanes')}${nm ? ` <span class="tag-m">+${nm} M</span>` : ''}${nx ? ` <span class="tag-x">+${nx} ${L('不用', 'unused')}</span>` : ''}</span>
+          <span class="bt-cols">${L(`成图第 <b>${cols}</b> 列`, `${n > 1 ? 'columns' : 'column'} <b>${cols}</b>`)}</span>
+          <button class="pnav" data-shift="-1" title="${L('这个框的泳道在成图里往左挪一列（最左到第 1 列，不会推动其他行）', "Move this box's lanes one column left in the figure (down to column 1; other rows are not pushed)")}"${sg.c0 <= 1 ? ' disabled' : ''}>‹</button><button class="pnav" data-shift="1" title="${L('往右挪一列', 'One column right')}">›</button></div>
+        <div class="bt-line"><span class="bt-even">${L('泳道数', 'Lanes')} <input type="number" class="num" min="1" max="60" value="${sg.lanes.length}"> <button class="btn sm primary" data-act="even" title="${L('最左、最右两条泳道线不动，中间按泳道数均匀排开', 'The outermost two lane lines stay; the others are spaced evenly between them')}">${L('首尾对齐', 'Space evenly')}</button></span>
+          <button class="btn sm ghost" data-act="redetect" title="${L('只看框里的像素，重新找泳道', 'Find the lanes again from the pixels in the box only')}">${L('框内重新识别', 'Detect in box')}</button></div>
+        <div class="bt-line"><span class="bt-rot">${L('倾斜', 'Tilt')} <button class="pnav" data-rot="-0.1" title="${L('逆时针 0.1°（选中框后按 [ ）', '0.1° anticlockwise ([ with the box selected)')}">−</button><b>${(sg.rot || 0).toFixed(1)}°</b><button class="pnav" data-rot="0.1" title="${L('顺时针 0.1°（选中框后按 ] ）', '0.1° clockwise (] with the box selected)')}">+</button></span>
+          <button class="btn sm ghost" data-act="level" title="${L('按框里的条带把框摆正（条带和膜条不完全水平时）', "Level the box by its bands (when bands and strip aren't quite horizontal)")}">${L('按条带摆正', 'Level by bands')}</button>${sg.rot ? `<button class="link" data-act="rot0">${L('归零', 'Reset')}</button>` : ''}</div>
       </div>`;
     }).join('');
     wrap.innerHTML = `${(b.pieces || []).length > 1 ? segLine : ''}
-      ${ex.length ? `<div class="rd-title">曝光<span>${why}</span>${row.img !== best ? '<button class="link" data-act="usebest">改用推荐</button>' : ''}</div><div class="tiles"></div>` : ''}
-      <div class="rd-title">泳道<button class="link" data-act="zoom" title="中间的膜图放大到这一行的框">在膜上放大</button></div>
-      <ul class="lane-help"><li><b>泳道线没对准</b>：把框里最左、最右两条拖到泳道中心，中间的自动均分（Alt 只动一条）</li>
+      ${ex.length ? `<div class="rd-title">${L('曝光', 'Exposure')}<span>${why}</span>${row.img !== best ? `<button class="link" data-act="usebest">${L('改用推荐', 'Use recommended')}</button>` : ''}</div><div class="tiles"></div>` : ''}
+      <div class="rd-title">${L('泳道', 'Lanes')}<button class="link" data-act="zoom" title="${L('中间的膜图放大到这一行的框', "Zoom the membrane view to this row's boxes")}">${L('在膜上放大', 'Zoom on membrane')}</button></div>
+      <ul class="lane-help">${L(`<li><b>泳道线没对准</b>：把框里最左、最右两条拖到泳道中心，中间的自动均分（Alt 只动一条）</li>
         <li><b>条数不对</b>：改下面的泳道数再点"首尾对齐"；或双击框内加一道，点竖线后 Delete 删掉</li>
         <li><b>边上的条带被切</b>：把框的左边或右边往外拖</li>
         <li><b>某道不用 / 是 Marker</b>：点框上方的数字切换</li>
         <li><b>歪了</b>：拖框上方的 ↻，或用下面的"倾斜"微调</li>
-        <li><b>太亮 / 太暗</b>：膜图上方的"暗部 / 亮部"只调这一行</li></ul>${boxes}`;
+        <li><b>太亮 / 太暗</b>：膜图上方的"暗部 / 亮部"只调这一行</li>`,
+      `<li><b>Lane lines off</b>: drag the outermost two in the box to the lane centres; the ones between follow evenly (Alt moves one only)</li>
+        <li><b>Wrong number of lanes</b>: change the number below and click "Space evenly"; or double-click in the box to add one, click a line and press Delete to remove it</li>
+        <li><b>A band at the edge cut off</b>: drag the box's left or right side outwards</li>
+        <li><b>A lane not used / a marker</b>: click its number above the box to switch</li>
+        <li><b>Tilted</b>: drag the ↻ above the box, or fine-tune with "Tilt" below</li>
+        <li><b>Too bright / too dark</b>: "Black / White" above the membrane view adjusts this row only</li>`)}</ul>${boxes}`;
     wrap.querySelector('[data-act="zoom"]').onclick = () => { App.viewBlot = row.blot; App.viewImg = row.img; App.emit('select'); G.View.fitRow(row); };
     const split = wrap.querySelector('[data-act="split"]');
-    if (split) split.onclick = done(() => { App.splitRow(row); toast('已拆开：每条膜条各成一行'); });
+    if (split) split.onclick = done(() => { App.splitRow(row); toast(L('已拆开：每条膜条各成一行', 'Split: one row per strip')); });
     const tiles = wrap.querySelector('.tiles');
     if (tiles) App.expoOrder(row).forEach(e => {
       const rec = App.images.get(e.id), th = App.rowThumb(row, e.id, 150), v = App.expoVerdict(e);
       const t = document.createElement('button');
       t.className = 'tile' + (e.id === row.img ? ' on' : '') + (e.id === best ? ' rec' : '') + ' v-' + v;
-      t.title = `${rec.name}｜信噪比 ${e.snr.toFixed(0)}${e.satFrac > 0.002 ? `｜条带内过曝 ${(e.satFrac * 100).toFixed(1)}%` : ''}`;
+      const satP = (e.satFrac * 100).toFixed(1);
+      t.title = L(`${rec.name}｜信噪比 ${e.snr.toFixed(0)}${e.satFrac > 0.002 ? `｜条带内过曝 ${satP}%` : ''}`,
+        `${rec.name} | SNR ${e.snr.toFixed(0)}${e.satFrac > 0.002 ? ` | ${satP}% saturated in the band` : ''}`);
       t.innerHTML = `${th ? `<img src="${th.href}" alt="">` : ''}<span class="cap">${e.id === best ? '<b>★</b> ' : ''}${esc(App.expoLabel(rec))}${TAG[v] ? `<i>${TAG[v]}</i>` : ''}</span>`;
       t.onclick = done(() => { row.img = e.id; row.auto = e.id === best; App.viewBlot = row.blot; App.viewImg = row.img; });
       tiles.appendChild(t);
@@ -677,20 +773,30 @@
       const sg = row.segs.find(s => s.piece === div.dataset.seg);
       if (!sg) return;
       div.addEventListener('mousedown', () => { if (App.selSeg !== sg.piece) { App.selSeg = sg.piece; App.selLane = null; G.View.draw(); wrap.querySelectorAll('.bt-seg').forEach(x => x.classList.toggle('sel', x === div)); } });
-      div.querySelectorAll('[data-shift]').forEach(btn => btn.onclick = done(() => { if (!App.shiftCols(row, sg, +btn.dataset.shift)) toast('已经在第 1 列了：要让它比其他行更靠左，把其他行往右挪（›）'); }));
+      div.querySelectorAll('[data-shift]').forEach(btn => btn.onclick = done(() => {
+        if (!App.shiftCols(row, sg, +btn.dataset.shift)) toast(L('已经在第 1 列了：要让它比其他行更靠左，把其他行往右挪（›）', 'Already at column 1: to put it further left than the other rows, move those right (›)'));
+      }));
       div.querySelector('[data-act="redetect"]').onclick = done(() => {
         const n = App.editLanes(row, sg, () => App.redetectBox(row, sg));
         App.findBand(row, sg); App.selLane = null;
         const nm = sg.lanes.filter(l => l.r === 'm').length;
-        toast(n ? `框内识别出 ${n} 道${nm ? `（另有 ${nm} 道 Marker）` : ''}` : '框里没识别到泳道：拖框调整范围，或填道数后点"排布"', 3200);
+        toast(n ? L(`框内识别出 ${n} 道${nm ? `（另有 ${nm} 道 Marker）` : ''}`, `Found ${pl(n, 'lane')} in the box${nm ? ` (and ${pl(nm, 'marker lane')})` : ''}`)
+          : L('框里没识别到泳道：拖框调整范围，或填道数后点"排布"', 'No lanes found in the box: drag the box to adjust it, or enter the number of lanes and click "Space evenly"'), 3200);
       });
       const pcOf = () => App.pieceOf(row, sg);
       div.querySelectorAll('[data-rot]').forEach(btn => btn.onclick = done(() => { App.setSegRot(pcOf(), sg, (sg.rot || 0) + +btn.dataset.rot); App.findBand(row, sg); }));
-      div.querySelector('[data-act="level"]').onclick = done(() => { const d = App.levelBox(row, sg); toast(d != null ? `已按条带把框摆正（转了 ${d.toFixed(2)}°）` : '框里的条带不够清楚（至少 3 道），没有改；可以用 − + 或拖框上方的 ↻ 手动转'); });
+      div.querySelector('[data-act="level"]').onclick = done(() => {
+        const d = App.levelBox(row, sg);
+        toast(d != null ? L(`已按条带把框摆正（转了 ${d.toFixed(2)}°）`, `Levelled the box by its bands (turned ${d.toFixed(2)}°)`)
+          : L('框里的条带不够清楚（至少 3 道），没有改；可以用 − + 或拖框上方的 ↻ 手动转', 'The bands in the box are not clear enough (3 lanes at least): nothing changed. Turn it by hand with − + or the ↻ above the box'));
+      });
       const r0 = div.querySelector('[data-act="rot0"]');
       if (r0) r0.onclick = done(() => { App.setSegRot(pcOf(), sg, 0); App.findBand(row, sg); });
       const inp = div.querySelector('.bt-even input');
-      const even = done(() => { const n = App.editLanes(row, sg, () => App.evenEnds(row, sg, +inp.value)); App.selLane = null; toast(`已按最左、最右两条泳道等间距排布 ${n} 道`); });
+      const even = done(() => {
+        const n = App.editLanes(row, sg, () => App.evenEnds(row, sg, +inp.value)); App.selLane = null;
+        toast(L(`已按最左、最右两条泳道等间距排布 ${n} 道`, `${pl(n, 'lane')} spaced evenly between the outermost two`));
+      });
       div.querySelector('[data-act="even"]').onclick = even;
       inp.addEventListener('keydown', e => { if (e.key === 'Enter' && !composing(e)) { e.preventDefault(); even(); } });
     });
@@ -711,11 +817,12 @@
   }
   $('btnAddRow').onclick = () => { if (!S()) return; App.setMode(App.mode === 'addrow' ? null : 'addrow'); };
   $('btnRedetect').onclick = () => {
-    if (!S() || !confirm('按膜条重新识别所有蛋白框？\n现在调过的框、行的顺序和名字都会丢掉（Ctrl+Z 可撤销）。')) return;
-    App.busy(true, '重新识别…');
+    if (!S() || !confirm(L('按膜条重新识别所有蛋白框？\n现在调过的框、行的顺序和名字都会丢掉（Ctrl+Z 可撤销）。',
+      'Detect every protein box again from the strips?\nThe boxes as adjusted, the row order and the names are lost (Ctrl+Z to undo).'))) return;
+    App.busy(true, L('重新识别…', 'Detecting…'));
     setTimeout(() => {
       S().blots.forEach(b => { App.reanalyze(b, { fresh: true }); S().rows.filter(r => r.blot === b.id).forEach(r => r.segs.forEach(sg => App.levelBox(r, sg))); });
-      App.busy(false); App.commit(); toast('已重新识别所有蛋白框（Ctrl+Z 可撤销）');
+      App.busy(false); App.commit(); toast(L('已重新识别所有蛋白框（Ctrl+Z 可撤销）', 'Detected every protein box again (Ctrl+Z to undo)'));
     }, 20);
   };
 
@@ -725,7 +832,7 @@
     const opts = sel => st.lanes.map((l, i) => `<option value="${i + 1}"${i + 1 === sel ? ' selected' : ''}>${i + 1}${l.name ? ' · ' + esc(l.name.replace(/\*/g, '')).slice(0, 10) : ''}</option>`).join('');
     $('rangeA').innerHTML = opts(st.range[0]); $('rangeB').innerHTML = opts(st.range[1]);
     $('laneList').innerHTML = st.lanes.map((l, i) => `<div class="item${i + 1 < st.range[0] || i + 1 > st.range[1] ? ' out' : ''}"><span class="idx">${i + 1}</span><span style="flex:1">${esc(l.name) || '<span class="muted">—</span>'}</span>
-      <label class="switch"><input type="checkbox" data-j="${i + 1}" ${l.hidden ? '' : 'checked'}>显示</label></div>`).join('');
+      <label class="switch"><input type="checkbox" data-j="${i + 1}" ${l.hidden ? '' : 'checked'}>${L('显示', 'Show')}</label></div>`).join('');
     $('laneList').querySelectorAll('[data-j]').forEach(c => c.addEventListener('change', done(e => { st.lanes[+c.dataset.j - 1].hidden = !e.target.checked; })));
   }
   const onRange = done(() => {
@@ -739,14 +846,18 @@
     let names = raw.includes('\t') ? raw.split(/\t|\n/) : raw.includes('\n') ? raw.split('\n') : raw.split(/[,，;；]/);
     names = names.map(s => s.trim());
     let fl = App.figLanes();
-    if (names.length > fl.length) { const extra = names.length - fl.length; S().range[1] += extra; App.ensureLane(S().range[1]); fl = App.figLanes(); toast(`名称多于泳道，范围向右扩展 ${extra} 条`); }
+    if (names.length > fl.length) {
+      const extra = names.length - fl.length; S().range[1] += extra; App.ensureLane(S().range[1]); fl = App.figLanes();
+      toast(L(`名称多于泳道，范围向右扩展 ${extra} 条`, `More names than lanes: the range was extended by ${pl(extra, 'lane')} to the right`));
+    }
     fl.forEach((j, k) => { if (k < names.length) S().lanes[j - 1].name = names[k]; });
-    $('laneBulk').value = ''; App.commit(); toast(`已填入 ${Math.min(names.length, fl.length)} 个泳道名`);
+    const nf = Math.min(names.length, fl.length);
+    $('laneBulk').value = ''; App.commit(); toast(L(`已填入 ${nf} 个泳道名`, `Filled in ${pl(nf, 'lane name')}`));
   }
   $('laneBulk').addEventListener('change', applyBulk);
 
   /* ---------- 4 annotations ---------- */
-  $('btnAddCond').onclick = done(() => { S().conditions.push({ name: '', values: S().lanes.map(() => '') }); toast('在成图上点每个格子切换 + / − / 空；点"条件"输入名称', 3200); });
+  $('btnAddCond').onclick = done(() => { S().conditions.push({ name: '', values: S().lanes.map(() => '') }); toast(L('在成图上点每个格子切换 + / − / 空；点"条件"输入名称', 'Click each cell on the figure to switch + / − / blank; click "Condition" to name it'), 3200); });
   $('btnAddGroup').onclick = () => { if (S()) App.setMode(App.mode === 'group' ? null : 'group'); };
   $('btnAddArrow').onclick = () => { if (S()) App.setMode(App.mode === 'arrow' ? null : 'arrow'); };
   $('btnAddBracket').onclick = () => { if (S()) App.setMode(App.mode === 'bracket' ? null : 'bracket'); };
@@ -754,14 +865,16 @@
   function bracketPopover(k, at) {
     const bk = (S().brackets || [])[k], rs = bk ? App.bracketRows(bk) : [];
     if (!rs.length) return;
-    const what = rs.length > 1 ? `${rs.length} 行（${rs.map(r => App.rowLabel(r)).join('、')}）` : `「${App.rowLabel(rs[0])}」${bk.f0 > 0.02 || bk.f1 < 0.98 ? '的一段' : '整行'}`;
-    pop.innerHTML = `<h4>行旁括号 · ${esc(what)}</h4>
-      <div class="field"><input type="text" id="pbText" value="${esc((bk.text || '').replace(/\n/g, ' ↵ '))}" placeholder="如 IP: Flag、Input、WCL、(Ub)n" title="↵ = 换行"></div>
-      <div class="field inline"><label class="inline-label">放在</label><div class="seg"><button data-side="left" class="${bk.side !== 'right' ? 'on' : ''}">左边</button><button data-side="right" class="${bk.side === 'right' ? 'on' : ''}">右边</button></div></div>
-      <div class="field inline"><label class="inline-label">字号</label><input type="number" id="pbPt" min="4" max="14" step="0.5" class="num" placeholder="${S().style.fontPt}" value="${bk.pt || ''}"> pt
-        <span class="hint" style="margin:0">留空 = 跟随全局字号</span></div>
-      <p class="hint">盖住的范围不对：删掉，再用"行旁括号"重新拖一个。</p>
-      <div class="actions"><button class="btn sm danger" id="pbDel">删除</button><button class="btn sm primary" id="pbOk">完成</button></div>`;
+    const part = bk.f0 > 0.02 || bk.f1 < 0.98;
+    const what = rs.length > 1 ? L(`${rs.length} 行（${list(rs.map(r => App.rowLabel(r)))}）`, `${rs.length} rows (${list(rs.map(r => App.rowLabel(r)))})`)
+      : L(`「${App.rowLabel(rs[0])}」${part ? '的一段' : '整行'}`, `"${App.rowLabel(rs[0])}", ${part ? 'part of the row' : 'the whole row'}`);
+    pop.innerHTML = `<h4>${L('行旁括号', 'Side bracket')} · ${esc(what)}</h4>
+      <div class="field"><input type="text" id="pbText" value="${esc((bk.text || '').replace(/\n/g, ' ↵ '))}" placeholder="${L('如 IP: Flag、Input、WCL、(Ub)n', 'e.g. IP: Flag, Input, WCL, (Ub)n')}" title="${L('↵ = 换行', '↵ = line break')}"></div>
+      <div class="field inline"><label class="inline-label">${L('放在', 'Side')}</label><div class="seg"><button data-side="left" class="${bk.side !== 'right' ? 'on' : ''}">${L('左边', 'Left')}</button><button data-side="right" class="${bk.side === 'right' ? 'on' : ''}">${L('右边', 'Right')}</button></div></div>
+      <div class="field inline"><label class="inline-label">${L('字号', 'Font size')}</label><input type="number" id="pbPt" min="4" max="14" step="0.5" class="num" placeholder="${S().style.fontPt}" value="${bk.pt || ''}"> pt
+        <span class="hint" style="margin:0">${L('留空 = 跟随全局字号', 'Empty = the figure font size')}</span></div>
+      <p class="hint">${L('盖住的范围不对：删掉，再用"行旁括号"重新拖一个。', 'Wrong span? Delete it and drag a new one with "Side bracket".')}</p>
+      <div class="actions"><button class="btn sm danger" id="pbDel">${L('删除', 'Delete')}</button><button class="btn sm primary" id="pbOk">${L('完成', 'Done')}</button></div>`;
     placePopNear(at);
     const q = id => pop.querySelector('#' + id);
     q('pbText').addEventListener('input', live(e => { bk.text = e.target.value.replace(/\s*↵\s*/g, '\n'); }));
@@ -770,7 +883,7 @@
     q('pbPt').addEventListener('input', live(e => { const v = +e.target.value; if (e.target.value !== '' && v >= 4 && v <= 14) bk.pt = v; else if (e.target.value === '') delete bk.pt; }));
     q('pbPt').addEventListener('change', done());
     pop.querySelectorAll('[data-side]').forEach(b => b.onclick = () => { bk.side = b.dataset.side; App.commit(); bracketPopover(S().brackets.indexOf(bk), at); });
-    q('pbDel').onclick = () => { const i = S().brackets.indexOf(bk); if (i >= 0) S().brackets.splice(i, 1); dropPop(); App.commit(); toast('已删除这个括号（Ctrl+Z 可撤销）'); };
+    q('pbDel').onclick = () => { const i = S().brackets.indexOf(bk); if (i >= 0) S().brackets.splice(i, 1); dropPop(); App.commit(); toast(L('已删除这个括号（Ctrl+Z 可撤销）', 'Bracket deleted (Ctrl+Z to undo)')); };
     q('pbOk').onclick = () => closePop();
     setTimeout(() => q('pbText') && q('pbText').focus({ preventScroll: true }), 0);
   }
@@ -779,23 +892,24 @@
   function arrowPopover(k, at) {
     const a = S().arrows[k]; if (!a) return;
     const row = App.row(a.row), est = App.arrowSize(a);
-    let estHtml = '这条膜条还没标够 2 条 Marker 带：分子量无法估算（第 4 步标好后自动出现，或在下面填理论大小）';
+    let estHtml = L('这条膜条还没标够 2 条 Marker 带：分子量无法估算（第 4 步标好后自动出现，或在下面填理论大小）',
+      'Fewer than 2 marker bands are marked on this strip: the size cannot be estimated (it appears once step 4 is done; or type the expected size below)');
     if (est) {
-      estHtml = `按这条膜条标的 Marker 估算：<b>${esc(est)}</b>`;
-      if (/≈/.test(est)) estHtml += '<br><span class="warn-t">在标过的 Marker 带范围之外，是外推值，成图上标 ≈</span>';
+      estHtml = L(`按这条膜条标的 Marker 估算：<b>${esc(est)}</b>`, `Estimated from the marker marked on this strip: <b>${esc(est)}</b>`);
+      if (/≈/.test(est)) estHtml += `<br><span class="warn-t">${L('在标过的 Marker 带范围之外，是外推值，成图上标 ≈', 'Outside the marked marker bands: extrapolated, shown with ≈ on the figure')}</span>`;
     }
-    pop.innerHTML = `<h4>目标条带 · ${esc(row ? App.rowLabel(row) : '')}</h4>
-      <div class="field"><input type="text" id="paText" value="${esc(a.text)}" placeholder="名称（可空），如 p-ERK1/2、剪切体"></div>
-      <div class="field inline"><label class="inline-label">标记</label>
-        <select id="paSym" style="width:auto"><option value="◀">◀ 箭头</option><option value="*">* 非特异条带</option><option value="#"># 降解产物等</option><option value="†">† 其他</option></select></div>
+    pop.innerHTML = `<h4>${L('目标条带', 'Target band')} · ${esc(row ? App.rowLabel(row) : '')}</h4>
+      <div class="field"><input type="text" id="paText" value="${esc(a.text)}" placeholder="${L('名称（可空），如 p-ERK1/2、剪切体', 'Name (optional), e.g. p-ERK1/2, cleaved form')}"></div>
+      <div class="field inline"><label class="inline-label">${L('标记', 'Mark')}</label>
+        <select id="paSym" style="width:auto"><option value="◀">◀ ${L('箭头', 'arrow')}</option><option value="*">* ${L('非特异条带', 'non-specific band')}</option><option value="#"># ${L('降解产物等', 'degradation product etc.')}</option><option value="†">† ${L('其他', 'other')}</option></select></div>
       <div class="est">${estHtml}</div>
-      <div class="field inline"><label class="switch"><input type="checkbox" id="paAuto" ${a.auto ? 'checked' : ''}><span>标注大小</span></label>
-        <input type="text" id="paSize" style="flex:1" value="${esc(a.sizeText || '')}" placeholder="${esc(est || '如 55 kDa')}" title="留空 = 用估算值；也可以填理论大小"></div>
-      <div class="field inline"><label class="inline-label">放在</label><div class="seg"><button data-side="left" class="${a.side === 'left' ? 'on' : ''}">左边</button><button data-side="right" class="${a.side !== 'left' ? 'on' : ''}">右边</button></div>
-        <span class="hint" style="margin:0">在成图上上下拖动箭头，可以移到这一行的另一条带</span></div>
-      <div class="field inline"><label class="inline-label">字号</label><input type="number" id="paPt" min="4" max="14" step="0.5" class="num" placeholder="${S().style.fontPt}" value="${a.pt || ''}"> pt
-        <span class="hint" style="margin:0">留空 = 跟随全局字号</span></div>
-      <div class="actions"><button class="btn sm danger" id="paDel">删除</button><button class="btn sm primary" id="paOk">完成</button></div>`;
+      <div class="field inline"><label class="switch"><input type="checkbox" id="paAuto" ${a.auto ? 'checked' : ''}><span>${L('标注大小', 'Show size')}</span></label>
+        <input type="text" id="paSize" style="flex:1" value="${esc(a.sizeText || '')}" placeholder="${esc(est || L('如 55 kDa', 'e.g. 55 kDa'))}" title="${L('留空 = 用估算值；也可以填理论大小', 'Empty = the estimate; or type the expected size')}"></div>
+      <div class="field inline"><label class="inline-label">${L('放在', 'Side')}</label><div class="seg"><button data-side="left" class="${a.side === 'left' ? 'on' : ''}">${L('左边', 'Left')}</button><button data-side="right" class="${a.side !== 'left' ? 'on' : ''}">${L('右边', 'Right')}</button></div>
+        <span class="hint" style="margin:0">${L('在成图上上下拖动箭头，可以移到这一行的另一条带', 'Drag the arrow up or down on the figure to move it to another band of this row')}</span></div>
+      <div class="field inline"><label class="inline-label">${L('字号', 'Font size')}</label><input type="number" id="paPt" min="4" max="14" step="0.5" class="num" placeholder="${S().style.fontPt}" value="${a.pt || ''}"> pt
+        <span class="hint" style="margin:0">${L('留空 = 跟随全局字号', 'Empty = the figure font size')}</span></div>
+      <div class="actions"><button class="btn sm danger" id="paDel">${L('删除', 'Delete')}</button><button class="btn sm primary" id="paOk">${L('完成', 'Done')}</button></div>`;
     pop.querySelector('#paSym').value = a.sym;
     placePopNear(at);
     const q = id => pop.querySelector('#' + id);
@@ -810,34 +924,34 @@
     q('paPt').addEventListener('change', done());
     pop.querySelectorAll('[data-side]').forEach(b => b.onclick = () => { a.side = b.dataset.side; App.commit(); arrowPopover(S().arrows.indexOf(a), at); });
     // (by identity: other arrows may have been deleted while this was open)
-    q('paDel').onclick = () => { const i = S().arrows.indexOf(a); if (i >= 0) S().arrows.splice(i, 1); dropPop(); App.commit(); toast('已删除这个箭头（Ctrl+Z 可撤销）'); };
+    q('paDel').onclick = () => { const i = S().arrows.indexOf(a); if (i >= 0) S().arrows.splice(i, 1); dropPop(); App.commit(); toast(L('已删除这个箭头（Ctrl+Z 可撤销）', 'Arrow deleted (Ctrl+Z to undo)')); };
     q('paOk').onclick = () => closePop();
     setTimeout(() => q('paText') && q('paText').focus({ preventScroll: true }), 0);
   }
   function renderAnno() {
     const st = S(), rows = [];
     // (a one-line field: a group label's line breaks show as ↵ and come back as breaks)
-    st.groups.forEach((g, k) => rows.push(`<div class="item"><span class="kind">分组</span><span class="idx" style="width:auto">${g.from}–${g.to}</span><input type="text" data-g="${k}" value="${esc((g.text || '').replace(/\n/g, ' ↵ '))}" placeholder="分组文字" title="↵ = 换行"><button class="x" data-gdel="${k}" aria-label="删除">×</button></div>`));
-    st.conditions.forEach((c, r) => rows.push(`<div class="item"><span class="kind">条件</span><input type="text" data-c="${r}" value="${esc(c.name)}" placeholder="条件名，如 Dox"><button class="x" data-cdel="${r}">×</button></div>`));
+    st.groups.forEach((g, k) => rows.push(`<div class="item"><span class="kind">${L('分组', 'Group')}</span><span class="idx" style="width:auto">${g.from}–${g.to}</span><input type="text" data-g="${k}" value="${esc((g.text || '').replace(/\n/g, ' ↵ '))}" placeholder="${L('分组文字', 'Group label')}" title="${L('↵ = 换行', '↵ = line break')}"><button class="x" data-gdel="${k}" aria-label="${L('删除', 'Delete')}">×</button></div>`));
+    st.conditions.forEach((c, r) => rows.push(`<div class="item"><span class="kind">${L('条件', 'Condition')}</span><input type="text" data-c="${r}" value="${esc(c.name)}" placeholder="${L('条件名，如 Dox', 'Condition name, e.g. Dox')}"><button class="x" data-cdel="${r}">×</button></div>`));
     (st.arrows || []).forEach((a, k) => {
       const row = App.row(a.row); if (!row) return;
-      const what = a.sym === '◀' ? App.arrowLabel(a) || '未标分子量' : a.sym + (a.text ? ' ' + a.text : '');
-      rows.push(`<div class="item"><span class="kind">箭头</span><button class="link anno-arrow" data-a="${k}" title="点开修改">${esc(App.rowLabel(row))} · ${esc(what)}</button><button class="x" data-adel="${k}">×</button></div>`);
+      const what = a.sym === '◀' ? App.arrowLabel(a) || L('未标分子量', 'no size') : a.sym + (a.text ? ' ' + a.text : '');
+      rows.push(`<div class="item"><span class="kind">${L('箭头', 'Arrow')}</span><button class="link anno-arrow" data-a="${k}" title="${L('点开修改', 'Click to edit')}">${esc(App.rowLabel(row))} · ${esc(what)}</button><button class="x" data-adel="${k}">×</button></div>`);
     });
     (st.brackets || []).forEach((bk, k) => {
       const rs = App.bracketRows(bk); if (!rs.length) return;
       const span = rs.length > 1 ? `${App.rowLabel(rs[0])} – ${App.rowLabel(rs[rs.length - 1])}` : App.rowLabel(rs[0]);
-      rows.push(`<div class="item"><span class="kind">括号</span><button class="link anno-arrow" data-b="${k}" title="点开修改">${esc(span)} · ${esc((bk.text || '').replace(/\n/g, ' ') || '（没写文字）')}</button><button class="x" data-bdel="${k}">×</button></div>`);
+      rows.push(`<div class="item"><span class="kind">${L('括号', 'Bracket')}</span><button class="link anno-arrow" data-b="${k}" title="${L('点开修改', 'Click to edit')}">${esc(span)} · ${esc((bk.text || '').replace(/\n/g, ' ') || L('（没写文字）', '(no text)'))}</button><button class="x" data-bdel="${k}">×</button></div>`);
     });
-    const L = $('annoList'); L.innerHTML = rows.join('');
-    L.querySelectorAll('[data-a]').forEach(b => b.onclick = () => arrowPopover(+b.dataset.a, b.getBoundingClientRect()));
-    L.querySelectorAll('[data-adel]').forEach(b => b.onclick = done(() => st.arrows.splice(+b.dataset.adel, 1)));
-    L.querySelectorAll('[data-b]').forEach(b => b.onclick = () => bracketPopover(+b.dataset.b, b.getBoundingClientRect()));
-    L.querySelectorAll('[data-bdel]').forEach(b => b.onclick = done(() => st.brackets.splice(+b.dataset.bdel, 1)));
-    L.querySelectorAll('[data-g]').forEach(i => { const g = st.groups[+i.dataset.g]; i.addEventListener('input', live(e => { g.text = e.target.value.replace(/\s*↵\s*/g, '\n'); })); i.addEventListener('change', done()); });
-    L.querySelectorAll('[data-c]').forEach(i => { const c = st.conditions[+i.dataset.c]; i.addEventListener('input', live(e => { c.name = e.target.value; })); i.addEventListener('change', done()); });
-    L.querySelectorAll('[data-gdel]').forEach(b => b.onclick = done(() => st.groups.splice(+b.dataset.gdel, 1)));
-    L.querySelectorAll('[data-cdel]').forEach(b => b.onclick = done(() => st.conditions.splice(+b.dataset.cdel, 1)));
+    const box = $('annoList'); box.innerHTML = rows.join('');
+    box.querySelectorAll('[data-a]').forEach(b => b.onclick = () => arrowPopover(+b.dataset.a, b.getBoundingClientRect()));
+    box.querySelectorAll('[data-adel]').forEach(b => b.onclick = done(() => st.arrows.splice(+b.dataset.adel, 1)));
+    box.querySelectorAll('[data-b]').forEach(b => b.onclick = () => bracketPopover(+b.dataset.b, b.getBoundingClientRect()));
+    box.querySelectorAll('[data-bdel]').forEach(b => b.onclick = done(() => st.brackets.splice(+b.dataset.bdel, 1)));
+    box.querySelectorAll('[data-g]').forEach(i => { const g = st.groups[+i.dataset.g]; i.addEventListener('input', live(e => { g.text = e.target.value.replace(/\s*↵\s*/g, '\n'); })); i.addEventListener('change', done()); });
+    box.querySelectorAll('[data-c]').forEach(i => { const c = st.conditions[+i.dataset.c]; i.addEventListener('input', live(e => { c.name = e.target.value; })); i.addEventListener('change', done()); });
+    box.querySelectorAll('[data-gdel]').forEach(b => b.onclick = done(() => st.groups.splice(+b.dataset.gdel, 1)));
+    box.querySelectorAll('[data-cdel]').forEach(b => b.onclick = done(() => st.conditions.splice(+b.dataset.cdel, 1)));
   }
 
   /* ---------- 5 layout ---------- */
@@ -861,16 +975,20 @@
     }
     App.commit();
     const got = G.BRender.build(false).w / App.MM;
-    toast(Math.abs(got - target) < 1.5 ? `成图总宽 ${got.toFixed(1)} mm（每道 ${st.mmPerLane} mm）`
-      : `每道已到${st.mmPerLane >= 15 ? '最宽 15' : '最窄 2'} mm，成图总宽 ${got.toFixed(1)} mm（到不了 ${target} mm）`, 3600);
+    const wide = st.mmPerLane >= 15;
+    toast(Math.abs(got - target) < 1.5 ? L(`成图总宽 ${got.toFixed(1)} mm（每道 ${st.mmPerLane} mm）`, `Figure width ${got.toFixed(1)} mm (${st.mmPerLane} mm per lane)`)
+      : L(`每道已到${wide ? '最宽 15' : '最窄 2'} mm，成图总宽 ${got.toFixed(1)} mm（到不了 ${target} mm）`,
+        `Lanes are at their ${wide ? 'widest, 15' : 'narrowest, 2'} mm; figure width ${got.toFixed(1)} mm (${target} mm is out of reach)`), 3600);
   });
-  $('btnResetLayout').onclick = done(() => { App.resetLayout(); toast('版式已重置为默认（Ctrl+Z 可撤销）'); });
+  $('btnResetLayout').onclick = done(() => { App.resetLayout(); toast(L('版式已重置为默认（Ctrl+Z 可撤销）', 'Layout reset to the defaults (Ctrl+Z to undo)')); });
   // the bands' own resolution at this lane width, and the widest lane that keeps 300 dpi
   function updateDpiLine() {
     const eff = Math.round(App.effectiveDpi()), safe = App.maxSafeMmPerLane(300), mm = S().style.mmPerLane;
     if (!isFinite(eff)) { $('dpiLine').innerHTML = ''; return; }
-    $('dpiLine').innerHTML = eff >= 300 ? `条带有效分辨率 <span class="ok">${eff} dpi</span>`
-      : `条带有效分辨率 <span class="bad">${eff} dpi</span>（&lt; 300）：每道不超过 <b>${safe} mm</b> 才能保证 300 dpi` + (safe >= 2 && mm > safe ? ` <button class="btn sm" id="btnSafeW">改为 ${safe} mm</button>` : '');
+    const head = L('条带有效分辨率', 'Effective resolution of the bands');
+    $('dpiLine').innerHTML = eff >= 300 ? `${head} <span class="ok">${eff} dpi</span>`
+      : `${head} <span class="bad">${eff} dpi</span>` + L(`（&lt; 300）：每道不超过 <b>${safe} mm</b> 才能保证 300 dpi`, ` (&lt; 300): lanes up to <b>${safe} mm</b> wide keep 300 dpi`)
+        + (safe >= 2 && mm > safe ? ` <button class="btn sm" id="btnSafeW">${L(`改为 ${safe} mm`, `Set ${safe} mm`)}</button>` : '');
     const b = $('btnSafeW'); if (b) b.onclick = done(() => { S().style.mmPerLane = safe; });
   }
 
@@ -886,7 +1004,7 @@
     // tabs: the exposures, shortest first, and the white-light picture the marker is read from (another white-light
     // picture only while it is shown: one per capture is common, and they look alike)
     const imgs = App.chemiOf(b).concat(App.markersOf(b).filter(r => r.id === b.marker || (rec && r.id === rec.id)));
-    $('imgTabs').innerHTML = imgs.map(r => `<button data-img="${r.id}" class="${rec && r.id === rec.id ? 'on' : ''}" title="${esc(r.name)}">${r.kind === 'marker' ? `白光<span class="tag-m">${r.id === b.marker ? 'Marker' : '其他'}</span>` : esc(App.expoLabel(r))}</button>`).join('');
+    $('imgTabs').innerHTML = imgs.map(r => `<button data-img="${r.id}" class="${rec && r.id === rec.id ? 'on' : ''}" title="${esc(r.name)}">${r.kind === 'marker' ? `${L('白光', 'White light')}<span class="tag-m">${r.id === b.marker ? 'Marker' : L('其他', 'other')}</span>` : esc(App.expoLabel(r))}</button>`).join('');
     $('imgTabs').querySelectorAll('button').forEach(btn => btn.onclick = () => { App.viewImg = btn.dataset.img; App.emit('select'); });
     // the picture shown: its tab scrolled into sight
     const on = $('imgTabs').querySelector('button.on');
@@ -897,8 +1015,11 @@
       // the selected row shown in its own picture: the bar adjusts that row alone (else the whole picture)
       const row = lvRow(), sel = App.selRow && App.row(App.selRow), users = st.rows.filter(r => r.img === rec.id && !r.hidden);
       const lv = row ? App.rowLevels(row) : App.levelsOf(rec.id);
-      $('levelName').innerHTML = row ? `调整 <b>${esc(App.rowLabel(row).replace(/ 行$/, ''))}</b>（只这一行）<button class="link" id="lvToImg" title="改这张图的所有行">改整张图</button>`
-        : `${users.length ? `调整整张图（${users.length} 行用它）` : '这张图未被使用'}${sel && sel.img === rec.id ? '<button class="link" id="lvToRow">只调选中的行</button>' : ''}`;
+      const nu = users.length, rl = row && esc(App.rowLabel(row).replace(L(/ 行$/, / row$/), ''));
+      $('levelName').innerHTML = row ? L(`调整 <b>${rl}</b>（只这一行）`, `Adjusting <b>${rl}</b> (this row only)`)
+          + `<button class="link" id="lvToImg" title="${L('改这张图的所有行', 'Change every row of this picture')}">${L('改整张图', 'Whole picture')}</button>`
+        : `${nu ? L(`调整整张图（${nu} 行用它）`, `Adjusting the whole picture (${pl(nu, 'row')} ${nu === 1 ? 'uses' : 'use'} it)`) : L('这张图未被使用', 'This picture is not used')}`
+          + `${sel && sel.img === rec.id ? `<button class="link" id="lvToRow">${L('只调选中的行', 'Selected row only')}</button>` : ''}`;
       if ($('lvToImg')) $('lvToImg').onclick = () => { lvImage = true; renderStageHead(); };
       if ($('lvToRow')) $('lvToRow').onclick = () => { lvImage = false; renderStageHead(); };
       $('lvBlack').value = toSl(lv.black); $('lvWhite').value = toSl(lv.white);
@@ -944,7 +1065,7 @@
     if (!App.dragging) {
       const ck = App.checks();
       showWarnings(f.warnings.concat(ck.warn));
-      $('legendHints').innerHTML = ck.legend.length ? '<b>图注可参考</b>' + ck.legend.map(esc).join('<br>') : '';
+      $('legendHints').innerHTML = ck.legend.length ? `<b>${L('图注可参考', 'For the legend')}</b>` + ck.legend.map(esc).join('<br>') : '';
     }
     if (edit) { const el = editEl(edit); if (el) el.classList.add('active'); }
   }
@@ -968,11 +1089,12 @@
   function syncBar() {
     if (!edit) return;
     const h = sizeHost(), own = h.o && h.o[h.k];
-    $('fedSizeLbl').textContent = edit.kind === 'lane' ? '泳道名字号' : edit.kind === 'rowname' ? '蛋白名字号' : edit.kind === 'group' ? '字号' : '本行字号';
+    $('fedSizeLbl').textContent = edit.kind === 'lane' ? L('泳道名字号', 'Lane name size') : edit.kind === 'rowname' ? L('蛋白名字号', 'Protein name size')
+      : edit.kind === 'group' ? L('字号', 'Font size') : L('本行字号', 'Row font size');
     $('fedSize').textContent = curSize() + ' pt';
     $('fedReset').classList.toggle('hidden', !own);
     $('fedBr').classList.toggle('hidden', edit.kind !== 'group');
-    $('fedHint').textContent = edit.kind === 'group' ? 'Shift+Enter 换行' : '';
+    $('fedHint').textContent = edit.kind === 'group' ? L('Shift+Enter 换行', 'Shift+Enter: new line') : '';
   }
   function placeBar() {
     const r = edBox().getBoundingClientRect();
@@ -991,7 +1113,8 @@
     edit = Object.assign(e, { orig: getV(e) || '' });
     const box = edBox();
     box.value = edit.orig;
-    box.placeholder = kind === 'lane' ? `泳道 ${id} 名称` : kind === 'rowname' ? '蛋白名（如 GAPDH）' : kind === 'group' ? '分组文字' : '条件名';
+    box.placeholder = kind === 'lane' ? L(`泳道 ${id} 名称`, `Lane ${id} name`) : kind === 'rowname' ? L('蛋白名（如 GAPDH）', 'Protein name (e.g. GAPDH)')
+      : kind === 'group' ? L('分组文字', 'Group label') : L('条件名', 'Condition name');
     if (kind === 'rowname') { fed.setAttribute('list', 'protList'); fillDatalist(App.rowKda(App.row(id))); selectRow(id, true); } else fed.removeAttribute('list');
     const w = Math.max(130, Math.min(240, r.width + 60));
     box.style.width = w + 'px';
@@ -1026,12 +1149,15 @@
       e.preventDefault();
       const { kind, id } = edit; closeEd(false);
       const back = e.shiftKey;
+      // the next one opens at once when it is on the figure already: keys typed right after Enter are not lost
+      // (a frame later they were, in Safari)
+      const next = (k, nid) => { if (editEl({ kind: k, id: nid })) openEd(k, nid); else requestAnimationFrame(() => openEd(k, nid)); };
       if (kind === 'lane') {
         const fl = App.figLanes(), k = fl.indexOf(id) + (back ? -1 : 1);
-        if (k >= 0 && k < fl.length) requestAnimationFrame(() => openEd('lane', fl[k])); else toast('泳道名称填完了');
+        if (k >= 0 && k < fl.length) next('lane', fl[k]); else toast(L('泳道名称填完了', 'All lane names filled in'));
       } else if (kind === 'rowname') {
         const vis = S().rows.filter(r => !r.hidden), k = vis.findIndex(r => r.id === id) + (back ? -1 : 1);
-        if (k >= 0 && k < vis.length) requestAnimationFrame(() => openEd('rowname', vis[k].id)); else toast('蛋白名填完了');
+        if (k >= 0 && k < vis.length) next('rowname', vis[k].id); else toast(L('蛋白名填完了', 'All protein names filled in'));
       }
     });
     // leaving the field finishes the edit — unless it went to the size / line-break bar
@@ -1124,7 +1250,8 @@
     Object.assign(gh.style, { left: (right ? sr.right - pr.left + 2 : sr.left - pr.left - 9) + 'px', top: y1 + 'px', height: Math.max(2, y2 - y1) + 'px' });
     const ids = new Set([d.a.r.id, d.b.r.id]), n = ids.size === 1 ? 1 : App.bracketRows({ r0: d.a.r.id, r1: d.b.r.id }).filter(r => !r.hidden).length;
     // (above the bracket: the rows below the pointer stay visible)
-    tipAt(ov, (right ? sr.right - pr.left + 14 : sr.left - pr.left + 6), Math.max(2, y1 - 26), n > 1 ? `盖住 ${n} 行（如 IP / Input）` : d.a.f === 0 && d.b.f === 1 || d.a.f === 1 && d.b.f === 0 ? '整行' : '一行里的一段（如 (Ub)n 拖尾）');
+    tipAt(ov, (right ? sr.right - pr.left + 14 : sr.left - pr.left + 6), Math.max(2, y1 - 26), n > 1 ? L(`盖住 ${n} 行（如 IP / Input）`, `Covers ${n} rows (e.g. IP / Input)`)
+      : d.a.f === 0 && d.b.f === 1 || d.a.f === 1 && d.b.f === 0 ? L('整行', 'The whole row') : L('一行里的一段（如 (Ub)n 拖尾）', 'Part of a row (e.g. an (Ub)n smear)'));
   }
   prev.addEventListener('mousedown', e => {
     if (e.button !== 0 || !S() || App.mode !== 'bracket' || !lastFig) return;
@@ -1147,7 +1274,7 @@
     swallowClick = true; setTimeout(() => { swallowClick = false; }, 0);
     let a = d.a, b = d.b;
     if (!d.moved) { a = { r: d.a.r, f: 0 }; b = { r: d.a.r, f: 1 }; }       // (a click: the whole row)
-    else if (a.r.id === b.r.id && Math.abs(a.f - b.f) < 0.05) { toast('拖得太短：沿着行上下拖，或在一行上点一下盖住整行'); return; }
+    else if (a.r.id === b.r.id && Math.abs(a.f - b.f) < 0.05) { toast(L('拖得太短：沿着行上下拖，或在一行上点一下盖住整行', 'Too short: drag up or down along the rows, or click a row to cover all of it')); return; }
     const bk = App.addBracket(a.r.id, a.f, b.r.id, b.f);
     App.setMode(null); App.commit();
     const k = S().brackets.indexOf(bk), g = prev.querySelector(`g[data-edit="bracket"][data-k="${k}"]`);
@@ -1159,7 +1286,7 @@
     if (img && App.mode === 'arrow') { placeArrow(img.dataset.row, e.clientY); return; }
     if (img) { selectRow(img.dataset.row, true); return; }
     const g = e.target.closest('[data-edit]');
-    if (!g) { if (App.mode === 'arrow') toast('请点在成图里某一行的条带上'); return; }
+    if (!g) { if (App.mode === 'arrow') toast(L('请点在成图里某一行的条带上', 'Click on the bands of a row in the figure')); return; }
     const kind = g.dataset.edit;
     if (kind === 'arrow') arrowPopover(+g.dataset.k, g.getBoundingClientRect());
     else if (kind === 'bracket') bracketPopover(+g.dataset.k, g.getBoundingClientRect());
@@ -1197,7 +1324,8 @@
       const row = App.row(r.id); if (!row) return;
       const t = document.createElement('div');
       t.className = 'rowtag' + (row.id === App.selRow ? ' sel' : ''); t.dataset.row = r.id; t.textContent = modLabel(row);
-      t.title = `来自膜条 ${modLabel(row)}。上下拖动调整顺序，拖到另一行上并排成一行；在成图上左右拖动条带对齐泳道`;
+      t.title = L(`来自膜条 ${modLabel(row)}。上下拖动调整顺序，拖到另一行上并排成一行；在成图上左右拖动条带对齐泳道`,
+        `From strip ${modLabel(row)}. Drag up or down to reorder, onto another row to join them side by side; drag the bands left or right on the figure to line up lanes`);
       t.style.left = (left - 5) + 'px'; t.style.top = ((r.top + r.bot) / 2) + 'px';
       ov.appendChild(t);
     });
@@ -1220,7 +1348,8 @@
     App.setMode(null); App.commit();
     const k = S().arrows.indexOf(a), g = prev.querySelector(`g[data-edit="arrow"][data-k="${k}"]`);
     if (g) arrowPopover(k, g.getBoundingClientRect());
-    toast(App.arrowSize(a) ? `已标出 ${App.arrowSize(a)}：可以加名称、换成 * # †、放到另一边` : '已加箭头：第 4 步标好 Marker 后自动显示分子量', 3600);
+    toast(App.arrowSize(a) ? L(`已标出 ${App.arrowSize(a)}：可以加名称、换成 * # †、放到另一边`, `Marked ${App.arrowSize(a)}: you can add a name, switch to * # † or move it to the other side`)
+      : L('已加箭头：第 4 步标好 Marker 后自动显示分子量', 'Arrow added: its size shows once the marker is marked in step 4'), 3600);
   }
   prev.addEventListener('mousedown', e => {
     if (e.button !== 0 || !S() || App.mode === 'arrow' || App.mode === 'bracket') return;
@@ -1255,7 +1384,7 @@
       line.classList.toggle('hidden', !!drop.onto); boxEl.classList.toggle('hidden', !drop.onto);
       if (drop.onto) {
         Object.assign(boxEl.style, { left: drop.r.x0 - 3 + 'px', top: drop.r.top - 3 + 'px', width: drop.r.x1 - drop.r.x0 + 6 + 'px', height: drop.r.bot - drop.r.top + 6 + 'px' });
-        tipAt(ov, mx + 14, my + 10, '松开：并排成一行（同一个蛋白，膜竖着剪开过）');
+        tipAt(ov, mx + 14, my + 10, L('松开：并排成一行（同一个蛋白，膜竖着剪开过）', 'Release to join side by side (one protein, the membrane cut through)'));
       } else {
         const a = rs[drop.at - 1], b = rs[drop.at], y = !rs.length ? 0 : !a ? b.top - 3 : !b ? a.bot + 3 : (a.bot + b.top) / 2, ref = rs[0] || { x0: 0, x1: 100 };
         Object.assign(line.style, { left: ref.x0 - 8 + 'px', top: y + 'px', width: ref.x1 - ref.x0 + 16 + 'px' });
@@ -1265,8 +1394,10 @@
       const k = Math.round(dx / prevScale / lastFig.laneW), row = App.row(pdrag.id), pc = row && App.findPiece(pdrag.piece);
       pdrag.k = k; pdrag.alt = e.altKey;
       ghost(e.altKey ? `[data-row="${pdrag.id}"][data-piece="${pdrag.piece}"]` : `[data-piece="${pdrag.piece}"]`, k * lastFig.laneW, 0);
-      const who = pc ? `膜条 ${pc.pc.letter}` : '这一行';
-      tipAt(ov, mx + 14, my + 10, k ? `${who}${e.altKey ? '（只这个框）' : '（这条膜条上的行一起）'}往${k > 0 ? '右' : '左'}挪 ${Math.abs(k)} 列` : '左右拖：对齐泳道（按住 Alt 只挪这个框）');
+      const who = pc ? L(`膜条 ${pc.pc.letter}`, `Strip ${pc.pc.letter}`) : L('这一行', 'This row');
+      tipAt(ov, mx + 14, my + 10, !k ? L('左右拖：对齐泳道（按住 Alt 只挪这个框）', 'Drag left or right to line up lanes (hold Alt to move this box only)')
+        : L(`${who}${e.altKey ? '（只这个框）' : '（这条膜条上的行一起）'}往${k > 0 ? '右' : '左'}挪 ${Math.abs(k)} 列`,
+          `${who}${e.altKey ? ' (this box only)' : ' (with the rows on this strip)'}: ${pl(Math.abs(k), 'column')} ${k > 0 ? 'right' : 'left'}`));
     }
   });
   window.addEventListener('mouseup', () => {
@@ -1279,21 +1410,29 @@
     if (!row) { updatePreview(); return; }
     if (d.mode === 'order' && d.drop && d.drop.onto) {
       const res = App.mergeRows(App.row(d.drop.onto), row);
-      if (res === 'joined') { App.selRow = d.drop.onto; App.commit(); toast('已并排成一行：两个框按左右接成连续的列；"拆开"可撤回'); return; }
-      toast(res === 'blot' ? '这两行来自不同的膜（不同的图片），不能并成一行' : res === 'same' ? '这两行在同一条膜条上，是两个不同的蛋白，不能并成一行'
-        : res === 'stacked' ? '这两条膜条上下叠放、泳道相同，是不同的蛋白，不能并成一行' : '没有改动', 3400);
+      if (res === 'joined') {
+        App.selRow = d.drop.onto; App.commit();
+        toast(L('已并排成一行：两个框按左右接成连续的列；"拆开"可撤回', 'Joined side by side: the two boxes make continuous columns, left to right ("Split" undoes it)'));
+        return;
+      }
+      toast(res === 'blot' ? L('这两行来自不同的膜（不同的图片），不能并成一行', 'These rows come from different membranes (different pictures) and cannot be joined')
+        : res === 'same' ? L('这两行在同一条膜条上，是两个不同的蛋白，不能并成一行', 'These rows are on the same strip: two different proteins, they cannot be joined')
+        : res === 'stacked' ? L('这两条膜条上下叠放、泳道相同，是不同的蛋白，不能并成一行', 'These strips lie one above the other on the same lanes: different proteins, they cannot be joined')
+        : L('没有改动', 'Nothing changed'), 3400);
       updatePreview();
     } else if (d.mode === 'order' && d.drop) {
       const rs = (lastFig.rowBoxes || []).map(b => b.id), rows = S().rows;
       const to = d.drop.at < rs.length ? rows.findIndex(r => r.id === rs[d.drop.at]) : rows.findIndex(r => r.id === rs[rs.length - 1]) + 1;
-      if (App.moveRow(d.id, to)) { App.commit(); toast('已调整行的上下顺序'); } else updatePreview();
+      if (App.moveRow(d.id, to)) { App.commit(); toast(L('已调整行的上下顺序', 'Row order changed')); } else updatePreview();
     } else if (d.mode === 'align' && d.k) {
       const sg = row.segs.find(s => s.piece === d.piece);
       if (!sg) { updatePreview(); return; }
       const mv = App.shiftAlign(row, sg, d.k, d.alt);
-      if (!mv.n) { updatePreview(); toast('已经在第 1 列了：要让它比其他行更靠左，把其他行往右拖', 3200); return; }
+      if (!mv.n) { updatePreview(); toast(L('已经在第 1 列了：要让它比其他行更靠左，把其他行往右拖', 'Already at column 1: to put it further left than the other rows, drag those right'), 3200); return; }
       App.commit();
-      toast(`${d.alt || mv.n < 2 ? '这个框' : `膜条 ${(App.findPiece(d.piece) || { pc: {} }).pc.letter} 上的 ${mv.n} 个框`}往${mv.d > 0 ? '右' : '左'}挪了 ${Math.abs(mv.d)} 列${mv.d !== d.k ? '（最左到第 1 列）' : ''}`);
+      const one = d.alt || mv.n < 2, letter = (App.findPiece(d.piece) || { pc: {} }).pc.letter, nd = Math.abs(mv.d);
+      toast(L(`${one ? '这个框' : `膜条 ${letter} 上的 ${mv.n} 个框`}往${mv.d > 0 ? '右' : '左'}挪了 ${nd} 列${mv.d !== d.k ? '（最左到第 1 列）' : ''}`,
+        `Moved ${one ? 'this box' : `the ${mv.n} boxes on strip ${letter}`} ${pl(nd, 'column')} ${mv.d > 0 ? 'right' : 'left'}${mv.d !== d.k ? ' (column 1 is the limit)' : ''}`));
     } else updatePreview();
   });
   // the list: drag rows by their grip
@@ -1319,7 +1458,7 @@
     items.forEach(it => it.classList.remove('drop-before', 'drop-after', 'dragging'));
     if (!d.moved || d.to == null) return;
     const to = d.to < items.length ? S().rows.findIndex(r => r.id === items[d.to].dataset.id) : S().rows.length;
-    if (App.moveRow(d.id, to)) { App.commit(); toast('已调整行的顺序'); }
+    if (App.moveRow(d.id, to)) { App.commit(); toast(L('已调整行的顺序', 'Row order changed')); }
   });
 
   /* ---------- the steps: one after the other, each on what the one before established ----------
@@ -1332,7 +1471,9 @@
   const unmarked = () => S().blots.flatMap(b => App.usedPieces(b).filter(pc => App.markInfo(b, pc).state !== 'manual').map(pc => ({ b, pc })));
   const piecesText = list => {
     const by = new Map(); list.forEach(t => { if (!by.has(t.b)) by.set(t.b, []); by.get(t.b).push(t.pc.letter); });
-    return [...by].map(([b, ls]) => (S().blots.length > 1 ? `${App.blotName(b)} 的` : '') + '膜条 ' + ls.join('、')).join('，');
+    const many = S().blots.length > 1;
+    return [...by].map(([b, ls]) => L((many ? `${App.blotName(b)} 的` : '') + '膜条 ' + ls.join('、'),
+      (ls.length > 1 ? 'strips ' : 'strip ') + ls.join(', ') + (many ? ` of ${App.blotName(b)}` : ''))).join(L('，', '; '));
   };
   const goTo = id => { const el = $(id); if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' }); };
   const flash = x => { const el = typeof x === 'string' ? $(x) : x; if (!el) return; el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1300); };
@@ -1363,20 +1504,28 @@
     const st = S(); if (!st) return;
     if (n === 1) {
       const none = st.blots.filter(b => !App.markerRec(b));
-      if (none.length && !confirm(`${none.map(App.blotName).join('、')} 没有 Marker 图：膜条只能按曝光图的信号找，也不能标分子量。继续？`)) return;
+      if (none.length && !confirm(L(`${none.map(App.blotName).join('、')} 没有 Marker 图：膜条只能按曝光图的信号找，也不能标分子量。继续？`,
+        `${none.map(App.blotName).join(', ')} ${none.length > 1 ? 'have' : 'has'} no marker picture: the strips can only be found from the exposures' signal, and no molecular weights can be marked. Continue?`))) return;
     }
     if (n === 4 && st.style.showMW) {
       const todo = unmarked();
-      if (todo.length && !confirm(`${piecesText(todo)} 还没标够 2 条 Marker 带：成图里这些膜条上的行没有分子量刻度。\n仍然继续？（以后可以回到第 4 步补标）`)) return;
+      if (todo.length && !confirm(L(`${piecesText(todo)} 还没标够 2 条 Marker 带：成图里这些膜条上的行没有分子量刻度。\n仍然继续？（以后可以回到第 4 步补标）`,
+        `Fewer than 2 marker bands are marked on ${piecesText(todo)}: the rows on ${todo.length > 1 ? 'these strips' : 'this strip'} get no MW ticks in the figure.\nContinue anyway? (You can come back to step 4 later.)`))) return;
     }
     if (n === 2) {
       const b = App.blot(App.viewBlot) || st.blots[0], pcs = App.mode === 'pieces' ? G.View.piecesEnd(true) : null;
       // a membrane whose pieces were not looked at yet: that one first
       const more = pcUnseen();
-      if (more) { applyPieces(b, pcs, false, () => { startPieces(more); renderPieces(); updateCoach(); toast(`${App.blotName(b)} 的膜条好了，再看 ${App.blotName(more)} 的`, 3200); }); return; }
+      if (more) {
+        applyPieces(b, pcs, false, () => {
+          startPieces(more); renderPieces(); updateCoach();
+          toast(L(`${App.blotName(b)} 的膜条好了，再看 ${App.blotName(more)} 的`, `The strips of ${App.blotName(b)} are done; now ${App.blotName(more)}`), 3200);
+        });
+        return;
+      }
       if (App.mode === 'pieces') App.setMode(null);
       applyPieces(b, pcs, false, () => {
-        App.busy(true, '找每个蛋白的条带…');
+        App.busy(true, L('找每个蛋白的条带…', 'Finding the bands of each protein…'));
         setTimeout(() => {
           const had = st.rows.length;
           App.makeBoxes();
@@ -1386,7 +1535,9 @@
           if (!had) App.viewBlot = st.blots[0].id;          // (the boxes from the first membrane on)
           App.commit(); G.View.fitFull(); goTo('secRows');
           const n3 = st.rows.filter(r => !r.hidden).length;
-          toast(had ? '膜条已更新，框都留在原处' : n3 ? `找到 ${n3} 个蛋白，右边就是成图。点框检查，好了点"下一步"` : '没找到蛋白条带：点"+ 添加一个蛋白框"自己框', 4200);
+          toast(had ? L('膜条已更新，框都留在原处', 'Strips updated; the boxes stayed where they were')
+            : n3 ? L(`找到 ${n3} 个蛋白，右边就是成图。点框检查，好了点"下一步"`, `Found ${pl(n3, 'protein')}; the figure is on the right. Click a box to check it, then click "Next"`)
+            : L('没找到蛋白条带：点"+ 添加一个蛋白框"自己框', 'No protein bands found: click "+ Add a protein box" and draw one yourself'), 4200);
         }, 20);
       });
       return;
@@ -1405,7 +1556,11 @@
       if (i) i.focus();
     }, 300);
   };
-  $('skip4').onclick = () => { S().style.showMW = false; toast('这次不标分子量：成图不显示分子量刻度（第 5 步"更多版式"里可以再打开）', 3600); nextStep(4); };
+  $('skip4').onclick = () => {
+    S().style.showMW = false;
+    toast(L('这次不标分子量：成图不显示分子量刻度（第 5 步"更多版式"里可以再打开）', 'No molecular weights this time: the figure shows no MW ticks (turn them on again under "More layout" in step 5)'), 3600);
+    nextStep(4);
+  };
   // a done step's header opens it again
   Object.entries(STEP_SEC).forEach(([n, id]) => $(id).querySelector('.sec-head').addEventListener('click', () => { if (S() && +n <= S().step && +n !== App.curStep) openStep(+n); }));
 
@@ -1414,31 +1569,53 @@
     const st = S(), n = App.curStep || st.step, vis = st.rows.filter(r => !r.hidden), fl = App.figLanes();
     let msg, ok = false;
     coachAct = null;
-    if (n === 1) { msg = `第 1 步：确认每张膜的 <b>Marker 图</b>（左边标 ★ 的那张），对了就点"下一步"`; coachAct = () => flash('next1'); }
-    else if (n === 2) {
-      const many = st.blots.length > 1 ? `（${esc(App.blotName(App.blot(App.viewBlot)))}${pcUnseen() ? '，看完再看下一张膜' : ''}）` : '';
-      msg = `第 2 步：看<b>蓝框</b>是不是刚好框住每条膜${many}，不对就在图上拖动修改；对了点"下一步"`; coachAct = () => flash('next2');
-    }
-    else if (n === 3) {
-      if (!vis.length) { msg = '第 3 步：没找到蛋白条带，<b>点这里</b>再到膜上点一下放一个框'; coachAct = () => App.setMode('addrow'); }
-      else { msg = `第 3 步：检查每个<b>蛋白框</b>（点框选中，拖边角改大小，泳道线拖到泳道中心），好了点"下一步"`; coachAct = () => flash('next3'); }
+    if (n === 1) {
+      msg = L('第 1 步：确认每张膜的 <b>Marker 图</b>（左边标 ★ 的那张），对了就点"下一步"', 'Step 1: check the <b>marker picture</b> of each membrane (the one marked ★ on the left), then click "Next"');
+      coachAct = () => flash('next1');
+    } else if (n === 2) {
+      const bn = st.blots.length > 1 && esc(App.blotName(App.blot(App.viewBlot)));
+      const many = bn ? L(`（${bn}${pcUnseen() ? '，看完再看下一张膜' : ''}）`, ` (${bn}${pcUnseen() ? ', then the next membrane' : ''})`) : '';
+      msg = L(`第 2 步：看<b>蓝框</b>是不是刚好框住每条膜${many}，不对就在图上拖动修改；对了点"下一步"`,
+        `Step 2: check that the <b>blue boxes</b> just enclose each strip${many}; drag on the picture to fix them, then click "Next"`);
+      coachAct = () => flash('next2');
+    } else if (n === 3) {
+      if (!vis.length) { msg = L('第 3 步：没找到蛋白条带，<b>点这里</b>再到膜上点一下放一个框', 'Step 3: no protein bands found. <b>Click here</b>, then click on the membrane to place a box'); coachAct = () => App.setMode('addrow'); }
+      else {
+        msg = L('第 3 步：检查每个<b>蛋白框</b>（点框选中，拖边角改大小，泳道线拖到泳道中心），好了点"下一步"',
+          'Step 3: check each <b>protein box</b> (click to select, drag its edges to resize, drag lane lines to the lane centres), then click "Next"');
+        coachAct = () => flash('next3');
+      }
     } else if (n === 4) {
       const todo = unmarked();
       const noLad = st.blots.find(b => !b.ladderId);
-      if (noLad) { msg = '第 4 步：先在左边<b>选你用的 Marker 型号</b>（只需选一次）'; coachAct = () => { const s = document.querySelector(`.mk-blot[data-blot="${noLad.id}"] .ladder-sel`); if (s) { s.focus(); flash(s); } }; }
-      else if (todo.length) { msg = `第 4 步：在 Marker 图上<b>点 Marker 条带</b>，选分子量（还没标够 2 条：${esc(piecesText(todo))}）`; coachAct = () => startMarks(todo[0].b, todo[0].pc); }
-      else { msg = '第 4 步：每条膜条都标好了，点"下一步"'; coachAct = () => flash('next4'); }
+      if (noLad) {
+        msg = L('第 4 步：先在左边<b>选你用的 Marker 型号</b>（只需选一次）', 'Step 4: first <b>choose your ladder</b> on the left (only once)');
+        coachAct = () => { const s = document.querySelector(`.mk-blot[data-blot="${noLad.id}"] .ladder-sel`); if (s) { s.focus(); flash(s); } };
+      } else if (todo.length) {
+        msg = L(`第 4 步：在 Marker 图上<b>点 Marker 条带</b>，选分子量（还没标够 2 条：${esc(piecesText(todo))}）`,
+          `Step 4: <b>click the marker bands</b> on the marker picture and pick their sizes (fewer than 2 so far: ${esc(piecesText(todo))})`);
+        coachAct = () => startMarks(todo[0].b, todo[0].pc);
+      } else { msg = L('第 4 步：每条膜条都标好了，点"下一步"', 'Step 4: every strip is marked; click "Next"'); coachAct = () => flash('next4'); }
     } else {
       const unnamedRows = vis.filter(r => !r.name), unnamedLanes = fl.filter(j => !st.lanes[j - 1].name);
       const sat = vis.filter(r => { const e = App.rowExpo(r).find(x => x.id === r.img); return e && e.satFrac > 0.002; });
-      if (unnamedRows.length) { msg = `第 5 步：<b>输入蛋白名</b>（还差 ${unnamedRows.length} 行，回车跳下一个）`; coachAct = () => { const i = $('nameList').querySelector(`.name-item[data-id="${unnamedRows[0].id}"] input`); if (i) i.focus(); else openEd('rowname', unnamedRows[0].id); }; }
-      else if (unnamedLanes.length) { msg = `第 5 步：<b>输入泳道名</b>（成图上方灰色数字，还差 ${unnamedLanes.length} 条）`; coachAct = () => openEd('lane', unnamedLanes[0]); }
-      else if (sat.length) { msg = `「${esc(sat[0].name)}」所选曝光有过曝：<b>点这里</b>换一张更短的曝光`; coachAct = () => { openStep(3); selectRow(sat[0].id, true); }; }
-      else { msg = '可以导出了 —— 右上角<b>导出 PNG</b>；补充材料用"未裁切原图"'; ok = true; coachAct = () => flash('btnPNG'); }
+      if (unnamedRows.length) {
+        msg = L(`第 5 步：<b>输入蛋白名</b>（还差 ${unnamedRows.length} 行，回车跳下一个）`, `Step 5: <b>type the protein names</b> (${unnamedRows.length} to go; Enter jumps to the next)`);
+        coachAct = () => { const i = $('nameList').querySelector(`.name-item[data-id="${unnamedRows[0].id}"] input`); if (i) i.focus(); else openEd('rowname', unnamedRows[0].id); };
+      } else if (unnamedLanes.length) {
+        msg = L(`第 5 步：<b>输入泳道名</b>（成图上方灰色数字，还差 ${unnamedLanes.length} 条）`, `Step 5: <b>type the lane names</b> (the grey numbers above the figure; ${unnamedLanes.length} to go)`);
+        coachAct = () => openEd('lane', unnamedLanes[0]);
+      } else if (sat.length) {
+        msg = L(`「${esc(sat[0].name)}」所选曝光有过曝：<b>点这里</b>换一张更短的曝光`, `The exposure chosen for "${esc(sat[0].name)}" is saturated: <b>click here</b> to pick a shorter one`);
+        coachAct = () => { openStep(3); selectRow(sat[0].id, true); };
+      } else {
+        msg = L('可以导出了 —— 右上角<b>导出 PNG</b>；补充材料用"未裁切原图"', 'Ready to export: <b>Export PNG</b> at the top right; for the supplement, "Uncropped originals"');
+        ok = true; coachAct = () => flash('btnPNG');
+      }
     }
     $('coachText').innerHTML = msg + (coachAct && !ok ? ' <span class="coach-go">→</span>' : '');
     $('coach').classList.toggle('done', ok); $('coach').classList.toggle('act', !!coachAct);
-    $('imgCount').textContent = `${App.images.size} 张图 · 添加`;
+    $('imgCount').textContent = L(`${App.images.size} 张图 · 添加`, `${pl(App.images.size, 'picture')} · add`);
   }
   $('coach').addEventListener('click', () => { if (coachAct) coachAct(); });
   // the steps' look: open / done / waiting; the figure's placeholder until there are boxes
@@ -1451,7 +1628,7 @@
     });
     // (a membrane added later goes through the steps again: the figure there is already stays)
     $('figEmpty').classList.toggle('hidden', !!st.rows.length);
-    $('feSub').textContent = '按左边的步骤走，第 3 步之后成图出现在这里';
+    $('feSub').textContent = L('按左边的步骤走，第 3 步之后成图出现在这里', 'Follow the steps on the left; the figure appears here after step 3');
     $('feSteps').querySelectorAll('li').forEach(li => { const s = +li.dataset.s; li.classList.toggle('done', s < cur); li.classList.toggle('cur', s === cur); });
   }
 
@@ -1464,7 +1641,7 @@
       c.style.left = Math.max(12, r.left + r.width / 2 - 150) + 'px'; c.style.top = (r.top + 90) + 'px';
     });
   }
-  $('tourOk').onclick = () => { $('tour').classList.add('hidden'); try { localStorage.setItem('blotfig.tour', '1'); } catch (e) { /* storage off */ } };
+  $('tourOk').onclick = () => { $('tour').classList.add('hidden'); G.PrefStorage.setItem('blotfig.tour', '1'); };
   $('btnTourAgain').onclick = () => { $('helpDlg').classList.add('hidden'); if (S()) showTour(); };
 
   function syncLayout() {
@@ -1478,7 +1655,7 @@
     $('laneNumbers').checked = !!y.laneNumbers; $('groupTicks').checked = !!y.groupTicks;
     $('mwSide').value = y.mwSide || 'left'; $('nameSide').value = y.nameSide || 'right';
     $('dpiTop').value = String(y.dpi);
-    $('stLayout').textContent = `${y.mmPerLane} mm/泳道 · ${y.fontPt} pt`;
+    $('stLayout').textContent = L(`${y.mmPerLane} mm/泳道 · ${y.fontPt} pt`, `${y.mmPerLane} mm/lane · ${y.fontPt} pt`);
     $('btnUndo').disabled = App.hist.length < 2; $('btnRedo').disabled = !App.future.length;
     updateDpiLine();
   }
@@ -1512,7 +1689,7 @@
       G.View.fitFull();               // (the membrane view drew before the step was known)
       // (a project saved in step 2 or 4: back in that step's mode)
       if (App.curStep === 2 || App.curStep === 4) setTimeout(() => openStep(App.curStep), 0);
-      let seen = true; try { seen = !!localStorage.getItem('blotfig.tour'); } catch (e) { /* storage off */ }
+      const seen = !!G.PrefStorage.getItem('blotfig.tour');
       const dev = qs.get('demo') || qs.get('srcdir') || qs.get('demomove');     // (scripted runs: only with &tour=1)
       if (!seen && (!dev || qs.get('tour'))) setTimeout(showTour, 400);
     }
@@ -1567,7 +1744,7 @@
       y0 += heights[k];
     });
     c.toBlob(bl => G.Export.download(bl, 'uncropped_originals.png'), 'image/png');
-    toast(`已导出未裁切原图（${pages.length} 张）`);
+    toast(L(`已导出未裁切原图（${pages.length} 张）`, `Exported the uncropped originals (${pl(pages.length, 'picture')})`));
   }
   function exportQuant() {
     const st = S(), C = App.columns(), fl = C.vis;
@@ -1591,11 +1768,11 @@
     lines.push([]); lines.push(['Volumes = sum of (pixel - local background) over the band, on the exposure shown in the figure. SAT = saturated pixels: do not quantify.']);
     const csv = lines.map(l => l.map(v => /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v).join(',')).join('\r\n');
     G.Export.download(new Blob(['﻿' + csv], { type: 'text/csv' }), 'blot_quantification.csv');
-    toast('已导出定量 CSV（用于参考；正式定量请用 ≥3 次独立实验）', 3600);
+    toast(L('已导出定量 CSV（用于参考；正式定量请用 ≥3 次独立实验）', 'Exported the densitometry CSV (for reference; quantify from ≥3 independent experiments)'), 3600);
   }
 
   G.UI = { toast, editRowName, openEd, markPicker, openStep, nextStep, lastFig: () => lastFig, preflight,
-    piecesChanged: () => { $('stPieces').textContent = '改过了：点"下一步"生效'; } };
+    piecesChanged: () => { $('stPieces').textContent = L('改过了：点"下一步"生效', 'Changed: click "Next" to apply'); } };
 
   const qs = new URLSearchParams(location.search);
   const scripted = !!(qs.get('demo') === '1' || qs.get('srcdir') || qs.get('demomove'));
@@ -1606,15 +1783,28 @@
     const d = await App.peekDraft();
     if (!d || S()) return;
     const s = d.summary || {};
-    $('draftName').textContent = `${s.images || '?'} 张图 · ${s.membranes || '?'} 张膜${s.rows ? ` · ${s.rows} 个蛋白` : ''}${s.names && s.names.length ? '（' + s.names.join('、') + '）' : ''}`;
-    $('draftTime').textContent = '保存于 ' + new Date(d.savedAt).toLocaleString('zh-CN');
+    const ni = s.images || '?', nb = s.membranes || '?', names = s.names && s.names.length ? s.names : null;
+    $('draftName').textContent = L(`${ni} 张图 · ${nb} 张膜${s.rows ? ` · ${s.rows} 个蛋白` : ''}${names ? '（' + names.join('、') + '）' : ''}`,
+      `${pl(ni, 'picture')} · ${pl(nb, 'membrane')}${s.rows ? ` · ${pl(s.rows, 'protein')}` : ''}${names ? ' (' + names.join(', ') + ')' : ''}`);
+    $('draftTime').textContent = L('保存于 ', 'Saved ') + new Date(d.savedAt).toLocaleString(G.I18N && G.I18N.lang === 'en' ? 'en' : 'zh-CN');
     $('draftBox').classList.remove('hidden');
   }
   $('btnDraftRestore').onclick = async () => {
-    try { await App.restoreDraft(); toast('已恢复上次的进度'); } catch (e) { alert('恢复失败：' + e.message); }
+    try { await App.restoreDraft(); toast(L('已恢复上次的进度', 'Restored your last session')); } catch (e) { alert(L('恢复失败：', 'Could not restore: ') + e.message); }
   };
   $('btnDraftDrop').onclick = async () => { await App.dropDraft(); $('draftBox').classList.add('hidden'); };
   offerDraft();
+
+  /* ---------- storage blocked or full (as GelFigure): editing goes on, a note says what is not kept ---------- */
+  function storageNotice() {
+    document.querySelectorAll('.storage-note').forEach(el => el.classList.toggle('hidden', G.PrefStorage.persistent));
+  }
+  window.addEventListener('blotfigure-storage-unavailable', storageNotice);
+  G.PrefStorage.getItem('blotfig.lang');       // (a blocked storage shows on the first read)
+  storageNotice();
+  // opened as the downloaded file: the offline download is what is open already
+  if (location.protocol === 'file:') $('offlineDownload').hidden = true;
+  $('helpVersion').textContent = 'BlotFigure ' + App.VERSION;
 
   /* ---------- dev params ---------- */
   if (scripted) setTimeout(async () => {
@@ -1705,7 +1895,7 @@
     const hold = (el, to, opt) => { const a = ctr(el); fire('mousedown', a, el, opt); fire('mousemove', [(a[0] + to[0]) / 2, (a[1] + to[1]) / 2], null, opt); fire('mousemove', to, null, opt); };
     const pull = (el, to, opt) => { hold(el, to, opt); fire('mouseup', to, null, opt); fire('click', to, el, opt); };
     const onPiece = l => vis().find(r => r.segs.some(s => letter(s.piece) === l));
-    const L = () => lastFig.laneW * prevScale;
+    const laneW = () => lastFig.laneW * prevScale;
     if (scen === 'stitch') {
       snap('start');
       App.splitRow(S().rows[0]); App.commit(); snap('split');
@@ -1725,16 +1915,16 @@
       pull(imgOf(low.id), [ctr(imgOf(low.id))[0], top.top - 4]); order('last to top');
       // piece C a column right — both of its rows follow (one is hidden) — and back; with Alt only one box
       const cr = onPiece('C'), cp = cr.segs[0].piece;
-      let el = imgOf(cr.id, cp), a = ctr(el); pull(el, [a[0] + 1.3 * L(), a[1]]); snap('C +1');
-      el = imgOf(cr.id, cp); a = ctr(el); pull(el, [a[0] - 1.3 * L(), a[1]]); snap('C -1');
-      el = imgOf(cr.id, cp); a = ctr(el); pull(el, [a[0] + 2.3 * L(), a[1]], { altKey: true }); snap('C box +2 (Alt)');
+      let el = imgOf(cr.id, cp), a = ctr(el); pull(el, [a[0] + 1.3 * laneW(), a[1]]); snap('C +1');
+      el = imgOf(cr.id, cp); a = ctr(el); pull(el, [a[0] - 1.3 * laneW(), a[1]]); snap('C -1');
+      el = imgOf(cr.id, cp); a = ctr(el); pull(el, [a[0] + 2.3 * laneW(), a[1]], { altKey: true }); snap('C box +2 (Alt)');
       App.undo(); snap('undo');
       // D two columns left: at column 1 already — nothing moves, no other row is pushed aside; C three columns
       // left: as far as column 1 (two)
       S().lanes[0].name = 'L1'; App.commit();
       const dr = onPiece('D'), dp = dr.segs[0].piece;
-      el = imgOf(dr.id, dp); a = ctr(el); pull(el, [a[0] - 2.3 * L(), a[1]]); order('D -2'); log.push('names ' + S().lanes.map(l => l.name || '.').join(','));
-      const c3 = onPiece('C'); el = imgOf(c3.id, c3.segs[0].piece); a = ctr(el); pull(el, [a[0] - 3.3 * L(), a[1]]); order('C -3');
+      el = imgOf(dr.id, dp); a = ctr(el); pull(el, [a[0] - 2.3 * laneW(), a[1]]); order('D -2'); log.push('names ' + S().lanes.map(l => l.name || '.').join(','));
+      const c3 = onPiece('C'); el = imgOf(c3.id, c3.segs[0].piece); a = ctr(el); pull(el, [a[0] - 3.3 * laneW(), a[1]]); order('C -3');
       App.undo(); App.undo(); order('undo x2');
       // C's row dropped on D's: refused (stacked); the first row to the bottom by its tag
       el = imgOf(onPiece('C').id); const dRect = imgOf(onPiece('D').id).getBoundingClientRect();
@@ -1858,11 +2048,11 @@
       const pull = (a, b2, opt) => { ev('mousedown', a, opt); ev('mousemove', [(a[0] + b2[0]) / 2, (a[1] + b2[1]) / 2], opt); ev('mousemove', b2, opt); ev('mouseup', b2, opt); };
       const geo = tag => snap(`${tag} box=${Math.round(sg.x0)}..${Math.round(sg.x1)} h=${Math.round(row.above)}+${Math.round(row.below)} vc=${Math.round(sg.vc)}`);
       geo('start');
-      let pr = G.View.probe(row, sg); const L = App.segPitch(sg) * pr.scale;
-      pull(pr.handles.e, [pr.handles.e[0] - 2.2 * L, pr.handles.e[1]]); geo('e -2 lanes');
-      pr = G.View.probe(row, sg); pull(pr.handles.e, [pr.handles.e[0] + 2.2 * L, pr.handles.e[1]]); geo('e +2 lanes');
-      pr = G.View.probe(row, sg); pull(pr.handles.nw, [pr.handles.nw[0] + 1.2 * L, pr.handles.nw[1] - 15]); geo('nw corner');
-      pr = G.View.probe(row, sg); pull(pr.lanes[0], [pr.lanes[0][0] + 0.2 * L, pr.lanes[0][1]]); geo('lane 0 dragged');
+      let pr = G.View.probe(row, sg); const lp = App.segPitch(sg) * pr.scale;
+      pull(pr.handles.e, [pr.handles.e[0] - 2.2 * lp, pr.handles.e[1]]); geo('e -2 lanes');
+      pr = G.View.probe(row, sg); pull(pr.handles.e, [pr.handles.e[0] + 2.2 * lp, pr.handles.e[1]]); geo('e +2 lanes');
+      pr = G.View.probe(row, sg); pull(pr.handles.nw, [pr.handles.nw[0] + 1.2 * lp, pr.handles.nw[1] - 15]); geo('nw corner');
+      pr = G.View.probe(row, sg); pull(pr.lanes[0], [pr.lanes[0][0] + 0.2 * lp, pr.lanes[0][1]]); geo('lane 0 dragged');
       pr = G.View.probe(row, sg); const mid = [(pr.lanes[0][0] + pr.lanes[1][0]) / 2, pr.lanes[0][1]];
       ev('mousedown', mid); ev('mouseup', mid); ev('dblclick', mid); geo('dblclick add');
       $('editorBox').dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true })); geo('Delete lane');
@@ -1874,7 +2064,7 @@
       App.selRow = top.id; App.emit('select');
       pr = G.View.probe(top, ts);
       App.setMode('addrow');
-      pull([pr.handles.sw[0] + 0.1 * L, pr.handles.sw[1] + 25], [pr.handles.se[0] - 0.1 * L, pr.handles.se[1] + 70]);
+      pull([pr.handles.sw[0] + 0.1 * lp, pr.handles.sw[1] + 25], [pr.handles.se[0] - 0.1 * lp, pr.handles.se[1] + 70]);
       geo('drawn box');
     }
     if (scen === 'marks') {
@@ -1909,7 +2099,7 @@
       log.push(`start | ${states()} | ${$('stMarker').textContent} | ${coach()}`);
       const lsel = $('markerPanel').querySelector('.ladder-sel');
       lsel.value = 'pr26619'; lsel.dispatchEvent(new Event('change', { bubbles: true }));
-      let saved = null; try { saved = localStorage.getItem('blotfig.ladder'); } catch (e) { /* storage off */ }
+      const saved = G.PrefStorage.getItem('blotfig.ladder');
       log.push(`ladder | blot ${B().ladderId} pref ${App.prefLadder} saved ${saved} | ${coach()}`);
       $('markerPanel').querySelector(`.mk-chip[data-pc="${pcId}"]`).click();
       log.push(`chip ${P().letter} | mode ${App.mode} step ${App.curStep} focus ${App.markFocus === pcId} white ${App.viewImg === B().marker} zoom ${G.View.probeScale().toFixed(2)} | ${shown()}`);
@@ -1989,12 +2179,12 @@
       row = App.row(App.selRow); sg = row.segs[0];
       log.push(`moved down | ${segS(sg)} | on D: ${sg.piece === D.id} figure ${img(row, sg)}`);
       // 3. the last lane dragged right by 40 px: the lanes between spread evenly; Alt: that lane alone
-      pr = G.View.probe(row, sg); let L = pr.lanes[pr.lanes.length - 1];
-      pull(L, [L[0] + 40 * pr.scale, L[1]]);
+      pr = G.View.probe(row, sg); let lastLn = pr.lanes[pr.lanes.length - 1];
+      pull(lastLn, [lastLn[0] + 40 * pr.scale, lastLn[1]]);
       row = App.row(App.selRow); sg = row.segs[0];
       log.push(`last lane +40 | ${segS(sg)}`);
-      pr = G.View.probe(row, sg); L = pr.lanes[pr.lanes.length - 1];
-      pull(L, [L[0] + 40 * pr.scale, L[1]], { altKey: true });
+      pr = G.View.probe(row, sg); lastLn = pr.lanes[pr.lanes.length - 1];
+      pull(lastLn, [lastLn[0] + 40 * pr.scale, lastLn[1]], { altKey: true });
       row = App.row(App.selRow); sg = row.segs[0];
       log.push(`last lane +40 Alt | ${segS(sg)}`);
       App.evenEnds(row, sg, sg.lanes.length + 1); App.snapBox(sg); App.commit(); sg = App.row(App.selRow).segs[0];
@@ -2090,7 +2280,7 @@
       hold(el, [ctr(el)[0], a.top + a.height / 2]);
     } else if (pose === 'align') {
       const r = onPiece('C'), el = imgOf(r.id, r.segs[0].piece), a = ctr(el);
-      hold(el, [a[0] + 1.3 * L(), a[1]]);
+      hold(el, [a[0] + 1.3 * laneW(), a[1]]);
     } else if (pose === 'order') {
       const el = imgOf(vis()[vis().length - 1].id), r1 = imgOf(vis()[1].id).getBoundingClientRect();
       hold(el, [ctr(el)[0], r1.top - 3]);

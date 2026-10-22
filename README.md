@@ -1,95 +1,214 @@
-# BlotFigure：Western blot 作图
+<div align="center">
 
-纯前端的离线工具：把一次实验的所有 WB 图片（每张膜的多个曝光 + 看得见 Marker 的图：白光图，或白光 + 化学发光的复合图）一起拖进去，按 5 步拼出一张可以投稿的 WB 图。每一步都依赖上一步，所以一步一步来：上一步确认了，下一步才在它的基础上自动识别。
+# BlotFigure
 
-- 双击 `index.html`，用 Chrome、Edge、Firefox 或 Safari 打开。不用安装，也不用联网，图片不会上传：页面的安全策略（CSP）禁止它连接任何服务器，图片不可能离开电脑。
-- 想先看效果：点"看看示例"。示例里有一张切成 3 条、拍了 3 个曝光的膜，加上另一张斜着放的膜。
+**Turn the raw pictures of a Western blot experiment into a publication-ready figure — in your browser, offline.**
 
-## 自动完成的部分
+[**Download the single HTML file**](https://github.com/poplarity/BlotFigure/releases/download/v0.8.0/BlotFigure-v0.8.0.html) · [Use online](https://poplarity.github.io/BlotFigure/) · [中文说明](README.zh-CN.md)
 
-| 步骤 | 做法 |
+[![CI](https://github.com/poplarity/BlotFigure/actions/workflows/ci.yml/badge.svg)](https://github.com/poplarity/BlotFigure/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![No install](https://img.shields.io/badge/install-none-brightgreen)
+![Images stay local](https://img.shields.io/badge/images-never%20uploaded-brightgreen)
+
+</div>
+
+## Quick start
+
+**Download one file, open it in your browser, and start making your figure. No installation, ZIP extraction or GitHub account is needed.**
+
+1. **[Download BlotFigure-v0.8.0.html](https://github.com/poplarity/BlotFigure/releases/download/v0.8.0/BlotFigure-v0.8.0.html)** (about 690 KB). Save it to your Desktop or Downloads folder.
+2. **Double-click the downloaded file.** It opens in your browser. If a text editor opens instead, right-click → **Open with** → Firefox, Chrome, Edge or Safari.
+3. **Drop in all pictures of one experiment**: every exposure of each membrane plus a picture that shows the marker (the white-light picture, or white light merged with chemiluminescence). Then follow the 5 steps on the left and choose **Export PNG**.
+
+That one HTML file is the complete tool. Keep it on your computer or send the same file to a colleague. Once downloaded, it works without an internet connection.
+
+**Get the right file:** choose the release attachment named **BlotFigure-v0.8.0.html**, not the repository's **index.html**, **Source code (zip)** or **Source code (tar.gz)**. If you reach the [release page](https://github.com/poplarity/BlotFigure/releases/latest), expand **Assets** and click the file ending in **.html**.
+
+**Keep your work:** use **File → Save project** (Ctrl+S) before closing. Your **.blotfig** file contains all the pictures and every adjustment; reopen it in BlotFigure to continue, on any computer.
+
+**Prefer the website?** [Open BlotFigure online](https://poplarity.github.io/BlotFigure/). Try **Try the example** first: a membrane cut into three strips with three exposures, and a second membrane lying askew.
+
+Need help? See [the download and opening guide](docs/getting-started.md) or press **?** inside the app.
+
+<img src="docs/screenshot-en.png" alt="BlotFigure: the steps on the left, the membrane in the middle, the finished figure on the right" width="900">
+
+Drop in everything the imager saved for one experiment. BlotFigure tells exposures from marker pictures, groups the pictures by membrane (also when the membrane was moved between captures), finds the strips of a cut membrane and their tilt, makes one box per protein, picks the best exposure for every row (no saturation, enough signal), and lays the rows out as one figure with lane names, molecular-weight ticks and protein names. You confirm each step, mark the ladder bands with a few clicks and type the names. Everything happens in the browser; **nothing is uploaded, nothing is installed**.
+
+<p align="center"><img src="docs/example-figure.png" alt="Example output" width="520"></p>
+
+## Contents
+
+- [Features](#features)
+- [Quick start](#quick-start)
+- [The five steps](#the-five-steps)
+- [Versions](#versions)
+- [Privacy](#privacy)
+- [Supported input](#supported-input)
+- [What is detected automatically](#what-is-detected-automatically)
+- [Exports](#exports)
+- [Image integrity](#image-integrity)
+- [Built-in ladders](#built-in-ladders)
+- [Browser support](#browser-support)
+- [Known limitations](#known-limitations)
+- [Development](#development)
+- [Contributing](#contributing) · [Citing](#citing) · [Acknowledgements](#acknowledgements) · [License](#license)
+
+## Features
+
+- **A whole experiment at once**: all exposures of all membranes and their white-light pictures in one drop; each picture is sorted by kind (exposure / marker picture) and by membrane.
+- **Cut and tilted membranes**: the strips of a cut membrane are found on the marker picture with their own angle; boxes level themselves along their bands and can be turned by hand to a tenth of a degree.
+- **Membranes moved between captures** (substrate added, strips lifted and put back) are recognised as one membrane and aligned, as a whole or strip by strip, and can be adjusted by hand.
+- **The best exposure per row**: every protein row gets its own exposure (no saturated pixels in the band, enough signal, clean background), with a side-by-side comparison of all exposures and saturated pixels in red.
+- **Boxes you can put anywhere**: resize, move, tilt; the figure shows exactly what a box covers. Lanes as in GelFigure: drag the first and last lane onto their lanes and the others spread evenly.
+- **Arrange by mouse**: drag rows up and down to set their order, left and right to line up the lanes of cut strips; one protein across two strips joins into one row.
+- **Marker by hand, in a few clicks**: choose the ladder once (40 prestained ladders with their reference bands), click two bands per strip, and the remaining sizes appear where they are expected.
+- **Edit on the figure**: click a lane or protein name and type, Enter jumps to the next; group lines, +/− condition rows, target-band arrows with estimated sizes, side brackets for IP / Input groups or (Ub)n smears, `*` / `#` / `†` marks.
+- **Flexible labels**: group labels wrap, shrink or stay on one line; every label can have its own font size; protein names and molecular weights can each go on the left or right.
+- **Pre-flight check before export**: unnamed rows, saturated exposures, tiny fonts, effective resolution below 300 dpi, a figure wider than a double column, with one-click fixes.
+- **Reproducible**: project files with every picture's SHA-256, a processing log, the uncropped originals for the supplement, reusable style files, and an autosaved draft that survives a page reload.
+- **Bilingual interface**: English and Chinese, switchable at any time. Figures are always in English.
+
+## The five steps
+
+The panel on the left opens one step at a time; look, fix what needs fixing, and click **Next**. Finished steps fold to a summary and can be opened again; the top bar always says what to do now.
+
+1. **Marker picture** — each membrane needs one picture that shows the marker. The guess is marked ★; if it is wrong, click "Use as marker picture" under the right one.
+2. **Strips** — the blue boxes are the strips found on the marker picture. Move, resize, rotate, draw or delete them right on the picture.
+3. **Protein boxes** — one box per protein, and the figure appears on the right. Resize, move or tilt a box; drag the leftmost and rightmost lane lines onto the lanes; add a box for a protein that was missed.
+4. **Marker** — choose your ladder and click its bands on the marker picture (they snap); two marks per strip give every row its molecular weight.
+5. **Names, lanes and export** — protein and lane names (on the figure or pasted as a row), annotations, layout; then **Export PNG**, TIFF or SVG.
+
+## Versions
+
+The current version is **0.8.0**: an English interface, the single-file offline download and tests in three browser engines. 0.7.0 brought everything from GelFigure 0.6.5 a blot figure needs (file menu with drafts and style files, pre-flight check, PNG / TIFF metadata, processing log, journal widths, side brackets). See the [changelog](CHANGELOG.md).
+
+## Privacy
+
+BlotFigure is a static web page with no backend. Pictures are decoded and processed by JavaScript in your browser, and results are saved by your browser's own download mechanism.
+
+The page carries a [Content Security Policy](index.html) that **forbids it from connecting to any other server** (it may only load its own files), so this is enforced by the browser, not just promised. The only data kept on your computer are preferences, custom ladders and the autosaved draft in the browser's local storage.
+
+## Supported input
+
+| Format | Notes |
 |---|---|
-| 区分曝光图和 Marker 图 | 先看文件名（Chemi / ECL / 曝光 → 曝光图；Marker / White / Light / Color / 白光 → 白光图；Merge / Overlay / Composite / 复合 / 叠加 / 合并 → 复合图，也当 Marker 图）；文件名看不出时看图：白光图是一大片亮的膜放在暗的托盘上，曝光图大部分是背景、只有条带亮。16 位文件常只用了很小一段灰度，先按图自己的范围拉伸再判断。第 1 步里每张膜标出它的"★ Marker 图"，由你确认；不对就点对的那张下面的"设为 Marker 图"（白光图、复合图、甚至看得见 Marker 的曝光图都可以） |
-| 曝光时间 | 从文件名读取，比如 `_30s`、`_2min`、`500ms`。读不到时，按图像亮度比例估算 |
-| 归到哪张膜 | 曝光图之间做相关性比对，Marker 图按膜的轮廓匹配 |
-| 拍摄之间膜挪动过 | 同一张膜两次拍摄之间常会挪动（补底物、膜条拿起来又放回去），图里膜的位置就不一样。白光图在平移、旋转之后能对上的（膜条各自放回去的，每条膜条分别对得上也算），认作同一张膜（也包括后来再添加的图）。每张图都对齐到大多数图所在的位置：白光图按膜的边缘和 Ladder 对齐；曝光图按条带两两对齐（每张和最像它的那张比），再落到同一次拍摄的白光图的位置上；膜条各自放回去的，每条膜条单独对齐。成图、换曝光、定量都用对齐后的图；未裁切原图用拍摄的原图。只有曝光图、没有白光图的不会自动并成一张膜（不同的膜做同样的蛋白，条带也一样） |
-| 切开的膜条和斜放的膜 | 从确认的 Marker 图里分割出每一条膜条，并测出各自的角度。没有 Marker 图时，按信号区域分别校正角度。第 2 步只显示膜条（还不生成蛋白框），你看过、需要时直接在图上改好，再点"下一步" |
-| 条带行（蛋白框） | 第 2 步确认膜条之后才生成。每个蛋白一行，双带（如 p-ERK1/2）算作同一行。并排的膜条只有在条带高度、强度都相当时才拼成一行，避免把一条膜上的弱杂带拼进另一条膜的主带。很弱的行默认隐藏，在第 3 步的列表里可以打开（● / ◌）。每个框生成后按框里的条带自动摆正：条带和膜条不完全水平时，框会转一个小角度（各道条带中心的稳健斜率，至少 3 道清楚的条带，0.15°–6° 之间才转） |
-| 每行选哪个曝光（自动标记最佳条带） | 每行单独评分，不需要知道曝光时间。优先选条带内没有过曝、信号足够、背景干净的一张；只有每张都过曝时才退而选过曝最少的。推荐的那张标 ★ |
-| 曝光对比 | 点某一行（或它的曝光标签），会展开该行在每张曝光里的样子，从弱到强排列。过曝像素标红，并标"过曝 / 偏弱 / 太弱"，★ 为推荐。点一张就换用它，"改用推荐"可以换回来。展开左侧的图片时，缩略图上的彩色圆点表示哪些行用了这张曝光 |
-| Ladder 型号和 kDa | **不自动读**：Marker 的情况太多（缺带、变浅、被切、复合图里条带发亮），自动读出的刻度删改起来比自己标还费事。第 4 步在 Marker 图上点 Marker 带、选分子量：点的位置自动吸附到附近的条带上（白光图里的深色带，复合图里的亮带都算）；标第 2 条时推荐型号里的下一个大小；每条膜条标满 2 条后，型号里其余大小的位置才用虚线提示出来，点一下就加上——开始时什么都不猜。kDa 刻度画在你标的位置，行的分子量在相邻刻度之间插值。Marker 型号（40 种预染 Marker，与 GelFigure 同一份按厂家资料核对过的列表，含各厂家的参考带）选一次就记住，其他还没选的膜也用它，以后新载入的膜默认用它；标的时候右上角显示它的官方条带示意 |
-| 泳道 | 每个蛋白一个框，每个框有自己的泳道（框里的竖线）。开始时按整张膜各行的条带定出泳道，框只框住成图要用的那几道（膜条边上多出来的杂斑不算）。"框内重新识别"只看框里的像素：泳道间距取膜上各行一致的间距，框里的条带比这个间距还宽时才改用框自己的；噪点、一条带的两个边缘都不会被认成多出来的泳道。泳道之间没有条带的空位也算一道，Marker 白光图上 Ladder 所在的那一道标 M |
-| 泳道放在成图第几列 | 先自动猜：膜条放回原位、泳道和 Ladder 位置都对得上时，按位置对齐；同一个蛋白跨两条并排的膜条时，右边那个框接着左边编号；其余从第 1 列开始。框上方的数字就是每一道在成图里的列，猜错了点 ‹ › 挪：‹ 最多挪到第 1 列，不会把其他行往右推；左边空出来、没有任何框用的列自动去掉 |
-| 对比度 | 每张图整体做一次线性调整，背景保留浅灰。拉伸上限按像素噪声定，不会把拖尾当成噪声而把强带压成灰色。选中一行时，膜图上方的"暗部 / 亮部"只调这一行（也是整块线性调整，图注会说明）；点"改整张图"则改这张图的所有行 |
+| TIFF (8 / 16 / 32-bit grayscale, or RGB) | Recommended: the 16-bit TIFFs chemiluminescence imagers export. Uncompressed, LZW, Deflate and PackBits; little- and big-endian. RGB pictures (e.g. a merged marker picture) are read as gray. |
+| PNG / JPG / BMP | Read as 8-bit by the browser; a note suggests the raw 16-bit TIFF instead (saturation is hard to judge in 8 bits). |
+| `.blotfig` | BlotFigure project file. |
 
-## 需要你操作的部分
+Exposures are recognised by their file names (`Chemi`, `ECL`, `_30s`, `2min` …) or, failing that, by the picture itself; marker pictures by names such as `Marker`, `White`, `Merge`, `Overlay`, or by a large bright membrane on a dark tray.
 
-左侧一次只展开一步，看过、需要就改，再点"下一步"；顶栏写着这一步做什么（点它直接跳过去）。做完的步骤收成一行摘要，前面变成绿色的 ✓，点它可以回去改（回到后面的步骤点"继续这一步 →"）：
+## What is detected automatically
 
-1. **确认 Marker 图**：每张膜标着"★ Marker 图"的那张是猜的，不对就点对的那张下面的"设为 Marker 图"。类型认错了、分错了膜时在图片的 ⋯ 里改。
-2. **检查膜条**：中间的 Marker 图上，蓝框是找到的膜条，要刚好框住每一条膜。不对就在图上改：拖动移动，拖边、角改大小，拖上方的 ↻ 旋转，在空白处拖出一条新的，选中后 Delete 删掉（方向键微调、[ ] 转 0.1°）。这一步还没有蛋白框。
-3. **调整蛋白框**：按确认的膜条生成每个蛋白的框，右边出现成图。点框选中，拖边、角改大小，拖框内部移动，拖上方的 ↻（或按 [ ]、用"倾斜 − +"）微调角度；泳道线没对准就把最左、最右两条拖到泳道中心。缺了蛋白就点"+ 添加一个蛋白框"，再到膜上点一下，框就放在点的地方（和其他框一样大，也可以按住拖出任意大小）。
-4. **标 Marker**：选你用的 Marker 型号（只需一次），在 Marker 图上点 Marker 带、选分子量，每条膜条 2 条以上。不需要分子量就点"这次不标分子量"。
-5. **名称、泳道与导出**：填蛋白名（回车跳下一个）、泳道名（成图上点灰色数字，或一次粘贴一整行），需要的话选分子量刻度、蛋白名放左边还是右边，然后导出。
+| Step | How |
+|---|---|
+| Exposure or marker picture | File name first; otherwise the picture: a white-light picture is a large bright membrane on a dark tray, an exposure is mostly background with bright bands. 16-bit files that use a small part of the range are stretched first. |
+| Exposure time | Read from the file name (`_30s`, `_2min`, `500ms`). Without that information, pictures are compared by signal quality; the actual exposure time remains unknown. |
+| Membrane | Exposures are grouped by correlation, marker pictures by the outline of the membrane. |
+| Membrane moved between captures | White-light pictures that match after a shift and rotation (as a whole, or strip by strip) are taken as one membrane; every picture is aligned to the position most of them share. Exposures alone are never merged automatically (different membranes probed for the same protein look alike). |
+| Strips | Segmented on the confirmed marker picture, each with its angle; without one, from the signal regions. |
+| Protein rows | One row per protein (a doublet such as p-ERK1/2 is one row); strips side by side join only when the bands match in height and strength. Each box levels itself along its bands (robust slope over at least 3 clear lanes). |
+| Best exposure per row | Scored per row without needing exposure times: no saturation inside the band, enough signal, clean background; a saturated exposure is used only when there is no suitable unsaturated one, prioritising the least clipping. |
+| Lanes | Every box has its own lanes, read from the membrane's lane spacing and the box's own pixels; noise and the two edges of one band never count as extra lanes; empty slots between lanes still count. |
+| Figure columns | Strips put back in place line up by position; a protein across two strips continues the left box's numbering; the rest start at column 1. |
+| Contrast | One linear adjustment per picture, background kept light grey; the white point is set from the pixel noise, so a smear never pushes strong bands to grey. Per-row levels are possible and stated in the legend. |
+| Molecular weights | **Not read automatically** (missing, faint or cut marker bands make a wrong automatic scale harder to fix than marking by hand): you click marker bands, which snap; after two marks per strip the other sizes are shown where they are expected. Row sizes are interpolated between neighbouring ticks. |
 
-第一次打开会有一个三栏的简短引导（"?" 里可以再看一遍）。
+## Exports
 
-"文件"菜单（和 GelFigure 一样）：
+| Export | Content |
+|---|---|
+| PNG | Rendered at the chosen dpi (300 / 600 / 1200). Includes `pHYs` (resolution), `sRGB` and an embedded processing summary (`iTXt`, UTF-8). |
+| TIFF | 8-bit grayscale, LZW, with resolution tags and the processing summary. For journals that accept only TIFF. |
+| SVG | Vector text and lines; edit in Illustrator or Inkscape. |
+| Uncropped originals | Every exposure and marker picture used, as taken (not aligned or rotated), with each box, its lanes' figure columns and the protein names drawn where the bands really are. For the supplementary information. |
+| Processing log (JSON) | Each source's SHA-256, alignment, every row's boxes, lanes, exposure, levels and tilt, all layout parameters, legend notes. |
+| Densitometry (CSV) | Band volumes minus local background on the exposure shown, normalised to the loading control on the same membrane; saturated values flagged `SAT`. |
+| Legend text | Suggested legend notes: membranes, inversion, ladder, exposure of every row, cut lanes, symbols. |
 
-- **保存项目 / 打开项目**：Ctrl+S 把全部图片和所有调整存成一个 .blotfig 文件（gzip 压缩，14 张 16 位 TIFF 约 16 MB），下次接着做，换电脑也行。打开时按每张图的 SHA-256 指纹核对，文件损坏会提示。关闭页面前没保存会提醒。
-- **自动草稿**：每次改动后约 1 秒，图片和进度自动存在浏览器里（每张图只存一次）。页面意外关掉、刷新后，开始页会显示"上次有未完成的图"，点"恢复"接着做。
-- **保存样式 / 载入样式**：泳道名、分组、条件行、蛋白名顺序、Marker 型号和版式存成一个小 .json；下一张同类的图一键套用（泳道、蛋白数不同时先问一句，按顺序对应）。
-- **回到刚导入时**：膜条、框、名字、刻度、标注全部回到载入图片后的样子，Ctrl+Z 可以撤销（打开的项目、恢复的草稿也回到当初导入时，而不是打开时）。
-- **新建**：清空，换一组图片。
+The **Layout** section shows the **effective resolution** of the bands themselves (picture pixels per lane ÷ printed lane width). If it is below 300 dpi, BlotFigure tells you the widest lane that keeps 300 dpi and offers to apply it. The total figure width can be set directly to a journal column (85 / 120 / 180 mm).
 
-需要时：
+## Image integrity
 
-- **框的范围不合适**（第 3 步）：在中间膜图上点框选中这一行，拖框的四条边或四个角自由缩放：框里的泳道留在原处，框的左右边拖过的地方按同样的间距补上泳道（拖过第 1 列时左边自动补列），拖回来就去掉；松手后框贴齐泳道（框里是什么，成图里就是什么）。拖框内部移动整个框，可以拖到任何位置，包括别的膜条上（框就归那条膜条，分子量按它的 Marker 算）；按住 Shift 只上下移动这一行在各条膜条上的框。框不受膜条边界限制，框住哪里，成图就显示哪里。改完框会在框里重新找条带（算分子量、挑曝光用）。
-- **泳道对不上**（和 GelFigure 一样的"首尾泳道等间距"）：把框里最左、最右两条泳道线拖到泳道中心，中间的泳道会均匀排开（按住 Alt 只动这一条）；条数不对就在第 3 步的列表里点这一行展开，改泳道数后点"首尾对齐"。边缘条带被切掉一部分时，把最外侧的泳道线往外拖，泳道整体加宽。框上方数字是每一道在成图里的列（M = Marker 道，× = 不用，点数字在三者之间切换）。多认了一道：点那根竖线，按 Delete；漏了：双击框内加一道，或把框边拖过去；选中框后 ←→ 平移全部泳道、Alt+←→ 调间距。整个框都不对：点"框内重新识别"（只看框里的像素）；"在膜上放大"（或膜图上方的"选中行"）把膜图放大到这一行的框。列号错位：点 ‹ ›（最左到第 1 列；要让这一行比其他行更靠左，就把其他行往右挪）。
-- **框歪了**（条带和膜条不完全水平）：框生成时已经按条带自动摆正过；还不正就拖框上方的 ↻（拖得越远转得越多，按框的半宽当杠杆，方便转零点几度），或选中后按 [ ]（0.1°，Shift 1°），或在展开的行里点"倾斜 − +"；"按条带摆正"重新自动摆，"归零"回到和膜条一样的角度。
-- **漏掉的蛋白**：点"+ 添加一个蛋白框"，鼠标移到膜上会看到一个虚线框跟着走，点一下就放在那里（和这条膜条上其他框一样大）；也可以按住拖出任意大小。成图里就是框住的部分，按框里的泳道间距等分成几道，再把最左、最右两条泳道线拖到泳道中心即可。
-- **膜条认错了**（两条合成一条、切歪了、漏了一条）：点第 2 步"检查膜条"回去改，点"下一步"生效。按调整后的膜条重新读条带，已经调好的框都留在原处；"恢复自动"回到自动识别。
-- **调整成图里各行的上下顺序**：发表的组图常按需要的顺序排，不一定按分子量。在右侧成图上按住一行的条带上下拖，蓝线是要放的位置；也可以拖成图左边的膜条标签，或第 3 步列表里每行前面的标签；选中一行后 Alt+↑↓ 一次挪一位。
-- **左右对齐泳道**：每条膜条是一个模块（自己的角度、泳道、Marker）。膜剪开过、上样顺序错开时（比如膜条 A 的第 4–6 道要对准膜条 B 的第 1–3 道），在成图上把这条膜条的一行左右拖，按列吸附：这条膜条上的各行一起动（它们共用同一套泳道），按住 Alt 只挪这一个框。最左到第 1 列为止，不会把别的行往右推；左边空出来的列自动去掉，泳道名、条件和分组跟着挪。（框的左边拖过第 1 列、多出泳道时，左边才自动补列。）
-- **一个蛋白跨两条膜条**（膜从中间竖着剪开，两半没有放回原位）：并排、条带高度相当的会自动并成一行。没有的话，在成图上把一行拖到另一行上，出现虚线框时松开，两个框按左右顺序接成连续的列，接缝处自动留白；左边的框增减泳道时，右边的框跟着挪。"拆开"可以撤回。上下叠放、泳道相同的膜条（不同的蛋白）不能并进同一行，同一条膜条上的两个蛋白也不行。
-- **膜的位置没对齐**：对齐过的图在缩略图上标"已对齐"（其他图对齐到的那张标"基准"），⋯ 菜单里写着它旋转、平移了多少。不准的话点"手动对齐…"：膜图上显示拍摄的原图和这张膜的框、膜条虚线，拖动图片让条带落进框里，Shift+拖动或 [ ] 旋转（Shift 加大步长），方向键微调，"完成"结束；"自动对齐"重新算，"不对齐"按原样使用。认错成同一张膜的，用"移到"把图移到另一张膜或新的一张膜（会对齐到那张膜上）。
-- **标 Marker**（第 4 步，也就是"特定条带大小的标记"）：先选 Marker 型号；左侧列出它的官方大小（橙色 = 彩色 / 加粗的参考带），膜图右上角是它的条带示意（按 log 分子量排开，✓ = 这条膜条已标的）。点某条膜条的小标签直接放大到它。在 Marker 图上点一条 Marker 带，选它的分子量（按型号列出，推荐的高亮，回车即选；也可以输入任意值）；点的位置自动吸附到最近的条带，按住 Alt 不吸附。标满 2 条后，其余大小的位置用虚线提示，点一下就加上。拖刻度对准条带；点刻度上的数字改分子量或删除；选中后 ↑↓ 微调、Delete 删除；右键或中键拖动平移。每条膜条单独标，有 2 条刻度就能算出各行分子量，成图只画这些刻度。以后重新分析（比如改图片类型）标过的刻度都保持不变；"清除这张膜的刻度"全部去掉重来。
-- **图片类型认错了**（白光图当成了曝光图等）：回到第 1 步，在图片右上角的 ⋯ 里改类型。已经调好的框、行的顺序和名字都保持不变；膜条上的字母也不变。只有第 3 步的"全部重新识别"才按膜条从头识别所有行。
-- **给某条带标分子量（目标条带）**：第 5 步"标注"里点"目标条带"，再在右侧成图上点那条带：箭头吸附到最近的条带，按这一行膜条上标的 Marker 算出分子量（超出标过的范围时标 ≈）。点箭头打开设置：加名称（显示成"名称 (52 kDa)"）、关掉分子量、换成 * # †（* 常用来标非特异条带，图注提示里会加一句说明）、放到左边或右边、删除。箭头跟着条带走：之后再挪框、转框，它仍指着那条带；删掉这一行时箭头一起删（Ctrl+Z 一起回来）。
-  目标条带的大小也可以填理论值（如 55 kDa），代替估算值；在成图上上下拖动箭头，可以移到这一行的另一条带（松手吸附）。
-- **IP / Input 分组、泛素化拖尾（行旁括号，和 GelFigure 一样）**：第 5 步"标注"里点"行旁括号"，在成图上沿着行上下拖：盖住几行就是一组（IP: Flag 的两行、Input 的三行），在一行里拖一段就标出这一段（(Ub)n 拖尾）；在一行上点一下盖住整行。两端靠近行边时自动对齐（Alt 不吸附）。默认放在蛋白名的另一边，在刻度、箭头、蛋白名的外侧；上下相邻的组共用一列，互相重叠的才往外错开。点括号改文字（↵ 换行）、换边、单独设字号或删除；行换了顺序，括号跟着它两端的行走，删掉一端的行括号也一起删（Ctrl+Z 一起回来）。
-- **成图上的文字**：点泳道名、蛋白名、分组、条件直接改；编辑框下面的小条可以单独调这一项的字号（A− / A+ / 默认），分组文字可以换行（↵ 或 Shift+Enter）。`*斜体*` 用两个星号夹住（如 `*p*-ERK`）；单个的 *（如 `WT*`、`K48R*`）照原样显示。
-- **分子量刻度、蛋白名放在哪边**：第 5 步"版式"里分别选左边或右边；放在同一边时，蛋白名在刻度外侧。
-- **成图大小**：每泳道宽度直接填，或在"按期刊栏宽"里选单栏 85 / 1.5 栏 120 / 双栏 180 mm，按成图总宽（含标签）反推每泳道宽度。下面一行显示条带本身的有效分辨率：低于 300 dpi（每道太宽，原图像素不够）时提示每道最宽多少，并可以一键改过去。
-- **更多版式**：字号和线宽；泳道名、蛋白名、分子量各自的字号（留空跟随字号）；泳道名角度（自动时放得下就水平，放不下转 45° 或 90°）；行距；分组文字放不下时自动换行（默认，按实际文字宽度排开，分组之间永不重叠，挤不下的升到上一层）、缩小字号（不小于设的最小字号）或保持一行；白底黑带、分子量刻度、kDa 标题、条带加边框、泳道编号（在泳道名下面）、分组线端点、面板字母。"重置版式"回到默认（Ctrl+Z 可撤销）。
+BlotFigure follows common journal image policies (e.g. Nature, JBC, PLOS; see Rossner & Yamada, *J Cell Biol* 2004, "What's in a picture?"):
 
-## 内置的期刊规范检查
+- Only **linear** adjustments, whole-picture by default; a row adjusted on its own is stated in the legend notes.
+- **One picture per row**: exposures or membranes are never spliced within a row. Lanes cut from the figure are cut from every row and leave a visible gap; neighbouring columns that are not neighbours on the membrane are separated too.
+- **Saturated** exposures are flagged and never chosen while an unsaturated one has enough signal; the loading control should be on the same membrane, and the tool checks it.
+- Every export carries a processing summary; the uncropped originals and the processing log are there for the supplement and for reviewers.
 
-- 一行只取自一张图，不会在一行内拼接不同曝光或不同的膜。
-- 剪掉的泳道在所有行同步剪掉，并留白分隔；成图里相邻两列只要在膜上不相邻（中间去掉了 Marker 道、或来自不同膜条），就留白分隔。
-- 内参不在同一张膜上、选用的曝光有过曝、没有 Marker 图，都会提示。
-- 自动生成图注文字：注明不同膜、反色、Ladder 型号和各行的曝光时间。
-- "未裁切原图"导出：每张用到的曝光图和 Marker 图（拍摄的原图，不做对齐或旋转），都标出每个框、框里每一道对应的成图列号（没用上的标 X，Marker 道标 M）和蛋白名，框画在条带在这张原图里的实际位置。
-- 灰度定量 CSV：用成图中所选的曝光，计算条带体积减去局部背景，归一化到同一张膜上的内参，过曝的值会标 SAT。
-- **导出前检查**（和 GelFigure 一样，导出菜单里可以关掉）：导出 PNG / TIFF / SVG 前列出要处理的问题（行没有名字、所选曝光过曝、字号小于 5 pt、线太细、超过双栏宽度、文字重叠、内参不在同一张膜……），能一键改的带按钮（"改用推荐曝光""全部至少 6 pt"），需要回去改的带跳转按钮；只有提示时直接导出。
-- **导出文件自带信息**：PNG 写入分辨率（dpi）、sRGB 和一段处理摘要（工具版本、用到的原图及其 SHA-256、每行的曝光、亮度范围和倾斜、条带有效分辨率、图注说明）；TIFF 为 LZW 压缩的 8 位灰度，带分辨率；"处理日志 JSON"记录每张原图的 SHA-256 指纹、对齐、每行的框与泳道、曝光和全部参数，便于审稿时说明图是怎么做出来的。
-- 读图时按文件内容判断格式（不看扩展名）；8 位图片（动态范围低，过曝不好判断）会提示，建议用成像仪导出的 16 位 TIFF。
+BlotFigure helps you comply, but **you remain responsible** for following your journal's policy.
 
-## 目录
+## Built-in ladders
+
+**40 prestained protein ladders** (kDa, apparent molecular weights): Bio-Rad Precision Plus (Dual Color, All Blue, Kaleidoscope, Dual Xtra) · Thermo / Invitrogen (PageRuler, PageRuler Plus, Spectra, Novex Sharp, SeeBlue Plus2, MagicMark XP) · NEB · Abcam · GenScript · Amersham · LI-COR · Yeasen · Epizyme · Beyotime · TransGen · Solarbio · Sangon · Tiangen · Vazyme. The list shares its sizes and reference bands with GelFigure; [`docs/ladders.md`](docs/ladders.md) lists each with its catalogue number. Prestained sizes are calibrated in a Tris-glycine system and shift with gel percentage and buffer, so a size read from one is an estimate; the legend says "apparent molecular weights".
+
+Any other ladder can be added as a custom ladder in step 4. To add a ladder for everyone, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Browser support
+
+Current Chrome, Edge, Firefox and Safari 16.4+ on Windows, macOS and Linux, with a mouse (there is no phone layout). The test suite runs in Chromium, Firefox and WebKit on every change.
+
+When the downloaded HTML is opened directly from disk, some browsers disable IndexedDB for local files; everything works except the autosaved draft. Use the online version or "Save project" if you need it.
+
+## Known limitations
+
+- Detection has been developed on real chemiluminescence blots and on synthetic membranes. If detection fails on your pictures, please [open an issue](https://github.com/poplarity/BlotFigure/issues/new/choose) (only with pictures you may share).
+- Densitometry is for orientation; quantify on at least three independent experiments with a dedicated tool for publication.
+- Bio-Rad `.scn` / `.1sc` and other proprietary formats must be exported to TIFF first. BigTIFF and palette TIFFs are not supported. 16-bit PNGs are read as 8-bit by browsers.
+- No phone or tablet layout yet.
+
+If the page looks like plain text and unstyled buttons, its stylesheet has not loaded. Reload with Ctrl+Shift+R (Command+Shift+R on macOS). For offline use, download the **single-file HTML** from [Releases](https://github.com/poplarity/BlotFigure/releases/latest), or extract the **whole ZIP** and keep `css/` and `js/` beside `index.html`.
+
+## Development
+
+This section is for contributors editing the source. To use BlotFigure, follow the single-file download steps above.
+
+No build step and no dependencies: the app is plain HTML, CSS and JavaScript loaded with ordinary `<script>` tags, so it also runs from `file://`.
+
 ```
-index.html        页面
-js/wbengine.js    WB 分析算法：分类、归膜、膜条、条带行、泳道、框内识别泳道与条带、Ladder 拟合、曝光选择、图与图的对齐
-js/wbladders.js   预染 Marker 库（40 种，与 GelFigure 同一份，已按厂家资料核对）
-js/wbapp.js       状态、撤销、项目文件与自动草稿、同一张膜各张图的对齐、行与框、框里的泳道、框的倾斜、手动 Marker、曝光逻辑、规范检查与导出前检查、处理日志、样式文件
-js/wbrender.js    排版成 SVG（刻度、箭头、蛋白名、行旁括号的左右位置，分组文字换行与分层）
-js/wbview.js      中间的膜图交互（膜条调整、框的缩放移动旋转、泳道竖线、点一下添加框、标 Marker、手动对齐）
-js/wbui.js        5 步面板与引导、成图上直接编辑与拖动排列、导出
-js/wbdemo.js      合成示例膜
-js/tiff.js engine.js   与 GelFigure 共用
-js/export.js      导出（PNG 的 dpi / sRGB / 文字信息块、LZW TIFF），移植自 GelFigure 0.6.5，去掉了凝胶专用部分
-test/engine.html  算法自测（合成膜，带真值对照；含膜条错位摆放的情形）
-test/boxlanes.html  框内识别泳道自测（15 种合成框：间距错一半、空泳道、Marker 空位、纯噪点、弱带、双峰带、框太宽……）
-test/register.html  对齐自测（合成膜平移/旋转后找回；整张膜挪动后一条膜条又单独挪动；另一张膜不能对上；接真实图片时还测膜条各自挪动）
-test/ladderlane.html  Marker 道识别自测（白光图里样品条带发黑、Marker 带变浅时，对照曝光图仍找到 Marker 道）
-test/classify.html  曝光图 / 白光图自动区分自测（原样，以及压到 1/4、1/10 灰度范围时）
+index.html          the page
+css/style.css       styles
+js/storage.js       optional preferences with in-memory fallback
+js/i18n.js          interface language (L('中文', 'English') pairs)
+js/tiff.js          TIFF decoder                 js/engine.js     shared image helpers (from GelFigure)
+js/wbengine.js      blot analysis: kinds, membranes, strips, rows, lanes, ladder fit, exposures, registration
+js/wbladders.js     prestained ladder library    js/wbdemo.js     synthetic demo membranes
+js/wbapp.js         state, undo, projects, drafts, alignment, rows and boxes, checks, processing log
+js/wbrender.js      figure layout (SVG)          js/export.js     PNG / TIFF / SVG export
+js/wbview.js        the membrane view            js/wbui.js       steps panel, editing on the figure
+test/*.html         engine self-tests on synthetic membranes
+tests/run.mjs       runs everything in Chromium, Firefox and WebKit
+scripts/            single-file build, release notes
 ```
+
+Run the tests:
+
+```bash
+npm install
+npx playwright install chromium firefox webkit
+npm test                      # all three engines
+npm test -- --browser=chromium
+npm run build                 # dist/BlotFigure.html, the single file
+```
+
+[DEVELOP.md](DEVELOP.md) (in Chinese) lists the debugging URL parameters, the test pages and the data model.
+
+## Contributing
+
+Bug reports, blot pictures that break detection (only if you are allowed to share them), new ladders, translations and code are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Citing
+
+If BlotFigure helped with a publication, please cite it; see [CITATION.cff](CITATION.cff) or use GitHub's "Cite this repository" button.
+
+## Acknowledgements
+
+BlotFigure is designed and developed by [poplarity](https://github.com/poplarity). It is the sibling of [GelFigure](https://github.com/poplarity/GelFigure), whose TIFF decoder, export code and ladder list it shares.
+
+Development is supported by API tokens provided by **Zhao Bowen** ([@zhober](https://github.com/zhober)).
+
+## License
+
+[MIT](LICENSE)

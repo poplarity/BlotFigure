@@ -1,0 +1,31 @@
+name: Release
+
+# Publish the single HTML for users, plus an optional folder ZIP.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build offline downloads
+        run: |
+          mkdir -p dist/BlotFigure
+          cp -r index.html css js test tests scripts docs package.json package-lock.json LICENSE README.md README.zh-CN.md CHANGELOG.md CONTRIBUTING.md CITATION.cff SECURITY.md DEVELOP.md dist/BlotFigure/
+          node scripts/bundle-onefile.mjs   # writes dist/BlotFigure.html
+          node scripts/release-notes.mjs "$GITHUB_REF_NAME"
+          cd dist && zip -r "BlotFigure-${GITHUB_REF_NAME}.zip" BlotFigure
+          cp BlotFigure.html "BlotFigure-${GITHUB_REF_NAME}.html"
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "dist/BlotFigure-${GITHUB_REF_NAME}.html" "dist/BlotFigure-${GITHUB_REF_NAME}.zip" --title "BlotFigure $GITHUB_REF_NAME" --notes-file dist/release-notes.md

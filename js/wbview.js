@@ -16,6 +16,7 @@
 (function (G) {
   'use strict';
   const App = G.BApp, WB = G.WB;
+  const L = G.L || (zh => zh);
   const cv = document.getElementById('editor'), box = document.getElementById('editorBox'), ctx = cv.getContext('2d');
   const view = { s: 1, ox: 0, oy: 0 };
   let dpr = 1, drag = null, hover = null, spaceDown = false, fitted = null;
@@ -88,9 +89,9 @@
     if (pts.length) {
       const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
       // (marking: room on the right for the ladder's reference card)
-      const L = 56, R = App.mode === 'marks' ? 170 : App.mode === 'pieces' ? 40 : 165, T = App.mode ? 64 : 36, B = 24;
-      view.s = Math.min((r.width - L - R) / (x1 - x0), (r.height - T - B) / (y1 - y0), 3);
-      view.ox = L + (r.width - L - R - (x1 - x0) * view.s) / 2 - x0 * view.s;
+      const LM = 56, R = App.mode === 'marks' ? 170 : App.mode === 'pieces' ? 40 : 165, T = App.mode ? 64 : 36, B = 24;
+      view.s = Math.min((r.width - LM - R) / (x1 - x0), (r.height - T - B) / (y1 - y0), 3);
+      view.ox = LM + (r.width - LM - R - (x1 - x0) * view.s) / 2 - x0 * view.s;
       view.oy = T + (r.height - T - B - (y1 - y0) * view.s) / 2 - y0 * view.s;
     } else {
       view.s = Math.min((r.width - 2 * pad) / rec.img.w, (r.height - 2 * pad - 14) / rec.img.h);
@@ -169,7 +170,7 @@
     const w = ctx.measureText(txt).width + 12;
     return { a, c, txt, pill: { x: a.x - 6 - w, y: a.y - 8, w, h: 16 } };
   }
-  const segDist = (px, py, a, c) => { const dx = c.x - a.x, dy = c.y - a.y, L = dx * dx + dy * dy || 1, t = Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / L)); return Math.hypot(px - a.x - t * dx, py - a.y - t * dy); };
+  const segDist = (px, py, a, c) => { const dx = c.x - a.x, dy = c.y - a.y, len2 = dx * dx + dy * dy || 1, t = Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / len2)); return Math.hypot(px - a.x - t * dx, py - a.y - t * dy); };
   // the mark selected while marking ({pc: id, i: index in pc.marks}), if it still exists
   const selMark = b => { const s = App.selMark, pc = s && App.piece(b, s.pc); return pc && pc.marks && pc.marks[s.i] ? { pc, m: pc.marks[s.i] } : null; };
 
@@ -239,7 +240,7 @@
       if (last && (!row.hidden || sel) && !marking && !pcsEd) {
         const p = toScr(last[0], last[1]);
         const on = App.images.get(row.img), ex = on ? App.expoLabel(on) : '';
-        const txt = `${App.rowLabel(row).replace(/ 行$/, '')} · ${on ? (row.img === App.bestSeen(row) ? '★ ' : '') + (ex.length > 10 ? ex.slice(0, 9) + '…' : ex) : ''}`;
+        const txt = `${App.rowLabel(row).replace(L(/ 行$/, / row$/), '')} · ${on ? (row.img === App.bestSeen(row) ? '★ ' : '') + (ex.length > 10 ? ex.slice(0, 9) + '…' : ex) : ''}`;
         ctx.font = `600 11px ${FONT}`; ctx.textAlign = 'left';
         const tw = ctx.measureText(txt).width + 12;
         ctx.fillStyle = col; roundRect(p.x + 6, p.y - 1, tw, 18, 6); ctx.fill();
@@ -276,7 +277,7 @@
         ctx.fillStyle = 'rgba(47,111,235,.10)'; line(pts, true); ctx.fill();
         ctx.strokeStyle = '#2f6feb'; ctx.lineWidth = 1.6; ctx.setLineDash([5, 4]); line(pts, true); ctx.stroke(); ctx.setLineDash([]);
         const t = toScr(...WB.toImg(g.F, g.u1, g.v0));
-        ctx.fillStyle = '#2f6feb'; ctx.font = `600 11px ${FONT}`; ctx.textAlign = 'left'; ctx.fillText('点一下放在这里', t.x + 6, t.y + 4);
+        ctx.fillStyle = '#2f6feb'; ctx.font = `600 11px ${FONT}`; ctx.textAlign = 'left'; ctx.fillText(L('点一下放在这里', 'Click to put it here'), t.x + 6, t.y + 4);
       }
     }
     document.getElementById('zoomLabel').textContent = Math.round(view.s * 100) + '%';
@@ -521,7 +522,7 @@
     if (App.mode === 'addrow') {
       // anywhere on the picture: the frame (its tilt) of the nearest piece
       const hit = App.pieceAt(b, p.x, p.y);
-      if (!hit) { G.UI.toast('这张膜还没有膜条：先回到第 2 步在图上拖出一条'); return; }
+      if (!hit) { G.UI.toast(L('这张膜还没有膜条：先回到第 2 步在图上拖出一条', 'This membrane has no strips yet: go back to step 2 and drag one out on the picture')); return; }
       drag = { h: { type: 'newbox', pc: hit.pc }, sx, sy, p0: p, moved: false, F: pFrame(hit.pc), a: [hit.u, hit.v] };
       e.preventDefault();
       return;
@@ -654,7 +655,9 @@
       App.setMode(null);
       if (row) {
         App.selRow = row.id; App.selSeg = row.segs[0].piece; App.selLane = null; App.commit();
-        G.UI.toast(`已添加一个框（${App.nSample(row.segs[0])} 道，成图里就是框住的部分）：拖边角调大小；泳道线没对准就把最左、最右两条拖到泳道中心`, 4600);
+        const n = App.nSample(row.segs[0]);
+        G.UI.toast(L(`已添加一个框（${n} 道，成图里就是框住的部分）：拖边角调大小；泳道线没对准就把最左、最右两条拖到泳道中心`,
+          `Box added (${n} lane${n === 1 ? '' : 's'}; the figure shows what it frames): drag its edges or corners to resize it; if the lane lines are off, drag the leftmost and rightmost ones onto the lane centres`), 4600);
       } else draw();
       return;
     }
@@ -662,7 +665,7 @@
     if (/^pc/.test(d.h.type)) { if (pedit) pieceDrop(d); draw(); if (G.UI.piecesChanged) G.UI.piecesChanged(); return; }
     if (d.h.type === 'pan' && !d.moved && !d.button) { App.selRow = null; App.selSeg = null; App.selLane = null; App.selMark = null; App.emit('select'); }
     if (d.h.type === 'mark') {
-      if (d.moved || d.added) { App.commit(); if (d.added && !d.moved) G.UI.toast(`已加 ${fmtK(d.mark.kda)} kDa 刻度（对准了吗？不对就拖一下）`); }
+      if (d.moved || d.added) { App.commit(); if (d.added && !d.moved) G.UI.toast(L(`已加 ${fmtK(d.mark.kda)} kDa 刻度（对准了吗？不对就拖一下）`, `${fmtK(d.mark.kda)} kDa tick added (on the band? If not, drag it)`)); }
       else if (d.mark) G.UI.markPicker(App.blot(App.viewBlot), d.h.pc, d.mark, e.clientX, e.clientY, false, d.was);
     }
     if (d.h.row && d.moved) {
@@ -674,7 +677,7 @@
       });
       if (d.h.type === 'resize' && (d.h.k.includes('n') || d.h.k.includes('s'))) row.segs.forEach(t => App.findBand(row, t));
       // moved onto another piece: the box belongs to it now
-      if (d.h.type === 'move') { const np = App.rehomeSeg(row, d.h.sg); if (np) { App.selSeg = d.h.sg.piece; G.UI.toast(`这个框移到了膜条 ${np.letter} 上（分子量按膜条 ${np.letter} 的 Marker 算）`); } }
+      if (d.h.type === 'move') { const np = App.rehomeSeg(row, d.h.sg); if (np) { App.selSeg = d.h.sg.piece; G.UI.toast(L(`这个框移到了膜条 ${np.letter} 上（分子量按膜条 ${np.letter} 的 Marker 算）`, `This box is now on strip ${np.letter} (molecular weights from strip ${np.letter}'s marker)`)); } }
       App.commit();
     }
     cv.style.cursor = cursorFor(hover);
@@ -689,10 +692,10 @@
       const pc = App.piece(b, sg.piece); if (!pc || sg.x0 == null) continue;
       const bx = segBox(row, sg, pc), [u, v] = WB.toFrame(bx.F, p.x, p.y), tol = 6 / view.s;
       if (u < bx.x0 - tol || u > bx.x1 + tol || v < bx.vTop || v > bx.vBot) continue;
-      if (sg.lanes.some(l => Math.abs(l.u - u) < App.segPitch(sg) * 0.3)) { G.UI.toast('这里已经有一道：拖动它可以微调，选中后按 Delete 删除'); return; }
+      if (sg.lanes.some(l => Math.abs(l.u - u) < App.segPitch(sg) * 0.3)) { G.UI.toast(L('这里已经有一道：拖动它可以微调，选中后按 Delete 删除', 'There is a lane here already: drag it to fine-tune; select it and press Delete to remove it')); return; }
       const i = App.editLanes(row, sg, () => App.addLane(row, sg, u));
       App.selSeg = sg.piece; App.selLane = i; App.commit();
-      G.UI.toast('已加一道：拖动竖线微调，选中后按 Delete 删除');
+      G.UI.toast(L('已加一道：拖动竖线微调，选中后按 Delete 删除', 'Lane added: drag its line to fine-tune; select it and press Delete to remove it'));
       return;
     }
   });
@@ -738,7 +741,7 @@
       const b = App.blot(App.viewBlot), s = b && selMark(b);
       if (!s) return;
       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { s.m.v += (e.key === 'ArrowUp' ? -1 : 1) * (e.shiftKey ? 5 : 1); App.commit(); e.preventDefault(); }
-      else if (e.key === 'Delete' || e.key === 'Backspace') { s.pc.marks.splice(App.selMark.i, 1); App.selMark = null; App.commit(); G.UI.toast('已删除这条刻度（Ctrl+Z 可撤销）'); e.preventDefault(); }
+      else if (e.key === 'Delete' || e.key === 'Backspace') { s.pc.marks.splice(App.selMark.i, 1); App.selMark = null; App.commit(); G.UI.toast(L('已删除这条刻度（Ctrl+Z 可撤销）', 'Tick deleted (Ctrl+Z to undo)')); e.preventDefault(); }
       else if (e.key === 'Enter') { const g = markGeom(s.pc, { u: s.m.u, v: s.m.v, k: s.m.kda }), R = cv.getBoundingClientRect(); G.UI.markPicker(b, s.pc, s.m, R.left + g.pill.x, R.top + g.pill.y, false); e.preventDefault(); }
       return;
     }
@@ -756,9 +759,9 @@
     if (App.selLane != null && sg.lanes[App.selLane]) {
       if (sideways) { const i = App.selLane; App.editLanes(row, sg, () => App.moveLane(sg, i, sg.lanes[i].u + d * st)); App.commit(); e.preventDefault(); return; }
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (sg.lanes.length < 2) { G.UI.toast('这个框只剩一道了：不要这一行可以在左侧删除整行'); return; }
+        if (sg.lanes.length < 2) { G.UI.toast(L('这个框只剩一道了：不要这一行可以在左侧删除整行', 'This box has only one lane left: to drop the row, delete the whole row on the left')); return; }
         const i = App.selLane; App.editLanes(row, sg, () => App.removeLane(row, sg, i)); App.selLane = null; App.commit();
-        G.UI.toast('已删除这一道（Ctrl+Z 可撤销）'); e.preventDefault(); return;
+        G.UI.toast(L('已删除这一道（Ctrl+Z 可撤销）', 'Lane deleted (Ctrl+Z to undo)')); e.preventDefault(); return;
       }
     }
     if (sideways) { App.editLanes(row, sg, () => { if (e.altKey) App.scaleLanes(sg, d * 0.5); else App.nudgeLanes(sg, d * st); }); App.commit(); e.preventDefault(); return; }
@@ -767,7 +770,7 @@
       row.segs.forEach(t => { t.vc += dv; t.b0 -= dv; t.b1 -= dv; App.findBand(row, t); });
       App.commit(); e.preventDefault();
     }
-    if (e.key === 'Delete') { App.S.rows = App.S.rows.filter(r => r !== row); App.selRow = null; App.selLane = null; App.commit(); G.UI.toast('已删除该行（Ctrl+Z 可撤销）'); e.preventDefault(); }
+    if (e.key === 'Delete') { App.S.rows = App.S.rows.filter(r => r !== row); App.selRow = null; App.selLane = null; App.commit(); G.UI.toast(L('已删除该行（Ctrl+Z 可撤销）', 'Row deleted (Ctrl+Z to undo)')); e.preventDefault(); }
   });
 
   // screen positions (canvas px) of a row's box handles and of its lanes at mid-height (tests)

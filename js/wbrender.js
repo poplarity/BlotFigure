@@ -8,6 +8,7 @@
 (function (G) {
   'use strict';
   const App = G.BApp, MM = 72 / 25.4;
+  const L = G.L || (zh => zh);
   const mctx = document.createElement('canvas').getContext('2d');
   /* *italic* runs. A star opens only before a non-space and closes only after one, never right after its opener
    * (as Markdown): the rest stay stars ("WT*", "siRNA* control", "**", "a * b") instead of vanishing.
@@ -132,7 +133,7 @@
       });
       if (P && App.selRow === row.id) els.push(`<rect x="-1" y="${f(y - 1)}" width="${f(W + 2)}" height="${f(h + 2)}" fill="none" stroke="#2f6feb" stroke-width="1.2" pointer-events="none"/>`);
       // protein name (placed once the width of the kDa scale is known)
-      const nm = row.name || (P ? '蛋白名' : '');
+      const nm = row.name || (P ? L('蛋白名', 'Protein name') : '');
       const kdaHint = App.rowKda(row);
       rowNames.push({ row, nm, y: y + h / 2, h, hint: !row.name && P && kdaHint ? `≈${Math.round(kdaHint)} kDa` : '' });
       // target-band arrows of the row, at their band (placed once the widths beside the bands are known)
@@ -162,7 +163,11 @@
           ticksOut.push(t);
         });
         // (said once the piece's marks are done — 2 of them — not while they are being set)
-        if (!kept.length && App.pieceCal(b, App.piece(b, tsg.piece))) warnings.push(`「${row.name || '膜条 ' + App.rowPieces(row).map(pc => pc.letter).join('+') + ' 的行'}」的框里没有标过的 Marker 带，旁边不画分子量刻度：在第 4 步标出这一高度附近的 Marker 带，或把框的上下边拉大`);
+        if (!kept.length && App.pieceCal(b, App.piece(b, tsg.piece))) {
+          const ls = App.rowPieces(row).map(pc => pc.letter).join('+');
+          warnings.push(L(`「${row.name || '膜条 ' + ls + ' 的行'}」的框里没有标过的 Marker 带，旁边不画分子量刻度：在第 4 步标出这一高度附近的 Marker 带，或把框的上下边拉大`,
+            `"${row.name || 'row on strip ' + ls}" has no marked marker bands in its box, so no molecular weight ticks are drawn beside it: in step 4, mark marker bands near this height, or make the box taller`));
+        }
       }
       rowBoxes.push({ id: row.id, y, h });
       y += h;
@@ -205,7 +210,8 @@
         if (nameLeft) maxLeft = Math.max(maxLeft, w); else maxRight = Math.max(maxRight, w);
         // names of neighbouring thin rows run into each other
         const nx = rowNames[i + 1];
-        if (nx && nx.nm && n.row.name && nx.row.name && nx.y - n.y < np * 1.05) overlap(`「${n.row.name}」和「${nx.row.name}」两行太窄，蛋白名会重叠：减小蛋白名字号，或加大行距、把框上下拉高`);
+        if (nx && nx.nm && n.row.name && nx.row.name && nx.y - n.y < np * 1.05) overlap(L(`「${n.row.name}」和「${nx.row.name}」两行太窄，蛋白名会重叠：减小蛋白名字号，或加大行距、把框上下拉高`,
+          `Rows "${n.row.name}" and "${nx.row.name}" are too thin, so their protein names overlap: use a smaller font size for protein names, a larger row gap or taller boxes`));
       }
       if (n.hint) {
         els.push(text(n.hint, x, n.y + np * 1.35, np * 0.8, anchor, ph));
@@ -230,7 +236,7 @@
     const base = { left: maxLeft, right: maxRight }, placedBr = { left: [], right: [] };
     brs.sort((p, q) => (p.y2 - p.y1) - (q.y2 - q.y1)).forEach(o => {
       const side = o.bk.side === 'right' ? 'right' : 'left', dir = side === 'right' ? 1 : -1, bp = o.bk.pt || pt, tk = pt * 0.45;
-      const txt = o.bk.text || (P ? '点击输入' : ''), ls = txt ? String(txt).split('\n') : [];
+      const txt = o.bk.text || (P ? L('点击输入', 'Click to type') : ''), ls = txt ? String(txt).split('\n') : [];
       const tw = Math.max(0, ...ls.map(t => measure(t, bp))), th = ls.length ? bp + (ls.length - 1) * bp * LEAD : 0;
       const ym = (o.y1 + o.y2) / 2, yy1 = Math.min(o.y1, ym - th / 2), yy2 = Math.max(o.y2, ym + th / 2);
       let off = base[side] + 3;
@@ -262,7 +268,7 @@
         const v = c.values[j - 1] || '', hit = P ? `<rect x="${f(X.get(j) - laneW * 0.45)}" y="${f(yTop - cp)}" width="${f(laneW * 0.9)}" height="${f(cp * 1.25)}" fill="transparent"/>` : '';
         if (v || P) els.push(ed(`data-edit="cond" data-r="${c.r}" data-j="${j}"`, hit + text(v || '·', X.get(j), yTop, cp, 'middle', v ? '' : ph)));
       });
-      const nm = c.name || (P ? '条件' : '');
+      const nm = c.name || (P ? L('条件', 'Condition') : '');
       if (nm) { els.push(ed(`data-edit="condname" data-r="${c.r}"`, text(nm, -st.labelGapPt * 2, yTop, cp, 'end', c.name ? '' : ph))); grow(-st.labelGapPt * 2 - measure(nm, cp), yTop - cp, 0, yTop); }
       yTop -= cp * 1.3;
     }
@@ -288,8 +294,8 @@
         }
       });
       const named = lanes.filter(j => S.lanes[j - 1].name).map(j => measure(S.lanes[j - 1].name, lp));
-      if (angle !== 0 && named.length && laneW < lp * 1.15) overlap('泳道太窄：即使 90° 泳道名也会重叠，请减小泳道名字号或加宽每道');
-      if (angle === 0 && st.labelAngle !== 'auto' && named.length && Math.max(...named) > laneW * 1.02) overlap('水平的泳道名互相重叠：改用"自动"或倾斜角度，或减小字号');
+      if (angle !== 0 && named.length && laneW < lp * 1.15) overlap(L('泳道太窄：即使 90° 泳道名也会重叠，请减小泳道名字号或加宽每道', 'Lanes are too narrow: lane names overlap even at 90°; use a smaller font size for lane names or wider lanes'));
+      if (angle === 0 && st.labelAngle !== 'auto' && named.length && Math.max(...named) > laneW * 1.02) overlap(L('水平的泳道名互相重叠：改用"自动"或倾斜角度，或减小字号', 'Horizontal lane names overlap: use "Auto" or a tilted angle, or a smaller font size'));
       yTop -= angle === 0 ? lp * 1.3 : hMax + lp * 0.35;
     }
     // kDa header aligned with the lane-label row
@@ -307,7 +313,7 @@
         const a = Math.min(g.from, g.to), b = Math.max(g.from, g.to), parts = [];
         segs.forEach(run => { const ins = run.filter(j => j >= a && j <= b); if (ins.length) parts.push([X.get(ins[0]) - half, X.get(ins[ins.length - 1]) + half]); });
         const x0 = parts[0][0], x1 = parts[parts.length - 1][1], cx = (x0 + x1) / 2;
-        const gp = g.pt || pt, txt = g.text || (P ? '点击输入' : '');
+        const gp = g.pt || pt, txt = g.text || (P ? L('点击输入', 'Click to type') : '');
         let size = gp, ls = txt ? String(txt).split('\n') : [];
         const widest = () => Math.max(0, ...ls.map(t => measure(t, size)));
         const room = Math.max(x1 - x0, gp * 2);

@@ -3,6 +3,7 @@
  * wbapp / wbui). */
 (function (G) {
   'use strict';
+  const L = G.L || (zh => zh);
 
   function download(blob, name) {
     const a = document.createElement('a');
@@ -67,7 +68,7 @@
         URL.revokeObjectURL(url);
         resolve(c);
       };
-      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('SVG 栅格化失败')); };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error(L('SVG 栅格化失败', 'Could not rasterise the SVG'))); };
       img.src = url;
     });
   }

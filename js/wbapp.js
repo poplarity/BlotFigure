@@ -14,6 +14,7 @@
 (function (G) {
   'use strict';
   const WB = G.WB;
+  const L = G.L || (zh => zh);
   const MM = 72 / 25.4;
   let uidN = 1;
   const uid = p => p + (uidN++).toString(36) + Math.random().toString(36).slice(2, 5);
@@ -29,8 +30,8 @@
   }
 
   const App = { images: new Map(), analysis: {}, S: null, hist: [], future: [], listeners: [], selRow: null, selSeg: null, selLane: null, viewBlot: null, viewImg: null, mode: null };
-  App.VERSION = '0.7.0';
-  try { App.prefLadder = localStorage.getItem('blotfig.ladder') || null; } catch (e) { App.prefLadder = null; }
+  App.VERSION = '0.8.0';
+  App.prefLadder = G.PrefStorage.getItem('blotfig.ladder') || null;
 
   /* ---------- file fingerprints (as GelFigure): every picture's SHA-256, in the project, the processing log and
    * the exports' summary ---------- */
@@ -145,11 +146,11 @@
     }
     return s.length > 14 ? s.slice(0, 13) + '…' : s;
   };
-  App.blotName = b => b.name || `膜 ${App.S.blots.indexOf(b) + 1}`;
+  App.blotName = b => b.name || `${L('膜', 'Membrane')} ${App.S.blots.indexOf(b) + 1}`;
   // in what leaves the app (uncropped images, CSV, the processing log): English unless the user named it
   App.blotNameEn = b => b.name || `Membrane ${App.S.blots.indexOf(b) + 1}`;
-  App.pieceName = (b, pc) => (App.S.blots.length > 1 ? App.blotName(b) + ' · ' : '') + '膜条 ' + (pc.letter || '?');
-  App.rowLabel = row => { const k = App.rowKda(row); return row.name || (k ? `≈${Math.round(k)} kDa 行` : '未命名行'); };
+  App.pieceName = (b, pc) => (App.S.blots.length > 1 ? App.blotName(b) + ' · ' : '') + L('膜条 ', 'strip ') + (pc.letter || '?');
+  App.rowLabel = row => { const k = App.rowKda(row); return row.name || (k ? L(`≈${Math.round(k)} kDa 行`, `≈${Math.round(k)} kDa row`) : L('未命名行', 'Unnamed row')); };
 
   /* ---------- loading ---------- */
   function resample(img, W, H) {
@@ -184,7 +185,7 @@
   // the ladder of a membrane chosen by the user: remembered for the next membranes
   App.setLadder = function (b, id) {
     b.ladderId = id || null;
-    if (id) { App.prefLadder = id; try { localStorage.setItem('blotfig.ladder', id); } catch (e) { /* storage off */ } }
+    if (id) { App.prefLadder = id; G.PrefStorage.setItem('blotfig.ladder', id); }
   };
   // a marker photo saved at another resolution: resampled to the matching exposure
   function matchSizes(recs) {
@@ -212,16 +213,16 @@
     return blob;
   };
   App.openProject = async function (file) {
-    busy(true, '打开项目…'); await tick();
+    busy(true, L('打开项目…', 'Opening project…')); await tick();
     try {
       let buf = file.buffer || await file.arrayBuffer(), u8 = new Uint8Array(buf);
       if (u8[0] === 0x1f && u8[1] === 0x8b) { buf = await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer(); u8 = new Uint8Array(buf); }
-      if (new TextDecoder().decode(u8.subarray(0, 8)) !== MAGIC) throw new Error('这不是 BlotFigure 项目文件（.blotfig）');
+      if (new TextDecoder().decode(u8.subarray(0, 8)) !== MAGIC) throw new Error(L('这不是 BlotFigure 项目文件（.blotfig）', 'This is not a BlotFigure project file (.blotfig)'));
       const n = new DataView(buf, 8, 4).getUint32(0, true), head = JSON.parse(new TextDecoder().decode(u8.subarray(12, 12 + n)));
       const bufs = [];
       let at = 12 + n;
       for (const im of head.images) { bufs.push(buf.slice(at, at + im.size)); at += im.size; }
-      await restoreFrom(head, bufs, '打开项目');
+      await restoreFrom(head, bufs, L('打开项目', 'Opening project'));
       return App.images.size;
     } finally { busy(false); }
   };
@@ -232,9 +233,9 @@
     const recs = [];
     for (let i = 0; i < head.images.length; i++) {
       const im = head.images[i], b = bufs[i];
-      busy(true, `${what}：读取图片 ${i + 1}/${head.images.length}…`); await tick();
+      busy(true, L(`${what}：读取图片 ${i + 1}/${head.images.length}…`, `${what}: reading pictures ${i + 1}/${head.images.length}…`)); await tick();
       const sha = await App.sha256(b);
-      if (im.sha256 && sha !== im.sha256) throw new Error(`图片 ${im.name} 校验失败（SHA-256 不一致），文件可能已损坏`);
+      if (im.sha256 && sha !== im.sha256) throw new Error(L(`图片 ${im.name} 校验失败（SHA-256 不一致），文件可能已损坏`, `Picture ${im.name} failed its check (SHA-256 mismatch); the file may be damaged`));
       const d = await G.TIFF.decodeBuffer(b, im.name);
       recs.push({ id: im.id, name: im.name, img: { w: d.width, h: d.height, data: d.data }, spp: d.spp, bits: d.bits, src: new File([b], im.name), kind: im.kind, exposure: im.exposure,
         sha256: sha, bytes: b.byteLength, dpi: d.dpi || 0 });
@@ -252,7 +253,7 @@
     App.viewBlot = App.blot(head.viewBlot) ? head.viewBlot : (App.S.blots[0] || {}).id; App.viewImg = null;
     App.loadWarnings = [];
     App.syncAlign();
-    busy(true, `${what}：分析各张膜…`); await tick();
+    busy(true, L(`${what}：分析各张膜…`, `${what}: analysing the membranes…`)); await tick();
     App.S.blots.forEach(b => App.analyze(b));
     App.hist = []; App.future = [];
     App.commit();
@@ -313,16 +314,16 @@
   App.dropDraft = async function () { draftHas.clear(); draftOurs = false; try { await idbDo('readwrite', st => st.clear()); } catch (e) { /* ignore */ } };
   App.restoreDraft = async function () {
     const meta = await App.peekDraft();
-    if (!meta) throw new Error('没有可恢复的草稿');
-    busy(true, '恢复上次的进度…'); await tick();
+    if (!meta) throw new Error(L('没有可恢复的草稿', 'No draft to restore'));
+    busy(true, L('恢复上次的进度…', 'Restoring where you left off…')); await tick();
     try {
       const bufs = [];
       for (const im of meta.images) {
         const b = await idbDo('readonly', st => st.get('img:' + im.sha256));
-        if (!b) throw new Error(`草稿里缺少图片 ${im.name}`);
+        if (!b) throw new Error(L(`草稿里缺少图片 ${im.name}`, `The draft is missing picture ${im.name}`));
         bufs.push(b);
       }
-      await restoreFrom({ images: meta.images, S: JSON.parse(meta.S), viewBlot: meta.viewBlot, initial: meta.initial }, bufs, '恢复');
+      await restoreFrom({ images: meta.images, S: JSON.parse(meta.S), viewBlot: meta.viewBlot, initial: meta.initial }, bufs, L('恢复', 'Restoring'));
       draftOurs = true; meta.images.forEach(im => draftHas.add(im.sha256));
     } finally { busy(false); }
   };
@@ -332,7 +333,7 @@
     if (!files.length) return 0;
     const first = !App.S;
     if (first) App.S = newState();
-    busy(true, `读取图片 0/${files.length}…`);
+    busy(true, L(`读取图片 0/${files.length}…`, `Reading pictures 0/${files.length}…`));
     await tick();
     try {
       const recs = [];
@@ -349,9 +350,9 @@
         // (src: the file itself, read again when the project is saved)
         recs.push({ id: f.id || uid('i'), name: f.name, img: { w: d.width, h: d.height, data: d.data }, spp: d.spp, bits: d.bits, src: f,
           sha256: await App.sha256(buf), bytes: buf.byteLength, dpi: d.dpi || 0 });
-        busy(true, `读取图片 ${recs.length}/${files.length}…`); await tick();
+        busy(true, L(`读取图片 ${recs.length}/${files.length}…`, `Reading pictures ${recs.length}/${files.length}…`)); await tick();
       }
-      busy(true, '识别曝光图与 Marker 图…'); await tick();
+      busy(true, L('识别曝光图与 Marker 图…', 'Identifying exposures and marker pictures…')); await tick();
       recs.forEach(r => { r.kind = WB.classify(r.img, { name: r.name, spp: r.spp }); r.exposure = WB.exposureFromName(r.name); });
       matchSizes(recs);
       recs.forEach(r => { prepare(r); App.images.set(r.id, r); });
@@ -368,7 +369,7 @@
       // the same membrane photographed in another place (moved between captures) is one membrane, also with one
       // loaded before: its white-light photo matches once moved back (pictures of exposures alone never join:
       // replicate membranes show the same bands)
-      busy(true, '比对各次拍摄中膜的位置…'); await tick();
+      busy(true, L('比对各次拍摄中膜的位置…', 'Comparing where the membrane lay in each capture…')); await tick();
       const init = new Map(), joined = new Set(), anchors = App.S.blots.filter(b => b.marker).map(b => ({ b, old: true }));
       blots = blots.filter(b => {
         const m = b.marker && App.images.get(b.marker);
@@ -385,13 +386,13 @@
       });
       for (const b of blots) {
         App.S.blots.push(b);
-        busy(true, `分析 ${App.blotName(b)}：对齐各张图、找膜条…`); await tick();
+        busy(true, L(`分析 ${App.blotName(b)}：对齐各张图、找膜条…`, `Analysing ${App.blotName(b)}: aligning the pictures, finding strips…`)); await tick();
         alignAndAnalyze(b, init, false);
       }
       // a membrane new to the figure goes through the steps: its Marker picture confirmed first (the boxes come
       // once its pieces are)
       if (blots.length) App.S.step = 1;
-      for (const b of joined) { busy(true, `重新分析 ${App.blotName(b)}…`); await tick(); alignAndAnalyze(b, init, true); }
+      for (const b of joined) { busy(true, L(`重新分析 ${App.blotName(b)}…`, `Re-analysing ${App.blotName(b)}…`)); await tick(); alignAndAnalyze(b, init, true); }
       App.fitLanes(first);
       if (!App.viewBlot || !App.blot(App.viewBlot)) App.viewBlot = App.S.blots[0] && App.S.blots[0].id;
       App.refreshChoices(true);
@@ -402,7 +403,7 @@
       App.emit('loaded');
       return recs.length;
     } catch (e) {
-      console.error(e); alert('读取失败：' + e.message);
+      console.error(e); alert(L('读取失败：', 'Could not read the pictures: ') + e.message);
       return 0;
     } finally { busy(false); }
   };
@@ -617,7 +618,9 @@
     if (!al || !rec) return '';
     const [cx, cy] = App.membraneCentre(b), [x, y] = WB.regPoint(al, rec.img.w, rec.img.h, cx, cy), d = Math.hypot(x - cx, y - cy);
     const n = al.pieces ? Object.keys(al.pieces).length : 0;
-    return `旋转 ${Math.abs(al.a) < 0.05 ? '0' : al.a.toFixed(1)}°、平移 ${d < 1 ? '<1' : Math.round(d)} px${n ? `；${n} 条膜条另外单独对齐` : ''}`;
+    const deg = Math.abs(al.a) < 0.05 ? '0' : al.a.toFixed(1), px = d < 1 ? '<1' : Math.round(d);
+    return L(`旋转 ${deg}°、平移 ${px} px${n ? `；${n} 条膜条另外单独对齐` : ''}`,
+      `rotated ${deg}°, shifted ${px} px${n ? `; ${n} strip${n === 1 ? '' : 's'} aligned separately` : ''}`);
   };
   /* turning the transform by hand (the picture's content on the grid): shifted by (dx, dy), turned by deg
    * about (px, py). T maps the grid to the picture, so the content moves the other way. */
@@ -715,8 +718,8 @@
       const isWeak = weak(r);
       const row = { id: uid('r'), blot: blot.id, name: '', img: A.chemiIds[r.choice], auto: true, hidden: isWeak, weak: isWeak, segs: [], above: r.above, below: r.below };
       r.segs.forEach(s => {
-        const pc = pcs[s.region], L = latticeLanes(pc, a, z);
-        const sg = { piece: pc.id, vc: s.vc, b0: s.b0, b1: s.b1, lanes: L.lanes, c0: L.c0, p: L.p, x0: -pc.w / 2, x1: pc.w / 2 };
+        const pc = pcs[s.region], lat = latticeLanes(pc, a, z);
+        const sg = { piece: pc.id, vc: s.vc, b0: s.b0, b1: s.b1, lanes: lat.lanes, c0: lat.c0, p: lat.p, x0: -pc.w / 2, x1: pc.w / 2 };
         // a piece without lanes of its own in the analysis: read them from the row's box
         if (!sg.lanes.length) App.redetectBox(row, sg);
         App.snapBox(sg);
@@ -868,8 +871,8 @@
     return deg;
   };
   // edges of lane i: half-way to its neighbours, half a spacing out at the ends
-  App.laneLeft = (sg, i) => { const L = sg.lanes; return i > 0 ? (L[i - 1].u + L[i].u) / 2 : L[i].u - App.segPitch(sg) / 2; };
-  App.laneRight = (sg, i) => { const L = sg.lanes; return i < L.length - 1 ? (L[i].u + L[i + 1].u) / 2 : L[i].u + App.segPitch(sg) / 2; };
+  App.laneLeft = (sg, i) => { const lns = sg.lanes; return i > 0 ? (lns[i - 1].u + lns[i].u) / 2 : lns[i].u - App.segPitch(sg) / 2; };
+  App.laneRight = (sg, i) => { const lns = sg.lanes; return i < lns.length - 1 ? (lns[i].u + lns[i + 1].u) / 2 : lns[i].u + App.segPitch(sg) / 2; };
   App.segCols = sg => { let c = sg.c0; return sg.lanes.map((l, i) => ({ i, u: l.u, r: l.r, col: l.r === 's' ? c++ : null })); };
   App.nSample = sg => sg.lanes.filter(l => l.r === 's').length;
   App.segEnd = sg => sg.c0 + App.nSample(sg) - 1;
@@ -909,24 +912,24 @@
     base = base || { lanes: sg.lanes.map(l => ({ u: l.u, r: l.r })), c0: sg.c0, p: sg.p };
     const pc = App.pieceOf(row, sg), p = spacing(base.lanes, base.p);
     const inside = l => l.u >= x0 - 1e-6 && l.u <= x1 + 1e-6;
-    const L = base.lanes.filter(inside).map(l => ({ u: l.u, r: l.r }));
-    if (!L.length) {
+    const lns = base.lanes.filter(inside).map(l => ({ u: l.u, r: l.r }));
+    if (!lns.length) {
       // moved clear of its lanes: their lattice carried on into the box
       const o = base.lanes.length ? base.lanes[0].u : (x0 + x1) / 2;
-      for (let u = o + Math.ceil((x0 - o) / p - 1e-9) * p; u <= x1 + 1e-6 && L.length < 80; u += p) L.push({ u, r: App.roleAt(pc, u, p) });
-      if (!L.length) L.push({ u: (x0 + x1) / 2, r: App.roleAt(pc, (x0 + x1) / 2, p) });
+      for (let u = o + Math.ceil((x0 - o) / p - 1e-9) * p; u <= x1 + 1e-6 && lns.length < 80; u += p) lns.push({ u, r: App.roleAt(pc, u, p) });
+      if (!lns.length) lns.push({ u: (x0 + x1) / 2, r: App.roleAt(pc, (x0 + x1) / 2, p) });
     } else {
-      for (let u = L[0].u - p; u >= x0 - 1e-6 && L.length < 80; u -= p) L.unshift({ u, r: App.roleAt(pc, u, p) });
-      for (let u = L[L.length - 1].u + p; u <= x1 + 1e-6 && L.length < 80; u += p) L.push({ u, r: App.roleAt(pc, u, p) });
+      for (let u = lns[0].u - p; u >= x0 - 1e-6 && lns.length < 80; u -= p) lns.unshift({ u, r: App.roleAt(pc, u, p) });
+      for (let u = lns[lns.length - 1].u + p; u <= x1 + 1e-6 && lns.length < 80; u += p) lns.push({ u, r: App.roleAt(pc, u, p) });
     }
     // (lanes gained left of column 1 go below it for now: the commit makes room on the left for every row)
     let c0 = base.c0;
     const stay = base.lanes.find(l => l.r === 's' && inside(l));
     if (stay) {
       const col = base.c0 + base.lanes.filter(l => l.r === 's' && l.u < stay.u - 1e-6).length;
-      c0 = col - L.filter(l => l.r === 's' && l.u < stay.u - 1e-6).length;
+      c0 = col - lns.filter(l => l.r === 's' && l.u < stay.u - 1e-6).length;
     }
-    sg.lanes = L; sg.c0 = c0; sg.p = p; sg.x0 = x0; sg.x1 = x1;
+    sg.lanes = lns; sg.c0 = c0; sg.p = p; sg.x0 = x0; sg.x1 = x1;
   };
   // the chemi signal of an image as a WB image
   const sigOf = rec => ({ w: rec.img.w, h: rec.img.h, data: rec.cs.sig });
@@ -966,21 +969,21 @@
    * lanes every lane between follows from the count. An end lane dragged to u (lanes as before the drag: base)
    * spreads the lanes between evenly; any other lane moves alone. */
   App.dragLane = function (sg, i, u, base) {
-    const L = base.lanes, n = L.length;
+    const lns = base.lanes, n = lns.length;
     if (n < 3 || (i !== 0 && i !== n - 1)) { App.moveLane(sg, i, u); return; }
-    const a = i === 0 ? Math.min(u, L[n - 1].u - 3 * (n - 1)) : L[0].u, z = i === n - 1 ? Math.max(u, L[0].u + 3 * (n - 1)) : L[n - 1].u;
-    sg.lanes = L.map((l, k) => ({ u: a + (z - a) * k / (n - 1), r: l.r }));
+    const a = i === 0 ? Math.min(u, lns[n - 1].u - 3 * (n - 1)) : lns[0].u, z = i === n - 1 ? Math.max(u, lns[0].u + 3 * (n - 1)) : lns[n - 1].u;
+    sg.lanes = lns.map((l, k) => ({ u: a + (z - a) * k / (n - 1), r: l.r }));
     sg.p = (z - a) / (n - 1);
   };
   // n lanes spaced evenly between the box's first and last lane, which stay (one lane: across the box); a lane
   // keeps its role (sample / left out / marker) when one was close by
   App.evenEnds = function (row, sg, n) {
-    const L = sg.lanes, pc = App.pieceOf(row, sg);
-    n = Math.max(1, Math.min(60, Math.round(n || L.length)));
-    if (L.length < 2 || n < 2) return App.evenBox(row, sg, n);
-    const a = L[0].u, z = L[L.length - 1].u, p = (z - a) / (n - 1), old = App.segPitch(sg);
+    const lns = sg.lanes, pc = App.pieceOf(row, sg);
+    n = Math.max(1, Math.min(60, Math.round(n || lns.length)));
+    if (lns.length < 2 || n < 2) return App.evenBox(row, sg, n);
+    const a = lns[0].u, z = lns[lns.length - 1].u, p = (z - a) / (n - 1), old = App.segPitch(sg);
     sg.lanes = Array.from({ length: n }, (_, k) => {
-      const u = a + k * p, near = L.slice().sort((x, y) => Math.abs(x.u - u) - Math.abs(y.u - u))[0];
+      const u = a + k * p, near = lns.slice().sort((x, y) => Math.abs(x.u - u) - Math.abs(y.u - u))[0];
       return { u, r: near && Math.abs(near.u - u) < Math.min(p, old) * 0.45 ? near.r : App.roleAt(pc, u, p) };
     });
     sg.p = p;
@@ -997,16 +1000,16 @@
   // a lane taken out (detected where there is none): the lanes after it move up a column
   App.removeLane = (row, sg, i) => { if (sg.lanes.length > 1 && sg.lanes[i]) sg.lanes.splice(i, 1); };
   App.moveLane = function (sg, i, u) {
-    const L = sg.lanes, lo = i > 0 ? L[i - 1].u + 3 : -Infinity, hi = i < L.length - 1 ? L[i + 1].u - 3 : Infinity;
-    L[i].u = Math.max(lo, Math.min(hi, u));
+    const lns = sg.lanes, lo = i > 0 ? lns[i - 1].u + 3 : -Infinity, hi = i < lns.length - 1 ? lns[i + 1].u - 3 : Infinity;
+    lns[i].u = Math.max(lo, Math.min(hi, u));
   };
   // sample -> left out -> marker -> sample
   App.cycleLane = (sg, i) => { const l = sg.lanes[i]; if (l) l.r = { s: 'x', x: 'm', m: 's' }[l.r] || 's'; };
   App.nudgeLanes = (sg, du) => sg.lanes.forEach(l => { l.u += du; });
   App.scaleLanes = function (sg, dp) {
-    const L = sg.lanes; if (L.length < 2) { sg.p = Math.max(6, App.segPitch(sg) + dp); return; }
-    const mid = (L[0].u + L[L.length - 1].u) / 2, p = App.segPitch(sg), k = Math.max(6, p + dp) / p;
-    L.forEach(l => { l.u = mid + (l.u - mid) * k; });
+    const lns = sg.lanes; if (lns.length < 2) { sg.p = Math.max(6, App.segPitch(sg) + dp); return; }
+    const mid = (lns[0].u + lns[lns.length - 1].u) / 2, p = App.segPitch(sg), k = Math.max(6, p + dp) / p;
+    lns.forEach(l => { l.u = mid + (l.u - mid) * k; });
     sg.p = p * k;
   };
   /* figure columns of a segment (and the segments after it in the row) moved by d — not left of column 1 (the
@@ -1390,8 +1393,8 @@
     const { pc, v } = hit;
     const hs = App.S.rows.filter(r => r.blot === blotId).flatMap(r => r.segs.map(s => s.b1 - s.b0)).sort((a, c) => a - c);
     const bandH = hs.length ? hs[hs.length >> 1] : 16, margin = Math.min(100, Math.max(16, bandH * 2.5)), half = pc.h / 2;
-    const L = App.pieceLanes(b, pc, v);
-    const sg = { piece: pc.id, vc: v, b0: -bandH / 2, b1: bandH / 2, lanes: L.lanes, c0: L.c0, p: L.p, x0: -pc.w / 2, x1: pc.w / 2 };
+    const lat = App.pieceLanes(b, pc, v);
+    const sg = { piece: pc.id, vc: v, b0: -bandH / 2, b1: bandH / 2, lanes: lat.lanes, c0: lat.c0, p: lat.p, x0: -pc.w / 2, x1: pc.w / 2 };
     const row = { id: uid('r'), blot: blotId, name: '', img: App.chemiOf(b)[0].id, auto: true, hidden: false, manual: true, segs: [sg],
       above: Math.max(bandH / 2 + 4, Math.min(bandH / 2 + margin, v + half - 2)), below: Math.max(bandH / 2 + 4, Math.min(bandH / 2 + margin, half - v - 2)) };
     if (!sg.lanes.length && !App.redetectBox(row, sg)) App.evenBox(row, sg, Math.max(1, Math.round(pc.w / (pc.pitch || 100))));
@@ -1637,20 +1640,29 @@
     const S = App.S, warn = [], legend = [];
     const vis = S.rows.filter(r => !r.hidden);
     // a row in words: its name, else its size, else the pieces it comes from
-    const label = r => r.name || (App.rowKda(r) ? `≈${Math.round(App.rowKda(r))} kDa 行` : `${S.blots.length > 1 ? App.blotName(App.blot(r.blot)) + ' ' : ''}膜条 ${App.rowPieces(r).map(pc => pc.letter).join('+')} 的行`);
+    const label = r => {
+      if (r.name) return r.name;
+      if (App.rowKda(r)) return L(`≈${Math.round(App.rowKda(r))} kDa 行`, `≈${Math.round(App.rowKda(r))} kDa row`);
+      const on = S.blots.length > 1 ? App.blotName(App.blot(r.blot)) + ' ' : '', ls = App.rowPieces(r).map(pc => pc.letter).join('+');
+      return L(`${on}膜条 ${ls} 的行`, `row on ${on}strip ${ls}`);
+    };
     const C = App.columns();
     vis.forEach(r => {
       const e = App.rowExpo(r).find(x => x.id === r.img);
-      if (e && e.satFrac > 0.002) warn.push(`「${label(r)}」所选曝光中条带有过曝像素，定量不可靠，建议换短曝光`);
-      if (App.rowClash(r).length) warn.push(`「${label(r)}」的几个框占了相同的列：在第 3 步选中这一行，把右边那个框往后挪（›）`);
-      if (!C.vis.some(j => App.colSource(r, j))) warn.push(`「${label(r)}」的泳道都不在成图的列范围里：在第 5 步调整列范围，或在第 3 步把这一行的列挪过来（‹ ›）`);
+      if (e && e.satFrac > 0.002) warn.push(L(`「${label(r)}」所选曝光中条带有过曝像素，定量不可靠，建议换短曝光`,
+        `"${label(r)}": the bands have saturated pixels in the chosen exposure, so quantification is unreliable; use a shorter exposure`));
+      if (App.rowClash(r).length) warn.push(L(`「${label(r)}」的几个框占了相同的列：在第 3 步选中这一行，把右边那个框往后挪（›）`,
+        `"${label(r)}" has boxes on the same columns: in step 3, select this row and move the right-hand box along (›)`));
+      if (!C.vis.some(j => App.colSource(r, j))) warn.push(L(`「${label(r)}」的泳道都不在成图的列范围里：在第 5 步调整列范围，或在第 3 步把这一行的列挪过来（‹ ›）`,
+        `"${label(r)}" has no lanes in the figure's column range: change the column range in step 5, or move this row's columns over in step 3 (‹ ›)`));
     });
     const blotsUsed = [...new Set(vis.map(r => r.blot))];
     if (blotsUsed.length > 1) {
       legend.push('Bands shown in separate rows were detected on different membranes processed in parallel; each row is an individual crop.');
       const loadBlots = new Set(vis.filter(App.isLoading).map(r => r.blot));
       if (loadBlots.size) blotsUsed.forEach(bid => {
-        if (!loadBlots.has(bid) && vis.some(r => r.blot === bid)) warn.push(`${App.blotName(App.blot(bid))} 上的蛋白没有同膜内参（期刊要求内参与目标蛋白在同一张膜上）`);
+        if (!loadBlots.has(bid) && vis.some(r => r.blot === bid)) warn.push(L(`${App.blotName(App.blot(bid))} 上的蛋白没有同膜内参（期刊要求内参与目标蛋白在同一张膜上）`,
+          `Proteins on ${App.blotName(App.blot(bid))} have no loading control on the same membrane (journals expect the loading control on the same membrane as the target protein)`));
       });
     }
     // membranes whose figure rows show sizes
@@ -1658,12 +1670,14 @@
     blotsUsed.forEach(bid => {
       const b = App.blot(bid);
       if (S.style.showMW && S.step >= 5 && !sized.has(bid)) {
-        warn.push(`${App.blotName(b)} 还没标 Marker，成图没有分子量：在第 4 步每条膜条标 2 条 Marker 带（不需要的话在第 5 步"更多版式"里关掉"分子量刻度"）`);
+        warn.push(L(`${App.blotName(b)} 还没标 Marker，成图没有分子量：在第 4 步每条膜条标 2 条 Marker 带（不需要的话在第 5 步"更多版式"里关掉"分子量刻度"）`,
+          `${App.blotName(b)} has no ladder marked yet, so the figure shows no molecular weights: in step 4, mark 2 marker bands on each strip (if you don't need them, turn off "MW ticks" under "More layout" in step 5)`));
       }
       (b.pieces || []).forEach(pc => {
         const ms = (pc.marks || []).filter(m => m.kda > 0).sort((p, q) => p.v - q.v);
         if (ms.length < 2) return;
-        if (ms.some((m, i) => i && m.kda >= ms[i - 1].kda)) warn.push(`${App.pieceName(b, pc)}的 Marker 刻度顺序不对：分子量应从上往下减小`);
+        if (ms.some((m, i) => i && m.kda >= ms[i - 1].kda)) warn.push(L(`${App.pieceName(b, pc)}的 Marker 刻度顺序不对：分子量应从上往下减小`,
+          `Marker ticks on ${App.pieceName(b, pc)} are out of order: molecular weights should decrease from top to bottom`));
       });
     });
     if (C.gapAfter.size) legend.push('Non-adjacent lanes, or lanes from different pieces of a membrane, are separated by white space.');
@@ -1707,38 +1721,43 @@
   App.preflight = function () {
     const S = App.S, st = S.style, out = [], add = (level, text, fix) => out.push({ level, text, fix });
     const vis = S.rows.filter(r => !r.hidden), ck = App.checks(), label = ck.label;
-    if (!vis.length) { add('block', '成图里还没有蛋白行。'); return out; }
+    if (!vis.length) { add('block', L('成图里还没有蛋白行。', 'The figure has no protein rows yet.')); return out; }
     const eff = App.effectiveDpi(), safe = App.maxSafeMmPerLane(300);
-    if (eff < 300) add('block', `条带本身的有效分辨率只有 ${Math.round(eff)} dpi（< 300）：每道 ${st.mmPerLane} mm 太宽，导出 ${st.dpi} dpi 也只是把像素放大。`,
-      safe >= 2 ? { label: `改为每道 ${safe} mm`, run: () => { st.mmPerLane = safe; } } : null);
+    if (eff < 300) add('block', L(`条带本身的有效分辨率只有 ${Math.round(eff)} dpi（< 300）：每道 ${st.mmPerLane} mm 太宽，导出 ${st.dpi} dpi 也只是把像素放大。`,
+      `Effective resolution of the bands ${Math.round(eff)} dpi (< 300): ${st.mmPerLane} mm per lane is too wide, and exporting at ${st.dpi} dpi only enlarges the pixels.`),
+      safe >= 2 ? { label: L(`改为每道 ${safe} mm`, `Set to ${safe} mm per lane`), run: () => { st.mmPerLane = safe; } } : null);
     // clipped pixels in the exposures shown: another exposure of the same row may be clean
     vis.forEach(r => {
       const ex = App.rowExpo(r), e = ex.find(x => x.id === r.img);
       if (!e || !(e.satFrac > 0.002)) return;
       const best = App.bestExpo(r), be = ex.find(x => x.id === best);
-      add('warn', `「${label(r)}」所选曝光中 ${(e.satFrac * 100).toFixed(1)}% 的条带像素过曝（相机饱和），这一行不能定量。`,
-        best !== r.img && be && be.satFrac < e.satFrac ? { label: '改用推荐曝光', run: () => { r.img = best; r.auto = true; } } : null);
+      add('warn', L(`「${label(r)}」所选曝光中 ${(e.satFrac * 100).toFixed(1)}% 的条带像素过曝（相机饱和），这一行不能定量。`,
+        `"${label(r)}": ${(e.satFrac * 100).toFixed(1)}% of the band pixels are saturated in the chosen exposure (camera saturation); this row cannot be quantified.`),
+        best !== r.img && be && be.satFrac < e.satFrac ? { label: L('改用推荐曝光', 'Use the recommended exposure'), run: () => { r.img = best; r.auto = true; } } : null);
     });
     // the smallest text actually printed (per-kind sizes count)
     const f = G.BRender.build(false), minPt = Math.round((f.minPt || st.fontPt) * 10) / 10;
-    if (minPt < 5) add('warn', `最小字号 ${minPt} pt 偏小（多数期刊要求 ≥ 5–6 pt）。`, { label: '全部至少 6 pt', run: () => {
+    if (minPt < 5) add('warn', L(`最小字号 ${minPt} pt 偏小（多数期刊要求 ≥ 5–6 pt）。`, `The smallest text is ${minPt} pt (most journals ask for ≥ 5–6 pt).`), { label: L('全部至少 6 pt', 'Make all text ≥ 6 pt'), run: () => {
       const up = v => (v && v < 6 ? 6 : v);
       st.fontPt = Math.max(st.fontPt, 6); ['lanePt', 'markerPt', 'namePt'].forEach(k => { st[k] = up(st[k]); }); st.minFontPt = Math.max(st.minFontPt || 5, 6);
       [S.groups, S.conditions, S.arrows, S.brackets].forEach(list => (list || []).forEach(o => { if (o.pt) o.pt = up(o.pt); }));
     } });
-    if (st.lineWidthPt < 0.25) add('warn', `线宽 ${st.lineWidthPt} pt 太细。`, { label: '改为 0.5 pt', run: () => { st.lineWidthPt = 0.5; } });
+    if (st.lineWidthPt < 0.25) add('warn', L(`线宽 ${st.lineWidthPt} pt 太细。`, `Line width ${st.lineWidthPt} pt is too thin.`), { label: L('改为 0.5 pt', 'Use 0.5 pt'), run: () => { st.lineWidthPt = 0.5; } });
     const wmm = f.w / MM;
-    if (wmm > 183) add('warn', `成图宽 ${wmm.toFixed(0)} mm，超过双栏宽度（约 180 mm）。`);
+    if (wmm > 183) add('warn', L(`成图宽 ${wmm.toFixed(0)} mm，超过双栏宽度（约 180 mm）。`, `The figure is ${wmm.toFixed(0)} mm wide, wider than a double column (about 180 mm).`));
     (f.overlaps || []).forEach(w => add('warn', w));
-    const unnamed = vis.filter(r => !r.name);
-    if (unnamed.length) add('warn', `${unnamed.length} 行还没有蛋白名（成图上不显示名字）。`, { label: '去填名字', leave: true, run: () => { if (App.goNames) App.goNames(); } });
-    const lanesNoName = App.figLanes().filter(j => !(S.lanes[j - 1] || {}).name);
-    if (lanesNoName.length && lanesNoName.length < App.figLanes().length) add('info', `${lanesNoName.length} 条泳道还没有名字。`);
-    else if (lanesNoName.length) add('info', '泳道还没有名字（成图上方只有空白）。', { label: '去填泳道名', leave: true, run: () => { if (App.goNames) App.goNames(true); } });
-    ck.warn.filter(w => /同膜内参|还没标 Marker|顺序不对|相同的列|列范围/.test(w)).forEach(w => add('warn', w));
-    if (vis.some(r => r.lv)) add('info', '有的行单独调过亮度 / 对比度（逐块线性调整），图注提示里已加说明。');
-    if ((S.arrows || []).some(a => a.sym === '◀' && a.auto && /≈/.test(App.arrowSize(a)))) add('info', '有目标条带的分子量是外推值（已标 ≈）。');
-    if (st.showMW && S.blots.some(b => b.ladderId)) add('info', '预染 Marker 标注的是表观分子量（随胶浓度、缓冲体系偏移），图注中建议写 "apparent molecular weight"。');
+    const unnamed = vis.filter(r => !r.name), nu = unnamed.length;
+    if (nu) add('warn', L(`${nu} 行还没有蛋白名（成图上不显示名字）。`, `${nu} ${nu === 1 ? 'row has' : 'rows have'} no protein name yet (no name shows in the figure).`),
+      { label: L('去填名字', 'Add names'), leave: true, run: () => { if (App.goNames) App.goNames(); } });
+    const lanesNoName = App.figLanes().filter(j => !(S.lanes[j - 1] || {}).name), nl = lanesNoName.length;
+    if (nl && nl < App.figLanes().length) add('info', L(`${nl} 条泳道还没有名字。`, `${nl} ${nl === 1 ? 'lane has' : 'lanes have'} no name yet.`));
+    else if (nl) add('info', L('泳道还没有名字（成图上方只有空白）。', 'The lanes have no names yet (the top of the figure is blank).'),
+      { label: L('去填泳道名', 'Add lane names'), leave: true, run: () => { if (App.goNames) App.goNames(true); } });
+    // (checks() warnings that belong here, told by their words in either language)
+    ck.warn.filter(w => /同膜内参|还没标 Marker|顺序不对|相同的列|列范围|loading control on the same membrane|no ladder marked yet|out of order|on the same columns|column range/.test(w)).forEach(w => add('warn', w));
+    if (vis.some(r => r.lv)) add('info', L('有的行单独调过亮度 / 对比度（逐块线性调整），图注提示里已加说明。', 'Some rows have brightness / contrast of their own (linear, per panel); the legend notes say so.'));
+    if ((S.arrows || []).some(a => a.sym === '◀' && a.auto && /≈/.test(App.arrowSize(a)))) add('info', L('有目标条带的分子量是外推值（已标 ≈）。', 'Some target band sizes are extrapolated (marked ≈).'));
+    if (st.showMW && S.blots.some(b => b.ladderId)) add('info', L('预染 Marker 标注的是表观分子量（随胶浓度、缓冲体系偏移），图注中建议写 "apparent molecular weight"。', 'Prestained marker sizes are apparent molecular weights that shift with gel percentage and buffer; state "apparent molecular weight" in the legend.'));
     return out;
   };
 
@@ -1806,7 +1825,7 @@
       style: S.style };
   };
   App.applyTemplate = function (t) {
-    if (!t || !t.blotfigTemplate) throw new Error('不是 BlotFigure 样式文件');
+    if (!t || !t.blotfigTemplate) throw new Error(L('不是 BlotFigure 样式文件', 'Not a BlotFigure style file'));
     const S = App.S, fl = App.figLanes(), vis = S.rows.filter(r => !r.hidden);
     const abs = k => fl[Math.max(0, Math.min(fl.length - 1, k))];
     (t.lanes || []).forEach((l, k) => { if (fl[k] != null) S.lanes[fl[k] - 1].name = l.name || ''; });

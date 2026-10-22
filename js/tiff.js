@@ -6,16 +6,17 @@
  */
 (function (G) {
   'use strict';
+  const L = G.L || (zh => zh);
 
   const TYPE_SIZE = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1, 8: 2, 9: 4, 10: 8, 11: 4, 12: 8, 16: 8 };
 
   function readIFDs(dv) {
     const bo = dv.getUint16(0);
     const le = bo === 0x4949;
-    if (!le && bo !== 0x4d4d) throw new Error('不是有效的 TIFF 文件');
+    if (!le && bo !== 0x4d4d) throw new Error(L('不是有效的 TIFF 文件', 'Not a valid TIFF file'));
     const magic = dv.getUint16(2, le);
-    if (magic === 43) throw new Error('暂不支持 BigTIFF');
-    if (magic !== 42) throw new Error('不是有效的 TIFF 文件');
+    if (magic === 43) throw new Error(L('暂不支持 BigTIFF', 'BigTIFF is not supported yet'));
+    if (magic !== 42) throw new Error(L('不是有效的 TIFF 文件', 'Not a valid TIFF file'));
     const ifds = [];
     let off = dv.getUint32(4, le);
     const seen = new Set();
@@ -67,11 +68,11 @@
     let next = 258, width = 9, bitPos = 0, old = -1, op = 0;
     const nbits = src.length * 8;
     const writeStr = (code) => {
-      const L = len[code];
-      if (op + L > out.length) return false;
-      let p = op + L - 1, c = code;
+      const sl = len[code];
+      if (op + sl > out.length) return false;
+      let p = op + sl - 1, c = code;
       while (c !== -1) { out[p--] = suffix[c]; c = prefix[c]; }
-      op += L;
+      op += sl;
       return true;
     };
     while (bitPos + width <= nbits && op < expected) {
@@ -114,7 +115,7 @@
   }
 
   async function inflate(src) {
-    if (typeof DecompressionStream === 'undefined') throw new Error('浏览器不支持 Deflate 解压，请更新浏览器');
+    if (typeof DecompressionStream === 'undefined') throw new Error(L('浏览器不支持 Deflate 解压，请更新浏览器', 'This browser cannot decompress Deflate; please update it'));
     const stream = new Blob([src]).stream().pipeThrough(new DecompressionStream('deflate'));
     return new Uint8Array(await new Response(stream).arrayBuffer());
   }
@@ -125,7 +126,7 @@
       case 5: return lzwDecode(bytes, expected);
       case 8: case 32946: return inflate(bytes);
       case 32773: return packBitsDecode(bytes, expected);
-      default: throw new Error('不支持的 TIFF 压缩方式: ' + comp + '（请在 iBright 中导出为未压缩或 LZW TIFF）');
+      default: throw new Error(L('不支持的 TIFF 压缩方式: ' + comp + '（请在 iBright 中导出为未压缩或 LZW TIFF）', 'Unsupported TIFF compression: ' + comp + ' (export an uncompressed or LZW TIFF from iBright)'));
     }
   }
 
@@ -151,7 +152,7 @@
   async function decode(buffer) {
     const dv = new DataView(buffer);
     const { ifds, le } = readIFDs(dv);
-    if (!ifds.length) throw new Error('TIFF 中没有图像');
+    if (!ifds.length) throw new Error(L('TIFF 中没有图像', 'The TIFF contains no image'));
     // choose the largest page (skip thumbnails)
     let t = ifds[0], best = 0;
     for (const d of ifds) {
@@ -167,8 +168,8 @@
     const planar = (t[284] || [1])[0];
     const predictor = (t[317] || [1])[0];
     const fmt = (t[339] || [1])[0]; // 1 uint, 2 int, 3 float
-    if (![8, 16, 32].includes(bits)) throw new Error('不支持的位深: ' + bits + ' bit');
-    if (photo === 3) throw new Error('暂不支持调色板 TIFF');
+    if (![8, 16, 32].includes(bits)) throw new Error(L('不支持的位深: ', 'Unsupported bit depth: ') + bits + ' bit');
+    if (photo === 3) throw new Error(L('暂不支持调色板 TIFF', 'Palette TIFFs are not supported yet'));
     const bps = bits / 8;
     const tiled = !!t[322];
     const total = new Uint8Array(w * h * spp * bps);
@@ -280,7 +281,7 @@
         URL.revokeObjectURL(url);
         resolve({ width: c.width, height: c.height, data: gray, bits: 8, spp: 3, compression: 0, actualMax: mx, dpi: 0 });
       };
-      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('无法读取该图片')); };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error(L('无法读取该图片', 'Cannot read this image'))); };
       img.src = url;
     });
   }
@@ -302,8 +303,10 @@
     const r = await decodeBrowserImage(new File([buffer], name || 'image'));
     r.warnings = [];
     const isPng = b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47;
-    if (isPng && b[24] === 16) r.warnings.push(`${name}：16 位 PNG 在浏览器里只能按 8 位读取，动态范围降低（过曝判断也会变粗）；建议用成像仪导出的 16 位 TIFF。`);
-    else r.warnings.push(`${name} 不是 TIFF，按 8 位处理：动态范围低，过曝像素不好判断；有原始 16 位 TIFF 的话建议用 TIFF。`);
+    if (isPng && b[24] === 16) r.warnings.push(L(`${name}：16 位 PNG 在浏览器里只能按 8 位读取，动态范围降低（过曝判断也会变粗）；建议用成像仪导出的 16 位 TIFF。`,
+      `${name}: browsers read a 16-bit PNG as 8-bit, so dynamic range is reduced (saturation is judged more coarsely too); a 16-bit TIFF from the imager is better.`));
+    else r.warnings.push(L(`${name} 不是 TIFF，按 8 位处理：动态范围低，过曝像素不好判断；有原始 16 位 TIFF 的话建议用 TIFF。`,
+      `${name} is not a TIFF and is handled as 8-bit: low dynamic range, saturated pixels are hard to tell; use the raw 16-bit TIFF if you have it.`));
     return r;
   }
 

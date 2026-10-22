@@ -1,0 +1,55 @@
+name: Bug report / 问题反馈
+description: Something does not work or detection is wrong. 功能出错或识别不准。
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! English or Chinese are both fine. 中英文均可。
+        **Only attach blot pictures you are allowed to share publicly.** Unpublished data should not be posted; a screenshot of the problem is usually enough. 只上传你有权公开的膜图；未发表的数据请不要上传，截图通常就够了。
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened? / 发生了什么？
+      description: What did you expect, and what happened instead? Screenshots help. 期望的结果和实际结果，截图很有帮助。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce / 复现步骤
+      placeholder: |
+        1. Drop in …
+        2. In step 3, click …
+  - type: input
+    id: imager
+    attributes:
+      label: Imager and file type / 成像仪与文件类型
+      placeholder: e.g. Bio-Rad ChemiDoc, 16-bit TIFF, 3 exposures + white light; or iBright, merged picture
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and OS / 浏览器与系统
+      placeholder: e.g. Chrome 140 on Windows 11
+    validations:
+      required: true
+  - type: dropdown
+    id: how
+    attributes:
+      label: How did you open BlotFigure? / 打开方式
+      options:
+        - Online (poplarity.github.io)
+        - Single-file BlotFigure-vVERSION.html / 单文件离线版
+        - index.html from an extracted ZIP / ZIP 完整解压后的 index.html
+        - Other / 其他
+  - type: input
+    id: version
+    attributes:
+      label: BlotFigure version / 版本
+      description: Shown at the bottom of the help (?) and in the processing log ("version"). 见帮助（?）底部或处理日志中的 "version"。
+  - type: textarea
+    id: log
+    attributes:
+      label: Processing log (optional) / 处理日志（可选）
+      description: Export ▾ → Processing log (JSON). It has settings, file fingerprints and statistics but no pixels; remove confidential protein or lane names. 导出 ▾ → 处理日志 JSON，不含像素；保密的蛋白名、泳道名请先删掉。
+      render: json

@@ -1,11 +1,19 @@
 node_modules/
 dist/
+_site/
 test-results/
 *.log
 .DS_Store
 Thumbs.db
-# never commit blot images or exports by accident
-*.tif
-*.tiff
-*.png
+# never commit blot pictures, projects or exports by accident (docs/ screenshots are made from the synthetic demo)
+*.[tT][iI][fF]
+*.[tT][iI][fF][fF]
+*.blotfig
+*.[pP][nN][gG]
+*.[jJ][pP][gG]
+*.[jJ][pP][eE][gG]
+*.[bB][mM][pP]
 *.csv
+*_processing_log.json
+blot_style*.json
+!docs/*.png

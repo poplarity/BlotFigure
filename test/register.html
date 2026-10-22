@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>register</title></head>
 <body><pre id="out">running</pre>
-<script src="../js/tiff.js"></script>
+<script src="../js/storage.js"></script><script src="../js/i18n.js"></script><script src="../js/tiff.js"></script>
 <script src="../js/engine.js"></script>
 <script src="../js/wbladders.js"></script>
 <script src="../js/wbengine.js"></script>
@@ -123,6 +123,7 @@
       check(Rm.ncc < 0.75, `other membrane, white light: best ncc ${Rm.ncc.toFixed(3)} (${fmt(Rm)})`);
     }
   } catch (e) { out.push('ERROR ' + (e.stack || e)); fails++; }
+  window.__done = true;      // (tests/run.mjs waits for it)
   say();
 })();
 </script></body></html>

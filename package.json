@@ -1,0 +1,19 @@
+{
+  "name": "blotfigure",
+  "version": "0.8.0",
+  "private": true,
+  "description": "Turn the raw pictures of a Western blot experiment into a publication-ready figure in the browser. The app itself has no dependencies; this file only installs the test runner.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/poplarity/BlotFigure.git"
+  },
+  "type": "module",
+  "scripts": {
+    "test": "node tests/run.mjs",
+    "build": "node scripts/bundle-onefile.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.0"
+  }
+}

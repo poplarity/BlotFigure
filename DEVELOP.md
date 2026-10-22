@@ -36,12 +36,34 @@ cd BlotFigure
 | `&pose=merge` / `align` / `order` | 在成图上停在拖动的半路（截图用）：把拆开的 B 行拖到 A 行上 / 把膜条 C 往右拖一列 / 把最下面一行往上拖 |
 | `&move=a.tif:2.5,140,85;b.tif:…` | 载入时把这些图里的膜当作挪动过（旋转度数、x、y 像素），模拟两次拍摄之间膜被挪动；用来测自动认膜和对齐 |
 | `&demomove=a,tx,ty,a2,tx2,ty2` | 示例膜再加一次"后来的拍摄"（一张曝光图和它的白光图）：整张膜挪动 `a,tx,ty`，中间那条膜条另外再挪 `a2,tx2,ty2`（膜条切出、其余挪动、膜条放到新位置）；测认出是同一张膜、单条膜条单独对齐 |
+| `&lang=en` / `&lang=zh` | 界面语言（不带时按上次的选择，第一次按浏览器语言）。回归基线是中文界面取的，脚本运行请带 `lang=zh` |
 | `&noalign=1` / `&dbg=1` | 不做对齐（各张图保持原样） / 标题 JSON 的 `dbg` 里记下认膜时的配准过程 |
 | `&popimg=12` / `&alignimg=12&alignby=dx,dy,度&alignhold=1` | 打开第 1 步和名字以 12 开头的图的 ⋯ 菜单 / 进入它的手动对齐并拖动（`alignhold` 停在拖动中，截图用） |
 | `&scrollto=secRows` | 把左侧面板滚到某个元素（截图用；`&sel=` 选中的行会自动滚到能看见） |
 | `&scenario=…` | 脚本化地跑一遍编辑功能，每步状态记在标题 JSON 的 `scen` 里（每行：`膜条:起始列:泳道角色` 和成图列）：`lanes` 框的缩放、框内重新识别、均分、加减/切换泳道、挪列、拼接行跟随；`drag` 用鼠标/键盘事件在膜图上拖角柄、拖竖线、双击加道、Delete、移动框、框选添加；`detect` 每行的框在每张曝光里只按框内像素识别的结果（原框 t、整条膜条宽的框 l）；`stitch` 拆开与并成一行（`App.mergeRows`，叠放的膜条、同一膜条的两行应被拒绝）；`arrange` 用鼠标事件在成图上排列：上下拖行、拖到另一行上并排、按膜条左右拖（Alt 只挪一个框）、往左最多到第 1 列（已经在第 1 列的不动，也不推别的行；差几列的只挪到第 1 列）、拖标签、列表里拖、Alt+↑↓；`realign` 手动对齐曝光 12：拖动、[ ] 旋转、完成、撤销/重做、不对齐、恢复自动（每步记下对齐参数和像素签名）；`kind` 先改一个框和行名，再把 09 改成白光又改回、01 改成曝光图又改回、14 移到新膜又移回、重新对齐、移除 07，每步记下所有框（膜条字母、位置、范围、列）——调过的东西都应保持不变（加 `&dbgpcs=1` 还记下膜条和每条候选切缝的判定）；`marks` / `picker` 手动 Marker 的数据层（没标时没有分子量，1 条也没有，2 条才有；清除）/ 分子量选择框；`mark2` 用鼠标和键盘标 Marker：选型号后记住、点膜条标签放大（开始时一条刻度、一个推算位置都不显示）、在条带旁 3 px 点一下（吸附到带上，第一条不推荐大小）、第二条推荐型号里的下一个、标满 2 条后才出现虚线的推算位置、拖刻度吸附（Alt 不吸附）、"不加了"、输入分子量、从选择框删除、↑↓、Delete、点虚线的推算刻度、下一步、清除这张膜的刻度；`focus` 在左侧列表里输入蛋白名（输入框不应丢焦点，回车跳到下一行）；`edit2` 在 C、D 两条膜条之间的缝上拖出一个框（成图应正好是框住的部分）、把它拖到 D 上（归到 D）、拖最右一条泳道线（中间均匀排开；Alt 只动这一条）、"首尾对齐"多一道，再调整膜条：C 右移、D 下边上移并旋转、删掉 E、画一条新的、应用，撤销 / 重做；`proj` 保存项目再打开，所有行、刻度、显示范围应与之前完全一样；`perf` 拖一个框的右边 20 次，记下每次鼠标移动和刷新成图的耗时（`window.__perfRun` 可以在性能分析器下再跑一遍）。`lanes` `drag` `detect` `stitch` `arrange` `realign` `kind` `edit2` `proj` `perf` 用真实样例（膜条 A–E），`marks` `picker` `mark2` `focus` 用示例（`demo=1`） |
 
 载入完成后页面标题变成 `READY {...}`，里面是各张图的对齐（`align`：`grid` 网格基准图、`marker` 读膜条和 Ladder 的白光图、每张挪动过的图 `名=角度,tx,ty+单独对齐的膜条/依据`）、膜、膜条（`pieces`：分析得到的泳道格点与 Ladder 位置 `lad`）、行（`rowsGeo`：每个框 `膜条:vc:起始列:泳道角色`、框的范围 `box`、成图列 `cols`）、曝光、显示范围（`levels`）、警告等状态的 JSON，方便脚本检查。
+
+## 自动测试、单文件版与发布
+
+```bash
+npm install                                   # 只装测试用的 Playwright
+npx playwright install chromium firefox webkit
+npm test                                      # 三种内核；npm test -- --browser=chromium 只跑一种
+npm run build                                 # 生成 dist/BlotFigure.html（单文件，双击可用）
+node scripts/docs-screenshots.mjs              # 用合成示例重做中英文截图及示例成图，不读取真实数据
+```
+
+`tests/run.mjs` 起一个本地 HTTP 服务，在每种内核里跑：`tests/startup.mjs`（浏览器存储被禁用 / 写满、`file://`、单文件离线、语言切换、示例能载入）、`test/boxlanes.html` `ladderlane.html` `register.html`（等 `window.__done`，标题里 `fails` 为 0）和 `engine.html`（不报错）、`tests/ui.mjs`（英文界面在示例膜上走一遍：五步、成图上输入泳道名、导出前检查、PNG / TIFF / SVG / 日志逐字节检查、项目与样式文件往返、回到刚导入时、草稿、分组不重叠、目标条带箭头、语言切换，以及英文界面里不能残留中文），最后从另一个源检查页面发不出任何请求。CI（`.github/workflows/ci.yml`）每次推送都跑。测试只用合成示例，不用真实样例。
+
+单文件版：`scripts/bundle-onefile.mjs` 把 `css/` 和 `js/` 按 `index.html` 里的顺序内联（新加的脚本要同时加进这个脚本的列表，漏了会报错），把 CSP 换成允许内联脚本的版本。
+
+界面语言：`js/i18n.js`（与 GelFigure 相同）。JS 里写 `L('中文', 'English')`（调用时求值，切换语言后重新渲染即生效，不要在载入时就算好）；HTML 里把英文放在 `data-en` / `data-en-html` / `data-en-title` / `data-en-placeholder`。切换时先把带 `data-en` 的元素恢复成静态文字，再调用 `I18N.onChange` 的回调重新渲染脚本写的内容。成图、图注、日志、CSV、文件名一律英文；国内厂家的 Marker 型号 `name` 是英文（进图注），`zh` 是中文界面显示的名字。偏好存在 `PrefStorage`（`js/storage.js`：存储不可用时退回内存，开始页和第 5 步显示提示）。
+
+发布新版本：
+1. 改版本号：`js/wbapp.js` 的 `App.VERSION`、`package.json` / `package-lock.json`、`CITATION.cff`（和日期）；`README.md`、`README.zh-CN.md`、`docs/getting-started*.md`、`index.html`（开始页的离线版链接）里的下载链接。
+2. `CHANGELOG.md` 加 `## [x.y.z] - 日期` 一节（发布说明从这里取，没有这一节发布会失败）。
+3. 提交、推送 main（网站随之更新），再打标签 `git tag vx.y.z` 并推送标签：`.github/workflows/release.yml` 生成 `BlotFigure-vx.y.z.html` 和源码 ZIP，建 Release。
 
 ## 测试页（test/）
 
@@ -105,6 +127,7 @@ msedge --headless=new --disable-gpu --user-data-dir=$env:TEMP\wb_dbg --allow-fil
 - `js/wbengine.js`（`G.WB`）：分类、归膜、膜条分割（`findStrips`）、Ladder 识别（`findLadders`）与标定（`calibrate` / `fitSeries`）、条带行（`detectRows`）、每条膜条的泳道格点（`pieceLattice` / `jointPitch`）、默认列号（`assignColumns`）、整体分析（`analyzeSession`）、框内识别泳道（`detectBoxLanes`）与条带（`bandInBox`）、曝光评分（`exposureScore`）、图与图的刚性配准（`registerRigid` / `registerPieces` / `regWarp`，FFT 相位相关）
 - `js/wbapp.js`（`G.BApp`）：状态、撤销、同一张膜各张图的对齐（`alignBlot` / `alignPieces` / `applyAlign`）、行与框、框里的泳道编辑、行的拼接与拆开、框选添加、手动 Marker、曝光与显示范围、规范检查
 - `js/wbrender.js`：排版成 SVG；`js/wbview.js`：中间膜图（框的 8 个角柄、泳道竖线与列号、双击加道、框选添加、标 Marker 的 `marks` 模式：`drawMarking` / `marksOf` / `markGeom`，手动对齐 `align` 模式；`fitFull` 放大到整张膜的膜条，`fitPiece` 放大到一条膜条的 Marker 道）；`js/wbui.js`：5 步面板（第 1 步 `renderBlots`、第 2 步 `renderPieces`、第 3 步 `renderRows` 和选中一行展开的曝光、泳道、倾斜工具 `rowDetail`、第 4 步 `renderMarker` / `ladderCard` 和刻度的分子量选择框 `markPicker`、第 5 步 `renderNames`；步骤切换 `openStep` / `nextStep` / `renderSteps`）、顶栏的提示 `updateCoach`（点它执行 `coachAct`）、首次引导 `showTour`、成图上的编辑与拖动排列（`rowRects` / `drawRowTags`，预览上的拖动在 `pdrag`，列表里的在 `ldrag`）、导出、调试参数
+- `js/storage.js` `i18n.js`：偏好存储（`PrefStorage`）和界面语言（`L` / `I18N`），与 GelFigure 相同，最先载入
 - `js/tiff.js` `engine.js`：与 GelFigure 共用，改动时注意两边同步（`tiff.js` 已同步到 GelFigure 0.6.5：按文件内容判断格式，8 位图片给出提示）
 - `js/export.js`：从 GelFigure 0.6.5 移植（PNG 元数据、LZW TIFF、下载），去掉了凝胶专用的部分
 

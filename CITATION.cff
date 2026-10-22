@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use BlotFigure in your research, please cite it as below."
+title: "BlotFigure: publication-ready Western blot figures in the browser"
+type: software
+authors:
+  - alias: poplarity
+version: 0.8.0
+date-released: 2026-10-22
+license: MIT
+repository-code: "https://github.com/poplarity/BlotFigure"
+url: "https://poplarity.github.io/BlotFigure/"
+keywords:
+  - Western blot
+  - immunoblot
+  - chemiluminescence
+  - protein ladder
+  - scientific figures
+  - image integrity
