@@ -293,5 +293,19 @@
     return decodeBrowserImage(file);
   }
 
-  G.TIFF = { decode, loadFile, _lzwDecode: lzwDecode };
+  // raw file bytes, whatever the format (told by its first bytes, not its name); lossy conversions noted in
+  // .warnings (as in GelFigure 0.6)
+  async function decodeBuffer(buffer, name) {
+    const b = new Uint8Array(buffer, 0, Math.min(32, buffer.byteLength));
+    const isTiff = (b[0] === 0x49 && b[1] === 0x49 && b[2] === 42) || (b[0] === 0x4d && b[1] === 0x4d && b[3] === 42);
+    if (isTiff) { const r = await decode(buffer); r.warnings = []; return r; }
+    const r = await decodeBrowserImage(new File([buffer], name || 'image'));
+    r.warnings = [];
+    const isPng = b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47;
+    if (isPng && b[24] === 16) r.warnings.push(`${name}：16 位 PNG 在浏览器里只能按 8 位读取，动态范围降低（过曝判断也会变粗）；建议用成像仪导出的 16 位 TIFF。`);
+    else r.warnings.push(`${name} 不是 TIFF，按 8 位处理：动态范围低，过曝像素不好判断；有原始 16 位 TIFF 的话建议用 TIFF。`);
+    return r;
+  }
+
+  G.TIFF = { decode, loadFile, decodeBuffer, _lzwDecode: lzwDecode };
 })(window);

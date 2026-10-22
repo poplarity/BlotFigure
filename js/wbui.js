@@ -16,8 +16,10 @@
 
   /* ---------- feedback ---------- */
   function toast(msg, ms) {
+    const box = $('toasts');
+    while (box.children.length >= 3) box.firstElementChild.remove();      // (the newest three: a pile is unreadable)
     const el = document.createElement('div'); el.className = 'toast'; el.textContent = msg;
-    $('toasts').appendChild(el);
+    box.appendChild(el);
     setTimeout(() => { el.style.transition = '.25s'; el.style.opacity = '0'; setTimeout(() => el.remove(), 260); }, ms || 2600);
   }
   const dismissed = new Set();
@@ -40,7 +42,8 @@
     const onView = m === 'addrow' || m === 'marks' || m === 'align' || m === 'pieces';
     $('modeBanner').classList.toggle('hidden', !m || onView);
     $('viewBanner').classList.toggle('hidden', !onView);
-    $('modeText').textContent = m === 'group' ? '在成图上从第一个泳道名拖到最后一个' : m === 'arrow' ? '在成图上点目标条带：箭头吸附到条带，按 Marker 标分子量' : '';
+    $('modeText').textContent = m === 'group' ? '在成图上从第一个泳道名拖到最后一个' : m === 'arrow' ? '在成图上点目标条带：箭头吸附到条带，按 Marker 标分子量'
+      : m === 'bracket' ? '在成图上沿着行上下拖出括号 · 点一行 = 整行 · Alt 不吸附行边' : '';
     $('viewModeText').textContent = m === 'addrow' ? '移到蛋白条带上点一下放下框（或按住拖出任意大小）· Esc 取消'
       : m === 'marks' ? '第 4 步：点一条 Marker 带，选它的分子量 · 拖动对准（自动吸附，Alt 不吸附）· 点数字改'
       : m === 'align' ? '拖动图片让条带落进框里 · Shift+拖动或 [ ] 旋转 · 方向键微调'
@@ -65,7 +68,9 @@
     $('btnAddRow').classList.toggle('primary', m === 'addrow');
     $('btnAddGroup').classList.toggle('on', m === 'group');
     $('btnAddArrow').classList.toggle('on', m === 'arrow');
+    $('btnAddBracket').classList.toggle('on', m === 'bracket');
     $('preview').classList.toggle('picking', m === 'arrow');
+    $('preview').classList.toggle('bracketing', m === 'bracket');
     if (m !== 'marks') { App.selMark = null; App.markFocus = null; }
     if (S()) renderMarker();
     G.View.draw();
@@ -125,8 +130,11 @@
     if (!n) return;
     const st = S(), moved = st.blots.reduce((s, b) => s + nMoved(b), 0);
     toast(`已载入 ${n} 张图片（${st.blots.length} 张膜）` + (moved ? `，${moved} 张拍摄时膜的位置不同，已自动对齐` : '') + '。第 1 步：确认每张膜的 Marker 图', moved ? 5200 : 4000);
+    // (8-bit pictures: said once, not once per file)
+    const lw = App.loadWarnings || [];
+    if (lw.length) toast(lw.length > 1 ? `有 ${lw.length} 张不是 16 位 TIFF，按 8 位处理：动态范围低，过曝像素不好判断；有成像仪导出的 16 位 TIFF 的话建议用它` : lw[0], 6000);
   }
-  ['fileInput', 'fileInput2'].forEach(id => $(id).addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; }));
+  ['fileInput', 'fileInput2', 'fileInput3'].forEach(id => $(id).addEventListener('change', e => { $('fileMenu').classList.add('hidden'); addFiles(e.target.files); e.target.value = ''; }));
   async function loadDemo() {
     App.busy(true, '生成示例膜图…');
     await new Promise(r => setTimeout(r, 30));
@@ -148,6 +156,7 @@
   $('btnExportMenu').onclick = e => { e.stopPropagation(); $('fileMenu').classList.add('hidden'); $('exportMenu').classList.toggle('hidden'); };
   $('btnFile').onclick = e => { e.stopPropagation(); $('exportMenu').classList.add('hidden'); $('fileMenu').classList.toggle('hidden'); };
   $('fileMenu').addEventListener('click', e => e.stopPropagation());
+  $('exportMenu').addEventListener('click', e => { if (e.target.closest('.menu-check')) e.stopPropagation(); });   // (a tick keeps the menu open)
   document.addEventListener('click', () => { $('exportMenu').classList.add('hidden'); $('fileMenu').classList.add('hidden'); });
   /* ---------- projects ---------- */
   async function saveProject() {
@@ -169,8 +178,44 @@
     try { const n = await App.openProject(f); toast(`已打开项目：${n} 张图片`); } catch (err) { alert('打开失败：' + err.message); }
   });
   window.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveProject(); } });
-  // leaving with work not saved as a project: the browser asks first
-  window.addEventListener('beforeunload', e => { if (S() && S().rows.length && App.hist.length > 1 && App.hist[App.hist.length - 1] !== App.saved) { e.preventDefault(); e.returnValue = ''; } });
+  // leaving with work not saved as a project: the browser asks first (the draft keeps it too, if it can)
+  window.addEventListener('beforeunload', e => { if (!App.leaving && S() && S().rows.length && App.hist.length > 1 && App.hist[App.hist.length - 1] !== App.saved) { e.preventDefault(); e.returnValue = ''; } });
+  /* ---------- style files, resets (as GelFigure's file menu) ---------- */
+  $('btnSaveTpl').onclick = () => {
+    $('fileMenu').classList.add('hidden');
+    if (!S() || !S().rows.length) { toast('先做出一张图，再保存它的样式'); return; }
+    G.Export.download(new Blob([JSON.stringify(App.template(), null, 2)], { type: 'application/json' }), 'blot_style.json');
+    toast('已保存样式：下一张同类的图"文件 → 载入样式"一键套用', 3600);
+  };
+  $('tplInput').addEventListener('change', async e => {
+    const f = e.target.files[0]; e.target.value = ''; $('fileMenu').classList.add('hidden');
+    if (!f) return;
+    if (!S() || !S().rows.length) { toast('先做到第 3 步（有了蛋白框），再套用样式'); return; }
+    try {
+      const t = JSON.parse(await f.text());
+      if (!t || !t.blotfigTemplate) throw new Error('不是 BlotFigure 样式文件');
+      const fl = App.figLanes().length, vis = S().rows.filter(r => !r.hidden).length;
+      if ((t.lanes || []).length !== fl || (t.proteins || []).length !== vis) {
+        if (!confirm(`样式里有 ${(t.lanes || []).length} 条泳道、${(t.proteins || []).length} 个蛋白，这张图是 ${fl} 条泳道、${vis} 个蛋白。\n会从第一条泳道、第一行起按顺序对应，多出来的忽略。继续？`)) return;
+      }
+      App.applyTemplate(t); App.commit();
+      toast('样式已套用（Ctrl+Z 可撤销）');
+    } catch (err) { alert('样式载入失败：' + err.message); }
+  });
+  $('btnResetAll').onclick = () => {
+    $('fileMenu').classList.add('hidden');
+    if (!S()) return;
+    if (App.hist[App.hist.length - 1] === App.initial) { toast(App.initialAsOpened ? '现在就是打开项目时的样子' : '现在就是刚导入时的样子，没有要撤回的改动'); return; }
+    const when = App.initialAsOpened ? '打开这个项目时（它保存时还没有记录导入时的状态）' : '刚导入图片时';
+    if (!confirm(`回到${when}的样子：膜条、蛋白框、名字、Marker 刻度和标注都会回到那时的状态。\n这一步可以用 Ctrl+Z 撤销。继续？`)) return;
+    if (App.resetAll()) { App.curStep = S().step; App.commit(); openStep(App.curStep); toast('已回到刚导入时（Ctrl+Z 可撤销）'); }
+  };
+  $('btnNew').onclick = async () => {
+    $('fileMenu').classList.add('hidden');
+    if (S() && App.hist[App.hist.length - 1] !== App.saved && !confirm('新建会清空现在的图片和所有调整（没保存成项目的话就找不回来了）。继续？')) return;
+    await App.dropDraft();
+    App.leaving = true; location.reload();
+  };
   window.addEventListener('keydown', e => {
     const tag = (e.target.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
@@ -190,13 +235,50 @@
   });
   $('dpiTop').addEventListener('change', done(e => { S().style.dpi = +e.target.value; }));
   const baseName = () => 'blot_figure';
-  $('btnPNG').onclick = async () => {
-    if (!S() || !S().rows.length) { toast('还没有可导出的行'); return; }
+  const needFigure = () => { if (S() && S().rows.some(r => !r.hidden)) return false; toast('还没有可导出的行'); return true; };
+  /* ---------- export, with a check first (as GelFigure) ---------- */
+  const pref = (k, v) => { try { if (v === undefined) return localStorage.getItem('blotfig.' + k); localStorage.setItem('blotfig.' + k, v); } catch (e) { /* storage off */ } return null; };
+  $('preflightOn').checked = pref('preflight') !== '0';
+  $('preflightOn').addEventListener('change', e => pref('preflight', e.target.checked ? '1' : '0'));
+  // true = go ahead, false = the user went back to fix something
+  function preflight() {
+    return new Promise(resolve => {
+      if (pref('preflight') === '0') return resolve(true);
+      const items = App.preflight(), serious = items.filter(i => i.level === 'block' || i.level === 'warn');
+      if (!serious.length) return resolve(true);
+      const lab = { block: '需处理', warn: '注意', info: '提示' };
+      $('pfList').innerHTML = items.map((it, k) => `<div class="pf-item"><span class="lv ${it.level}">${lab[it.level]}</span><span class="tx">${esc(it.text)}</span>${it.fix ? `<button class="btn sm" data-fix="${k}">${esc(it.fix.label)}</button>` : ''}</div>`).join('');
+      const close = ok => { $('preflightDlg').classList.add('hidden'); if ($('pfOff').checked) { pref('preflight', '0'); $('preflightOn').checked = false; } resolve(ok); };
+      $('pfList').querySelectorAll('[data-fix]').forEach(b => b.onclick = () => {
+        const fx = items[+b.dataset.fix].fix;
+        if (fx.leave) { close(false); fx.run(); return; }
+        fx.run(); App.commit(); b.disabled = true; b.textContent = '已修正';
+      });
+      $('pfOff').checked = false;
+      $('preflightDlg').classList.remove('hidden');
+      $('pfBack').onclick = () => close(false);
+      $('pfGo').onclick = () => close(true);
+    });
+  }
+  const exportTexts = () => ({ Software: 'BlotFigure ' + App.VERSION, Description: App.summaryText() });
+  async function exportRaster(kind) {
+    if (needFigure() || !(await preflight())) return;
     App.busy(true, '导出中…');
-    try { const f = G.BRender.build(false); await G.Export.exportPNG(f.svg, f.w, f.h, S().style.dpi, `${baseName()}_${S().style.dpi}dpi.png`); toast(`已导出 ${S().style.dpi} dpi PNG`); }
-    catch (e) { alert(e.message); } finally { App.busy(false); }
+    try {
+      const f = G.BRender.build(false), dpi = S().style.dpi, eff = Math.round(App.effectiveDpi());
+      if (kind === 'tiff') await G.Export.exportTIFF(f.svg, f.w, f.h, dpi, `${baseName()}_${dpi}dpi.tif`, exportTexts());
+      else await G.Export.exportPNG(f.svg, f.w, f.h, dpi, `${baseName()}_${dpi}dpi.png`, exportTexts());
+      toast(`已导出 ${dpi} dpi ${kind === 'tiff' ? 'TIFF' : 'PNG'}` + (eff < dpi ? `（条带本身 ${eff} dpi）` : ''));
+    } catch (e) { alert(e.message); } finally { App.busy(false); }
+  }
+  $('btnPNG').onclick = () => exportRaster('png');
+  $('btnTIFF').onclick = () => exportRaster('tiff');
+  $('btnSVG').onclick = async () => { if (needFigure() || !(await preflight())) return; G.Export.exportSVG(G.BRender.build(false).svg, baseName() + '.svg'); toast('已导出 SVG'); };
+  $('btnLog').onclick = () => {
+    if (needFigure()) return;
+    G.Export.download(new Blob([JSON.stringify(App.processingLog(), null, 2)], { type: 'application/json' }), baseName() + '_processing_log.json');
+    toast('已导出处理日志（含每张原图的 SHA-256）');
   };
-  $('btnSVG').onclick = () => { if (!S()) return; G.Export.exportSVG(G.BRender.build(false).svg, baseName() + '.svg'); toast('已导出 SVG'); };
   $('btnLegend').onclick = async () => {
     if (!S()) return;
     const t = App.checks().legend.join(' ');
@@ -307,9 +389,13 @@
     const c = accept ? popAccept : popCancel; popCancel = null; popAccept = null;
     if (c) c();
   }
-  function placePop(anchor) {
-    const r = anchor.getBoundingClientRect();
-    placePopAt(r.right + 8, r.top - 10);
+  function placePop(anchor) { placePopNear(anchor.getBoundingClientRect()); }
+  // beside a rect: on its right, or on its left when the right has no room (never over the thing it is about)
+  function placePopNear(r) {
+    pop.classList.remove('hidden'); popOpen = true;
+    const pw = pop.offsetWidth || 260, ph = pop.offsetHeight;
+    pop.style.left = clamp(r.right + 10 + pw > innerWidth - 6 ? r.left - pw - 10 : r.right + 10, 6, innerWidth - pw - 6) + 'px';
+    pop.style.top = clamp(r.top - 10, 58, innerHeight - ph - 8) + 'px';
   }
   function placePopAt(x, y) {
     pop.classList.remove('hidden'); popOpen = true;
@@ -317,6 +403,8 @@
     pop.style.left = clamp(x, 6, innerWidth - pw - 6) + 'px';
     pop.style.top = clamp(y, 58, innerHeight - ph - 8) + 'px';
   }
+  // the popover dropped without its pending actions (the state it belongs to is being replaced)
+  function dropPop() { popOpen = false; popCancel = popAccept = null; pop.classList.add('hidden'); }
   document.addEventListener('mousedown', e => { if (popOpen && !pop.contains(e.target) && !e.target.classList.contains('more') && e.target !== $('editor')) closePop(); });
   const shortName = name => name.replace(/\s*\(.*?\)/g, '').replace(/\*$/, '');
   /* size of a marker band: the ladder's sizes (the suggested one highlighted; Enter takes it) or any value. A new
@@ -661,42 +749,92 @@
   $('btnAddCond').onclick = done(() => { S().conditions.push({ name: '', values: S().lanes.map(() => '') }); toast('在成图上点每个格子切换 + / − / 空；点"条件"输入名称', 3200); });
   $('btnAddGroup').onclick = () => { if (S()) App.setMode(App.mode === 'group' ? null : 'group'); };
   $('btnAddArrow').onclick = () => { if (S()) App.setMode(App.mode === 'arrow' ? null : 'arrow'); };
-  /* a target-band arrow: its name, whether its size is shown, the symbol (an arrowhead; * # † for other bands),
-   * the side; taken away */
+  $('btnAddBracket').onclick = () => { if (S()) App.setMode(App.mode === 'bracket' ? null : 'bracket'); };
+  /* a side bracket: its label (↵ = a line break, as in the list), the side, its own font size */
+  function bracketPopover(k, at) {
+    const bk = (S().brackets || [])[k], rs = bk ? App.bracketRows(bk) : [];
+    if (!rs.length) return;
+    const what = rs.length > 1 ? `${rs.length} 行（${rs.map(r => App.rowLabel(r)).join('、')}）` : `「${App.rowLabel(rs[0])}」${bk.f0 > 0.02 || bk.f1 < 0.98 ? '的一段' : '整行'}`;
+    pop.innerHTML = `<h4>行旁括号 · ${esc(what)}</h4>
+      <div class="field"><input type="text" id="pbText" value="${esc((bk.text || '').replace(/\n/g, ' ↵ '))}" placeholder="如 IP: Flag、Input、WCL、(Ub)n" title="↵ = 换行"></div>
+      <div class="field inline"><label class="inline-label">放在</label><div class="seg"><button data-side="left" class="${bk.side !== 'right' ? 'on' : ''}">左边</button><button data-side="right" class="${bk.side === 'right' ? 'on' : ''}">右边</button></div></div>
+      <div class="field inline"><label class="inline-label">字号</label><input type="number" id="pbPt" min="4" max="14" step="0.5" class="num" placeholder="${S().style.fontPt}" value="${bk.pt || ''}"> pt
+        <span class="hint" style="margin:0">留空 = 跟随全局字号</span></div>
+      <p class="hint">盖住的范围不对：删掉，再用"行旁括号"重新拖一个。</p>
+      <div class="actions"><button class="btn sm danger" id="pbDel">删除</button><button class="btn sm primary" id="pbOk">完成</button></div>`;
+    placePopNear(at);
+    const q = id => pop.querySelector('#' + id);
+    q('pbText').addEventListener('input', live(e => { bk.text = e.target.value.replace(/\s*↵\s*/g, '\n'); }));
+    q('pbText').addEventListener('change', done());
+    q('pbText').addEventListener('keydown', e => { if (e.key === 'Enter' && !composing(e)) closePop(); });
+    q('pbPt').addEventListener('input', live(e => { const v = +e.target.value; if (e.target.value !== '' && v >= 4 && v <= 14) bk.pt = v; else if (e.target.value === '') delete bk.pt; }));
+    q('pbPt').addEventListener('change', done());
+    pop.querySelectorAll('[data-side]').forEach(b => b.onclick = () => { bk.side = b.dataset.side; App.commit(); bracketPopover(S().brackets.indexOf(bk), at); });
+    q('pbDel').onclick = () => { const i = S().brackets.indexOf(bk); if (i >= 0) S().brackets.splice(i, 1); dropPop(); App.commit(); toast('已删除这个括号（Ctrl+Z 可撤销）'); };
+    q('pbOk').onclick = () => closePop();
+    setTimeout(() => q('pbText') && q('pbText').focus({ preventScroll: true }), 0);
+  }
+  /* a target-band arrow (as GelFigure's): its name, where its size comes from (the marks; ≈ beyond the marked
+   * bands) or a size typed in, the mark (an arrowhead; * # † for other bands), the side, its own font size */
   function arrowPopover(k, at) {
     const a = S().arrows[k]; if (!a) return;
-    const row = App.row(a.row), sz = App.arrowSize(a);
-    const syms = [['◀', '箭头'], ['*', '*'], ['#', '#'], ['†', '†']];
+    const row = App.row(a.row), est = App.arrowSize(a);
+    let estHtml = '这条膜条还没标够 2 条 Marker 带：分子量无法估算（第 4 步标好后自动出现，或在下面填理论大小）';
+    if (est) {
+      estHtml = `按这条膜条标的 Marker 估算：<b>${esc(est)}</b>`;
+      if (/≈/.test(est)) estHtml += '<br><span class="warn-t">在标过的 Marker 带范围之外，是外推值，成图上标 ≈</span>';
+    }
     pop.innerHTML = `<h4>目标条带 · ${esc(row ? App.rowLabel(row) : '')}</h4>
-      <div class="field inline"><label class="inline-label">名称</label><input type="text" id="paText" style="flex:1" value="${esc(a.text)}" placeholder="可空，如 p-ERK1/2、剪切体"></div>
-      <div class="field inline"><label class="inline-label">符号</label><div class="seg">${syms.map(([s, t]) => `<button data-sym="${s}" class="${a.sym === s ? 'on' : ''}"${s === '*' ? ' title="常用来标非特异条带"' : ''}>${t}</button>`).join('')}</div></div>
-      <label class="switch"><input type="checkbox" id="paAuto" ${a.auto ? 'checked' : ''}${a.sym === '◀' ? '' : ' disabled'}><span>标分子量：${sz ? esc(sz) : '先在第 4 步标 Marker'}</span></label>
-      <div class="field inline"><label class="inline-label">放在</label><div class="seg"><button data-side="left" class="${a.side === 'left' ? 'on' : ''}">左边</button><button data-side="right" class="${a.side !== 'left' ? 'on' : ''}">右边</button></div></div>
+      <div class="field"><input type="text" id="paText" value="${esc(a.text)}" placeholder="名称（可空），如 p-ERK1/2、剪切体"></div>
+      <div class="field inline"><label class="inline-label">标记</label>
+        <select id="paSym" style="width:auto"><option value="◀">◀ 箭头</option><option value="*">* 非特异条带</option><option value="#"># 降解产物等</option><option value="†">† 其他</option></select></div>
+      <div class="est">${estHtml}</div>
+      <div class="field inline"><label class="switch"><input type="checkbox" id="paAuto" ${a.auto ? 'checked' : ''}><span>标注大小</span></label>
+        <input type="text" id="paSize" style="flex:1" value="${esc(a.sizeText || '')}" placeholder="${esc(est || '如 55 kDa')}" title="留空 = 用估算值；也可以填理论大小"></div>
+      <div class="field inline"><label class="inline-label">放在</label><div class="seg"><button data-side="left" class="${a.side === 'left' ? 'on' : ''}">左边</button><button data-side="right" class="${a.side !== 'left' ? 'on' : ''}">右边</button></div>
+        <span class="hint" style="margin:0">在成图上上下拖动箭头，可以移到这一行的另一条带</span></div>
+      <div class="field inline"><label class="inline-label">字号</label><input type="number" id="paPt" min="4" max="14" step="0.5" class="num" placeholder="${S().style.fontPt}" value="${a.pt || ''}"> pt
+        <span class="hint" style="margin:0">留空 = 跟随全局字号</span></div>
       <div class="actions"><button class="btn sm danger" id="paDel">删除</button><button class="btn sm primary" id="paOk">完成</button></div>`;
-    placePopAt(at.right + 10, at.top - 20);
-    const inp = pop.querySelector('#paText');
-    inp.addEventListener('input', live(e => { a.text = e.target.value; }));
-    inp.addEventListener('change', done());
-    inp.addEventListener('keydown', e => { if (e.key === 'Enter' && !composing(e)) closePop(); });
-    pop.querySelectorAll('[data-sym]').forEach(b => b.onclick = done(() => { a.sym = b.dataset.sym; arrowPopover(k, at); }));
-    pop.querySelectorAll('[data-side]').forEach(b => b.onclick = done(() => { a.side = b.dataset.side; arrowPopover(k, at); }));
-    pop.querySelector('#paAuto').addEventListener('change', done(e => { a.auto = e.target.checked; }));
-    pop.querySelector('#paDel').onclick = () => { S().arrows.splice(k, 1); closePop(); App.commit(); toast('已删除这个箭头（Ctrl+Z 可撤销）'); };
-    pop.querySelector('#paOk').onclick = () => closePop();
+    pop.querySelector('#paSym').value = a.sym;
+    placePopNear(at);
+    const q = id => pop.querySelector('#' + id);
+    q('paText').addEventListener('input', live(e => { a.text = e.target.value; }));
+    q('paText').addEventListener('change', done());
+    q('paText').addEventListener('keydown', e => { if (e.key === 'Enter' && !composing(e)) closePop(); });
+    q('paSym').addEventListener('change', done(e => { a.sym = e.target.value; }));
+    q('paAuto').addEventListener('change', done(e => { a.auto = e.target.checked; }));
+    q('paSize').addEventListener('input', live(e => { a.sizeText = e.target.value.trim(); if (a.sizeText) { a.auto = true; q('paAuto').checked = true; } }));
+    q('paSize').addEventListener('change', done());
+    q('paPt').addEventListener('input', live(e => { const v = +e.target.value; if (e.target.value !== '' && v >= 4 && v <= 14) a.pt = v; else if (e.target.value === '') delete a.pt; }));
+    q('paPt').addEventListener('change', done());
+    pop.querySelectorAll('[data-side]').forEach(b => b.onclick = () => { a.side = b.dataset.side; App.commit(); arrowPopover(S().arrows.indexOf(a), at); });
+    // (by identity: other arrows may have been deleted while this was open)
+    q('paDel').onclick = () => { const i = S().arrows.indexOf(a); if (i >= 0) S().arrows.splice(i, 1); dropPop(); App.commit(); toast('已删除这个箭头（Ctrl+Z 可撤销）'); };
+    q('paOk').onclick = () => closePop();
+    setTimeout(() => q('paText') && q('paText').focus({ preventScroll: true }), 0);
   }
   function renderAnno() {
     const st = S(), rows = [];
-    st.groups.forEach((g, k) => rows.push(`<div class="item"><span class="kind">分组</span><span class="idx" style="width:auto">${g.from}–${g.to}</span><input type="text" data-g="${k}" value="${esc(g.text)}" placeholder="分组文字"><button class="x" data-gdel="${k}">×</button></div>`));
+    // (a one-line field: a group label's line breaks show as ↵ and come back as breaks)
+    st.groups.forEach((g, k) => rows.push(`<div class="item"><span class="kind">分组</span><span class="idx" style="width:auto">${g.from}–${g.to}</span><input type="text" data-g="${k}" value="${esc((g.text || '').replace(/\n/g, ' ↵ '))}" placeholder="分组文字" title="↵ = 换行"><button class="x" data-gdel="${k}" aria-label="删除">×</button></div>`));
     st.conditions.forEach((c, r) => rows.push(`<div class="item"><span class="kind">条件</span><input type="text" data-c="${r}" value="${esc(c.name)}" placeholder="条件名，如 Dox"><button class="x" data-cdel="${r}">×</button></div>`));
     (st.arrows || []).forEach((a, k) => {
       const row = App.row(a.row); if (!row) return;
       const what = a.sym === '◀' ? App.arrowLabel(a) || '未标分子量' : a.sym + (a.text ? ' ' + a.text : '');
       rows.push(`<div class="item"><span class="kind">箭头</span><button class="link anno-arrow" data-a="${k}" title="点开修改">${esc(App.rowLabel(row))} · ${esc(what)}</button><button class="x" data-adel="${k}">×</button></div>`);
     });
+    (st.brackets || []).forEach((bk, k) => {
+      const rs = App.bracketRows(bk); if (!rs.length) return;
+      const span = rs.length > 1 ? `${App.rowLabel(rs[0])} – ${App.rowLabel(rs[rs.length - 1])}` : App.rowLabel(rs[0]);
+      rows.push(`<div class="item"><span class="kind">括号</span><button class="link anno-arrow" data-b="${k}" title="点开修改">${esc(span)} · ${esc((bk.text || '').replace(/\n/g, ' ') || '（没写文字）')}</button><button class="x" data-bdel="${k}">×</button></div>`);
+    });
     const L = $('annoList'); L.innerHTML = rows.join('');
     L.querySelectorAll('[data-a]').forEach(b => b.onclick = () => arrowPopover(+b.dataset.a, b.getBoundingClientRect()));
     L.querySelectorAll('[data-adel]').forEach(b => b.onclick = done(() => st.arrows.splice(+b.dataset.adel, 1)));
-    L.querySelectorAll('[data-g]').forEach(i => { const g = st.groups[+i.dataset.g]; i.addEventListener('input', live(e => { g.text = e.target.value; })); i.addEventListener('change', done()); });
+    L.querySelectorAll('[data-b]').forEach(b => b.onclick = () => bracketPopover(+b.dataset.b, b.getBoundingClientRect()));
+    L.querySelectorAll('[data-bdel]').forEach(b => b.onclick = done(() => st.brackets.splice(+b.dataset.bdel, 1)));
+    L.querySelectorAll('[data-g]').forEach(i => { const g = st.groups[+i.dataset.g]; i.addEventListener('input', live(e => { g.text = e.target.value.replace(/\s*↵\s*/g, '\n'); })); i.addEventListener('change', done()); });
     L.querySelectorAll('[data-c]').forEach(i => { const c = st.conditions[+i.dataset.c]; i.addEventListener('input', live(e => { c.name = e.target.value; })); i.addEventListener('change', done()); });
     L.querySelectorAll('[data-gdel]').forEach(b => b.onclick = done(() => st.groups.splice(+b.dataset.gdel, 1)));
     L.querySelectorAll('[data-cdel]').forEach(b => b.onclick = done(() => st.conditions.splice(+b.dataset.cdel, 1)));
@@ -704,11 +842,37 @@
 
   /* ---------- 5 layout ---------- */
   const num = (id, key, lo, hi) => $(id).addEventListener('change', done(e => { S().style[key] = clamp(+e.target.value || S().style[key], lo, hi); }));
-  num('mmPerLane', 'mmPerLane', 2, 15); num('fontPt', 'fontPt', 4, 14); num('rowGap', 'rowGapPt', 0, 10);
+  num('mmPerLane', 'mmPerLane', 2, 15); num('fontPt', 'fontPt', 4, 14); num('rowGap', 'rowGapPt', 0, 10); num('lineW', 'lineWidthPt', 0.25, 2); num('minFontPt', 'minFontPt', 4, 10);
+  // per-kind text sizes: empty = the figure font
+  ['lanePt', 'namePt', 'markerPt'].forEach(id => $(id).addEventListener('change', done(e => { const v = +e.target.value; S().style[id] = e.target.value === '' || !(v > 0) ? null : clamp(v, 4, 14); })));
   $('labelAngle').addEventListener('change', done(e => { S().style.labelAngle = e.target.value; }));
-  ['invert', 'showMW', 'unitHeader', 'border'].forEach(id => $(id).addEventListener('change', done(e => { S().style[id] = e.target.checked; })));
+  $('groupFit').addEventListener('change', done(e => { S().style.groupFit = e.target.value; }));
+  ['invert', 'showMW', 'unitHeader', 'border', 'laneNumbers', 'groupTicks'].forEach(id => $(id).addEventListener('change', done(e => { S().style[id] = e.target.checked; })));
   $('panelLetter').addEventListener('change', done(e => { S().style.panelLetter = e.target.value.trim(); }));
   ['mwSide', 'nameSide'].forEach(id => $(id).addEventListener('change', done(e => { S().style[id] = e.target.value; })));
+  // a journal column = the figure's total width, labels included: solved for the lane width (as GelFigure)
+  $('widthPreset').addEventListener('change', e => {
+    const target = +e.target.value; e.target.value = '';
+    if (!S() || !target || !App.figLanes().length) return;
+    const st = S().style, n = App.figLanes().length;
+    for (let k = 0; k < 4; k++) {          // (labels hardly depend on the lane width: a few rounds converge)
+      const total = G.BRender.build(false).w / App.MM;
+      st.mmPerLane = clamp(Math.round((st.mmPerLane + (target - total) / n) * 10) / 10, 2, 15);
+    }
+    App.commit();
+    const got = G.BRender.build(false).w / App.MM;
+    toast(Math.abs(got - target) < 1.5 ? `成图总宽 ${got.toFixed(1)} mm（每道 ${st.mmPerLane} mm）`
+      : `每道已到${st.mmPerLane >= 15 ? '最宽 15' : '最窄 2'} mm，成图总宽 ${got.toFixed(1)} mm（到不了 ${target} mm）`, 3600);
+  });
+  $('btnResetLayout').onclick = done(() => { App.resetLayout(); toast('版式已重置为默认（Ctrl+Z 可撤销）'); });
+  // the bands' own resolution at this lane width, and the widest lane that keeps 300 dpi
+  function updateDpiLine() {
+    const eff = Math.round(App.effectiveDpi()), safe = App.maxSafeMmPerLane(300), mm = S().style.mmPerLane;
+    if (!isFinite(eff)) { $('dpiLine').innerHTML = ''; return; }
+    $('dpiLine').innerHTML = eff >= 300 ? `条带有效分辨率 <span class="ok">${eff} dpi</span>`
+      : `条带有效分辨率 <span class="bad">${eff} dpi</span>（&lt; 300）：每道不超过 <b>${safe} mm</b> 才能保证 300 dpi` + (safe >= 2 && mm > safe ? ` <button class="btn sm" id="btnSafeW">改为 ${safe} mm</button>` : '');
+    const b = $('btnSafeW'); if (b) b.onclick = done(() => { S().style.mmPerLane = safe; });
+  }
 
   /* ---------- middle header: image tabs + levels ---------- */
   const toSl = v => Math.round(Math.sqrt(clamp(v, 0, 1)) * 1000), fromSl = s => (s / 1000) ** 2;
@@ -787,50 +951,115 @@
   const getV = e => e.kind === 'lane' ? S().lanes[e.id - 1].name : e.kind === 'rowname' ? (App.row(e.id) || {}).name : e.kind === 'group' ? S().groups[e.id].text : S().conditions[e.id].name;
   const setV = (e, v) => { if (e.kind === 'lane') S().lanes[e.id - 1].name = v; else if (e.kind === 'rowname') { const r = App.row(e.id); if (r) r.name = v; } else if (e.kind === 'group') S().groups[e.id].text = v; else S().conditions[e.id].name = v; };
   const editEl = e => prev.querySelector(e.kind === 'lane' ? `g[data-edit="lane"][data-j="${e.id}"]` : e.kind === 'rowname' ? `g[data-edit="rowname"][data-row="${e.id}"]` : e.kind === 'group' ? `g[data-edit="group"][data-k="${e.id}"]` : `g[data-edit="condname"][data-r="${e.id}"]`);
+  /* the text editor over the figure: one line (with the protein-name suggestions), or several for a group label
+   * (Shift+Enter); under it a bar with the font size of what is edited (lane names and protein names share one
+   * each, a group or a condition row has its own) and, for a group, a line break (as GelFigure) */
+  const fta = $('floatTa'), bar = $('fedBar');
+  const edBox = () => (edit && edit.kind === 'group' ? fta : fed);
+  const sizeHost = () => (edit.kind === 'lane' ? { o: S().style, k: 'lanePt' } : edit.kind === 'rowname' ? { o: S().style, k: 'namePt' }
+    : { o: edit.kind === 'group' ? S().groups[edit.id] : S().conditions[edit.id], k: 'pt' });
+  const curSize = () => { const h = sizeHost(); return (h.o && h.o[h.k]) || S().style.fontPt; };
+  function setSize(v) {
+    const h = sizeHost(); if (!h.o) return;
+    if (v == null || v === S().style.fontPt) { if (h.k === 'pt') delete h.o.pt; else h.o[h.k] = null; }
+    else h.o[h.k] = clamp(Math.round(v * 2) / 2, 4, 14);
+    syncBar(); App.refresh();
+  }
+  function syncBar() {
+    if (!edit) return;
+    const h = sizeHost(), own = h.o && h.o[h.k];
+    $('fedSizeLbl').textContent = edit.kind === 'lane' ? '泳道名字号' : edit.kind === 'rowname' ? '蛋白名字号' : edit.kind === 'group' ? '字号' : '本行字号';
+    $('fedSize').textContent = curSize() + ' pt';
+    $('fedReset').classList.toggle('hidden', !own);
+    $('fedBr').classList.toggle('hidden', edit.kind !== 'group');
+    $('fedHint').textContent = edit.kind === 'group' ? 'Shift+Enter 换行' : '';
+  }
+  function placeBar() {
+    const r = edBox().getBoundingClientRect();
+    bar.classList.remove('hidden');
+    const below = r.bottom + 4 + bar.offsetHeight < innerHeight;
+    bar.style.left = clamp(r.left, 4, Math.max(4, innerWidth - bar.offsetWidth - 4)) + 'px';
+    bar.style.top = (below ? r.bottom + 4 : r.top - bar.offsetHeight - 4) + 'px';
+  }
+  // the multi-line editor grows with typed line breaks
+  const autoRows = () => { fta.rows = Math.min(4, Math.max(1, fta.value.split('\n').length)); if (edit) placeBar(); };
   function openEd(kind, id) {
+    if (edit) closeEd(false);          // (a previous editor whose blur has not been handled yet)
     closePop();
     const e = { kind, id }, el = editEl(e); if (!el) return;
     const r = el.getBoundingClientRect();
     edit = Object.assign(e, { orig: getV(e) || '' });
-    fed.value = edit.orig;
-    fed.placeholder = kind === 'lane' ? `泳道 ${id} 名称` : kind === 'rowname' ? '蛋白名（如 GAPDH）' : kind === 'group' ? '分组文字' : '条件名';
+    const box = edBox();
+    box.value = edit.orig;
+    box.placeholder = kind === 'lane' ? `泳道 ${id} 名称` : kind === 'rowname' ? '蛋白名（如 GAPDH）' : kind === 'group' ? '分组文字' : '条件名';
     if (kind === 'rowname') { fed.setAttribute('list', 'protList'); fillDatalist(App.rowKda(App.row(id))); selectRow(id, true); } else fed.removeAttribute('list');
     const w = Math.max(130, Math.min(240, r.width + 60));
-    fed.style.width = w + 'px';
-    fed.style.left = clamp(kind === 'rowname' ? r.left - 6 : r.left + r.width / 2 - w / 2, 4, innerWidth - w - 4) + 'px';
-    fed.style.top = clamp(r.top + r.height / 2 - 15, 56, innerHeight - 40) + 'px';
-    fed.classList.remove('hidden'); fed.focus(); fed.select();
+    box.style.width = w + 'px';
+    box.style.left = clamp(kind === 'rowname' ? r.left - 6 : r.left + r.width / 2 - w / 2, 4, innerWidth - w - 4) + 'px';
+    box.style.top = clamp(r.top + r.height / 2 - 15, 56, innerHeight - 40) + 'px';
+    box.classList.remove('hidden');
+    if (box === fta) { fta.rows = 1; autoRows(); }
+    syncBar(); placeBar();
+    box.focus(); box.select();
   }
+  // only a group label keeps line breaks; spaces around them tidied
+  const cleanText = (kind, v) => (kind === 'group' ? v.split('\n').map(s => s.trim()).join('\n').replace(/\n{2,}/g, '\n').trim() : v.replace(/\s*\n\s*/g, ' ').trim());
   function closeEd(revert) {
     if (!edit) return;
-    const e = edit; edit = null;
-    setV(e, revert ? e.orig : fed.value.trim());
-    fed.classList.add('hidden');
+    const e = edit, box = edBox(); edit = null;
+    setV(e, revert ? e.orig : cleanText(e.kind, box.value));
+    fed.classList.add('hidden'); fta.classList.add('hidden'); bar.classList.add('hidden');
     App.commit();
   }
-  fed.addEventListener('input', () => { if (edit) { setV(edit, fed.value); App.refresh(); } });
-  fed.addEventListener('keydown', e => {
-    if (!edit || composing(e)) return;
-    if (e.key === 'Escape') { e.preventDefault(); closeEd(true); return; }
-    if (e.key !== 'Enter' && e.key !== 'Tab') return;
-    e.preventDefault();
-    const { kind, id } = edit; closeEd(false);
-    const back = e.shiftKey;
-    if (kind === 'lane') {
-      const fl = App.figLanes(), k = fl.indexOf(id) + (back ? -1 : 1);
-      if (k >= 0 && k < fl.length) requestAnimationFrame(() => openEd('lane', fl[k])); else toast('泳道名称填完了');
-    } else if (kind === 'rowname') {
-      const vis = S().rows.filter(r => !r.hidden), k = vis.findIndex(r => r.id === id) + (back ? -1 : 1);
-      if (k >= 0 && k < vis.length) requestAnimationFrame(() => openEd('rowname', vis[k].id)); else toast('蛋白名填完了');
-    }
+  let barPress = false;
+  [fed, fta].forEach(box => {
+    box.addEventListener('input', () => {
+      if (!edit || edBox() !== box) return;
+      if (edit.kind !== 'group' && box.value.includes('\n')) box.value = box.value.replace(/\n/g, ' ');     // (pasted text)
+      setV(edit, box.value); if (box === fta) autoRows(); App.refresh();
+    });
+    box.addEventListener('keydown', e => {
+      if (!edit || composing(e)) return;          // (the IME is choosing characters: Enter belongs to it)
+      if (e.key === 'Escape') { e.preventDefault(); closeEd(true); return; }
+      if (e.key === 'Enter' && edit.kind === 'group' && (e.shiftKey || e.altKey)) return;      // a line break (the textarea inserts it)
+      if (e.key !== 'Enter' && e.key !== 'Tab') return;
+      e.preventDefault();
+      const { kind, id } = edit; closeEd(false);
+      const back = e.shiftKey;
+      if (kind === 'lane') {
+        const fl = App.figLanes(), k = fl.indexOf(id) + (back ? -1 : 1);
+        if (k >= 0 && k < fl.length) requestAnimationFrame(() => openEd('lane', fl[k])); else toast('泳道名称填完了');
+      } else if (kind === 'rowname') {
+        const vis = S().rows.filter(r => !r.hidden), k = vis.findIndex(r => r.id === id) + (back ? -1 : 1);
+        if (k >= 0 && k < vis.length) requestAnimationFrame(() => openEd('rowname', vis[k].id)); else toast('蛋白名填完了');
+      }
+    });
+    // leaving the field finishes the edit — unless it went to the size / line-break bar
+    box.addEventListener('blur', () => setTimeout(() => { if (edit && !barPress && document.activeElement !== edBox()) closeEd(false); }, 120));
   });
-  fed.addEventListener('blur', () => setTimeout(() => { if (edit && document.activeElement !== fed) closeEd(false); }, 120));
+  bar.addEventListener('pointerdown', e => { barPress = true; e.preventDefault(); setTimeout(() => { barPress = false; }, 800); });
+  bar.addEventListener('mousedown', e => e.preventDefault());       // (the focus stays in the text field)
+  bar.addEventListener('click', e => {
+    const b = e.target.closest('button[data-fz]'); barPress = false;
+    if (!b || !edit) return;
+    const k = b.dataset.fz;
+    if (k === '+' || k === '-') setSize(curSize() + (k === '+' ? 0.5 : -0.5));
+    else if (k === 'reset') setSize(null);
+    else if (k === 'br' && edit.kind === 'group') { fta.setRangeText('\n', fta.selectionStart, fta.selectionEnd, 'end'); fta.dispatchEvent(new Event('input')); }
+    edBox().focus();
+  });
   function editRowName(id) { requestAnimationFrame(() => requestAnimationFrame(() => openEd('rowname', id))); }
+  // undo / redo / another project: open editors belong to the old state — dropped without writing back
+  App.onSwap = () => {
+    if (edit) { edit = null; fed.classList.add('hidden'); fta.classList.add('hidden'); bar.classList.add('hidden'); }
+    dropPop();
+  };
 
   let press = null;
   const laneAt = (x, y) => { const el = document.elementFromPoint(x, y), g = el && el.closest && el.closest('g[data-edit="lane"]'); return g ? +g.dataset.j : null; };
   const hl = (a, b) => prev.querySelectorAll('g[data-edit="lane"]').forEach(g => { const j = +g.dataset.j; g.classList.toggle('active', a != null && j >= Math.min(a, b) && j <= Math.max(a, b)); });
   prev.addEventListener('mousedown', e => {
+    if (App.mode === 'bracket') return;
     const g = e.target.closest('g[data-edit="lane"]');
     if (g) { press = { j: +g.dataset.j, end: +g.dataset.j, x: e.clientX, y: e.clientY, moved: false }; e.preventDefault(); }
   });
@@ -848,14 +1077,92 @@
       const k = S().groups.length - 1; requestAnimationFrame(() => openEd('group', k));
     } else if (!p.moved) openEd('lane', p.j);
   });
+  // a target-band arrow dragged up / down the figure: onto another band of its row (snaps on release)
+  let adrag = null;
+  prev.addEventListener('mousedown', e => {
+    const g = e.button === 0 && S() && App.mode !== 'bracket' && e.target.closest('g[data-edit="arrow"]'); if (!g) return;
+    const a = S().arrows[+g.dataset.k], row = a && App.row(a.row), r = row && rowRects(lastFig).find(x => x.id === a.row);
+    if (!r) return;
+    const mid = App.arrowV(a) - a.db, sg = row.segs[0];
+    adrag = { a, row, y0: e.clientY, db0: a.db, k: (row.above + row.below) / Math.max(1, r.bot - r.top), lo: sg.vc - row.above - mid, hi: sg.vc + row.below - mid, moved: false };
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', e => {
+    if (!adrag) return;
+    const dy = e.clientY - adrag.y0;
+    if (Math.abs(dy) > 3) adrag.moved = true;
+    if (adrag.moved) { adrag.a.db = clamp(adrag.db0 + dy * adrag.k, adrag.lo, adrag.hi); App.refresh(); }
+  });
+  window.addEventListener('mouseup', () => {
+    if (!adrag) return;
+    const d = adrag; adrag = null;
+    if (!d.moved) return;                 // (a click: its settings, by the click handler)
+    const v = App.arrowV(d.a), mid = v - d.a.db;
+    d.a.db = Math.round((App.snapBandV(d.row, v) - mid) * 10) / 10;
+    swallowClick = true; setTimeout(() => { swallowClick = false; }, 0);
+    App.commit();
+  });
+  /* a side bracket drawn on the figure (bracket tool): dragged along the rows, its ends snapping to a row's top or
+   * bottom when near one (Alt: no snapping); a click covers that one row */
+  let bdrag = null;
+  function rowAtY(my, alt) {
+    const rs = rowRects(lastFig);
+    let best = null;
+    rs.forEach(r => { if (my >= r.top && my <= r.bot) best = { r, f: (my - r.top) / Math.max(1, r.bot - r.top) }; });
+    // (between the rows, or past them: the nearest row edge)
+    if (!best) rs.forEach(r => [[r.top, 0], [r.bot, 1]].forEach(([y, fr]) => { const d = Math.abs(my - y); if (!best || d < best.d) best = { r, f: fr, d }; }));
+    if (best && !alt) best.f = best.f < 0.2 ? 0 : best.f > 0.8 ? 1 : best.f;
+    return best;
+  }
+  function bracketGhost(d) {
+    const ov = prev.querySelector('.prev-ov'), svg = prev.querySelector('svg'); if (!ov || !svg) return;
+    const pr = prev.getBoundingClientRect(), sr = svg.getBoundingClientRect(), right = S().style.nameSide === 'left';
+    const y = p => p.r.top + p.f * (p.r.bot - p.r.top), y1 = Math.min(y(d.a), y(d.b)), y2 = Math.max(y(d.a), y(d.b));
+    let gh = ov.querySelector('.brk-ghost');
+    if (!gh) { gh = document.createElement('div'); ov.appendChild(gh); }
+    gh.className = 'brk-ghost ' + (right ? 'r' : 'l');
+    Object.assign(gh.style, { left: (right ? sr.right - pr.left + 2 : sr.left - pr.left - 9) + 'px', top: y1 + 'px', height: Math.max(2, y2 - y1) + 'px' });
+    const ids = new Set([d.a.r.id, d.b.r.id]), n = ids.size === 1 ? 1 : App.bracketRows({ r0: d.a.r.id, r1: d.b.r.id }).filter(r => !r.hidden).length;
+    // (above the bracket: the rows below the pointer stay visible)
+    tipAt(ov, (right ? sr.right - pr.left + 14 : sr.left - pr.left + 6), Math.max(2, y1 - 26), n > 1 ? `盖住 ${n} 行（如 IP / Input）` : d.a.f === 0 && d.b.f === 1 || d.a.f === 1 && d.b.f === 0 ? '整行' : '一行里的一段（如 (Ub)n 拖尾）');
+  }
+  prev.addEventListener('mousedown', e => {
+    if (e.button !== 0 || !S() || App.mode !== 'bracket' || !lastFig) return;
+    const a = rowAtY(e.clientY - prev.getBoundingClientRect().top, e.altKey); if (!a) return;
+    bdrag = { a, b: a, y0: e.clientY, moved: false };
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', e => {
+    if (!bdrag) return;
+    if (Math.abs(e.clientY - bdrag.y0) > 4) bdrag.moved = true;
+    if (!bdrag.moved) return;
+    bdrag.b = rowAtY(e.clientY - prev.getBoundingClientRect().top, e.altKey) || bdrag.b;
+    bracketGhost(bdrag);
+  });
+  window.addEventListener('mouseup', () => {
+    if (!bdrag) return;
+    const d = bdrag; bdrag = null;
+    const ov = prev.querySelector('.prev-ov');
+    if (ov) { ov.querySelectorAll('.brk-ghost').forEach(x => x.remove()); tipAt(ov, 0, 0, ''); }
+    swallowClick = true; setTimeout(() => { swallowClick = false; }, 0);
+    let a = d.a, b = d.b;
+    if (!d.moved) { a = { r: d.a.r, f: 0 }; b = { r: d.a.r, f: 1 }; }       // (a click: the whole row)
+    else if (a.r.id === b.r.id && Math.abs(a.f - b.f) < 0.05) { toast('拖得太短：沿着行上下拖，或在一行上点一下盖住整行'); return; }
+    const bk = App.addBracket(a.r.id, a.f, b.r.id, b.f);
+    App.setMode(null); App.commit();
+    const k = S().brackets.indexOf(bk), g = prev.querySelector(`g[data-edit="bracket"][data-k="${k}"]`);
+    if (g) bracketPopover(k, g.getBoundingClientRect());
+  });
   prev.addEventListener('click', e => {
     if (!S() || swallowClick) return;
     const img = e.target.closest('image[data-row]');
     if (img && App.mode === 'arrow') { placeArrow(img.dataset.row, e.clientY); return; }
     if (img) { selectRow(img.dataset.row, true); return; }
-    const g = e.target.closest('[data-edit]'); if (!g) return;
+    const g = e.target.closest('[data-edit]');
+    if (!g) { if (App.mode === 'arrow') toast('请点在成图里某一行的条带上'); return; }
     const kind = g.dataset.edit;
     if (kind === 'arrow') arrowPopover(+g.dataset.k, g.getBoundingClientRect());
+    else if (kind === 'bracket') bracketPopover(+g.dataset.k, g.getBoundingClientRect());
     else if (kind === 'rowname') openEd('rowname', g.dataset.row);
     else if (kind === 'group') openEd('group', +g.dataset.k);
     else if (kind === 'condname') openEd('condname', +g.dataset.r);
@@ -916,7 +1223,7 @@
     toast(App.arrowSize(a) ? `已标出 ${App.arrowSize(a)}：可以加名称、换成 * # †、放到另一边` : '已加箭头：第 4 步标好 Marker 后自动显示分子量', 3600);
   }
   prev.addEventListener('mousedown', e => {
-    if (e.button !== 0 || !S() || App.mode === 'arrow') return;
+    if (e.button !== 0 || !S() || App.mode === 'arrow' || App.mode === 'bracket') return;
     const tag = e.target.closest('.rowtag'), img = !tag && e.target.closest('image[data-row]');
     if (!tag && !img) return;
     pdrag = { id: (tag || img).dataset.row, piece: img ? img.dataset.piece : null, x0: e.clientX, y0: e.clientY, mode: null, onlyOrder: !!tag, k: 0, drop: null, alt: false };
@@ -1089,6 +1396,15 @@
     openStep(n + 1);
   }
   [1, 2, 3, 4].forEach(n => { $('next' + n).onclick = () => nextStep(n); });
+  // (a fix in the export check: on to the names, the first one missing focused)
+  App.goNames = lanes => {
+    S().step = Math.max(S().step, 5); openStep(5);
+    setTimeout(() => {
+      if (lanes) { const j = App.figLanes().find(x => !(S().lanes[x - 1] || {}).name); if (j) openEd('lane', j); return; }
+      const r = S().rows.find(x => !x.hidden && !x.name), i = r && $('nameList').querySelector(`.name-item[data-id="${r.id}"] input`);
+      if (i) i.focus();
+    }, 300);
+  };
   $('skip4').onclick = () => { S().style.showMW = false; toast('这次不标分子量：成图不显示分子量刻度（第 5 步"更多版式"里可以再打开）', 3600); nextStep(4); };
   // a done step's header opens it again
   Object.entries(STEP_SEC).forEach(([n, id]) => $(id).querySelector('.sec-head').addEventListener('click', () => { if (S() && +n <= S().step && +n !== App.curStep) openStep(+n); }));
@@ -1154,11 +1470,17 @@
   function syncLayout() {
     const y = S().style;
     $('mmPerLane').value = y.mmPerLane; $('fontPt').value = y.fontPt; $('rowGap').value = y.rowGapPt; $('labelAngle').value = String(y.labelAngle);
+    $('lineW').value = y.lineWidthPt;
+    ['lanePt', 'namePt', 'markerPt'].forEach(id => { $(id).value = y[id] || ''; $(id).placeholder = y.fontPt; });
+    $('groupFit').value = y.groupFit || 'wrap'; $('minFontPt').value = y.minFontPt || 5;
+    $('minFontRow').classList.toggle('hidden', (y.groupFit || 'wrap') !== 'shrink');
     $('invert').checked = y.invert; $('showMW').checked = y.showMW; $('unitHeader').checked = y.unitHeader; $('border').checked = !!y.border; $('panelLetter').value = y.panelLetter || '';
+    $('laneNumbers').checked = !!y.laneNumbers; $('groupTicks').checked = !!y.groupTicks;
     $('mwSide').value = y.mwSide || 'left'; $('nameSide').value = y.nameSide || 'right';
     $('dpiTop').value = String(y.dpi);
     $('stLayout').textContent = `${y.mmPerLane} mm/泳道 · ${y.fontPt} pt`;
     $('btnUndo').disabled = App.hist.length < 2; $('btnRedo').disabled = !App.future.length;
+    updateDpiLine();
   }
 
   /* the panel drawn again while a protein name is being typed in the list: that row's field gets the focus (and
@@ -1183,7 +1505,7 @@
   App.on(what => {
     if (!S()) return;
     if (what === 'loaded') {
-      $('emptyState').classList.add('hidden'); $('sections').classList.remove('hidden');
+      $('emptyState').classList.add('hidden'); $('sections').classList.remove('hidden'); $('draftBox').classList.add('hidden');
       // the step to go on with (a membrane just added: its Marker picture first)
       App.curStep = S().step;
       if (App.curStep === 1) { const b = App.blot(App.viewBlot); if (b && b.marker) App.viewImg = b.marker; }
@@ -1220,14 +1542,14 @@
     pages.forEach((p, k) => {
       const sc = Wout / p.rec.img.w, h = p.rec.img.h * sc, top = y0 + fs * 2.2, toRaw = (pc, xy) => App.rawPoint(p.rec.id, pc.id, xy[0], xy[1]);
       ctx.fillStyle = '#000'; ctx.font = `bold ${fs * 0.8}px Arial`;
-      ctx.fillText(`${App.blotName(p.b)} — ${p.rec.kind === 'marker' ? 'white-light marker image' : 'exposure ' + App.expoLabel(p.rec)} — ${p.rec.name}`, 14, y0 + fs * 1.4);
+      ctx.fillText(`${App.blotNameEn(p.b)} — ${p.rec.kind === 'marker' ? 'white-light marker image' : 'exposure ' + App.expoLabel(p.rec)} — ${p.rec.name}`, 14, y0 + fs * 1.4);
       ctx.drawImage(G.View.dispCanvas(p.rec, true), 0, top, Wout, h);
       const vis = new Set(App.figLanes());
       st.rows.filter(r => !r.hidden && r.blot === p.b.id && (p.rec.kind === 'marker' || r.img === p.rec.id)).forEach(r => {
         let last = null;
         r.segs.forEach(sg => {
           const pc = App.piece(p.b, sg.piece); if (!pc || !sg.lanes.length) return;
-          const F = WB.frame(pc.cx, pc.cy, pc.angle), vT = sg.vc - r.above, vB = sg.vc + r.below;
+          const F = App.segFrame(pc, sg), vT = sg.vc - r.above, vB = sg.vc + r.below;   // (a tilted box drawn tilted)
           const pts = [[sg.x0, vT], [sg.x1, vT], [sg.x1, vB], [sg.x0, vB]].map(([u, v]) => toRaw(pc, WB.toImg(F, u, v)));
           ctx.strokeStyle = '#e03131'; ctx.lineWidth = 2; ctx.beginPath();
           pts.forEach(([x, y], i) => { if (i) ctx.lineTo(x * sc, top + y * sc); else ctx.moveTo(x * sc, top + y * sc); }); ctx.closePath(); ctx.stroke();
@@ -1251,19 +1573,20 @@
     const st = S(), C = App.columns(), fl = C.vis;
     const data = C.rows.map((r, ri) => {
       const b = App.blot(r.blot), rec = App.images.get(r.img);
-      const lanes = C.src[ri].map(s => s && s.pc && { F: WB.frame(s.pc.cx, s.pc.cy, s.pc.angle), uc: s.u, hw: App.segPitch(s.sg) * 0.33,
+      // (in the box's own frame: a tilted box is read along its tilt, as in the figure)
+      const lanes = C.src[ri].map(s => s && s.pc && { F: App.segFrame(s.pc, s.sg), uc: s.u, hw: App.segPitch(s.sg) * 0.33,
         vTop: s.sg.vc - r.above, vBot: s.sg.vc + r.below, b0: s.sg.vc + s.sg.b0, b1: s.sg.vc + s.sg.b1 });
       return { r, b, rec, d: WB.densitometry(rec.img, rec.cs, lanes) };
     });
     const head = ['protein', 'membrane', 'exposure'].concat(fl.map(j => st.lanes[j - 1].name || 'lane ' + j));
     const lines = [head];
-    data.forEach(x => lines.push([x.r.name || '?', App.blotName(x.b), App.expoLabel(x.rec)].concat(x.d.map(v => (v ? v.volume.toFixed(2) + (v.saturated ? ' (SAT)' : '') : '')))));
+    data.forEach(x => lines.push([x.r.name || '?', App.blotNameEn(x.b), App.expoLabel(x.rec)].concat(x.d.map(v => (v ? v.volume.toFixed(2) + (v.saturated ? ' (SAT)' : '') : '')))));
     // normalized to a same-membrane loading control, then to the first lane
     const ctrls = data.filter(x => App.isLoading(x.r));
     data.filter(x => !App.isLoading(x.r)).forEach(x => {
       const c = ctrls.find(c => c.b === x.b); if (!c) return;
       const ratio = x.d.map((v, i) => (v && c.d[i] ? v.volume / Math.max(1e-9, c.d[i].volume) : null)), r0 = ratio.find(v => v) || 1;
-      lines.push([`${x.r.name}/${c.r.name} (rel. lane 1)`, App.blotName(x.b), ''].concat(ratio.map(v => (v == null ? '' : (v / r0).toFixed(3)))));
+      lines.push([`${x.r.name}/${c.r.name} (rel. lane 1)`, App.blotNameEn(x.b), ''].concat(ratio.map(v => (v == null ? '' : (v / r0).toFixed(3)))));
     });
     lines.push([]); lines.push(['Volumes = sum of (pixel - local background) over the band, on the exposure shown in the figure. SAT = saturated pixels: do not quantify.']);
     const csv = lines.map(l => l.map(v => /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v).join(',')).join('\r\n');
@@ -1271,12 +1594,32 @@
     toast('已导出定量 CSV（用于参考；正式定量请用 ≥3 次独立实验）', 3600);
   }
 
-  G.UI = { toast, editRowName, openEd, markPicker, openStep, nextStep, lastFig: () => lastFig,
+  G.UI = { toast, editRowName, openEd, markPicker, openStep, nextStep, lastFig: () => lastFig, preflight,
     piecesChanged: () => { $('stPieces').textContent = '改过了：点"下一步"生效'; } };
 
-  /* ---------- dev params ---------- */
   const qs = new URLSearchParams(location.search);
-  if (qs.get('demo') === '1' || qs.get('srcdir') || qs.get('demomove')) setTimeout(async () => {
+  const scripted = !!(qs.get('demo') === '1' || qs.get('srcdir') || qs.get('demomove'));
+
+  /* ---------- the draft of last time (offered on the start screen, as GelFigure) ---------- */
+  async function offerDraft() {
+    if (scripted && !qs.get('draft')) return;
+    const d = await App.peekDraft();
+    if (!d || S()) return;
+    const s = d.summary || {};
+    $('draftName').textContent = `${s.images || '?'} 张图 · ${s.membranes || '?'} 张膜${s.rows ? ` · ${s.rows} 个蛋白` : ''}${s.names && s.names.length ? '（' + s.names.join('、') + '）' : ''}`;
+    $('draftTime').textContent = '保存于 ' + new Date(d.savedAt).toLocaleString('zh-CN');
+    $('draftBox').classList.remove('hidden');
+  }
+  $('btnDraftRestore').onclick = async () => {
+    try { await App.restoreDraft(); toast('已恢复上次的进度'); } catch (e) { alert('恢复失败：' + e.message); }
+  };
+  $('btnDraftDrop').onclick = async () => { await App.dropDraft(); $('draftBox').classList.add('hidden'); };
+  offerDraft();
+
+  /* ---------- dev params ---------- */
+  if (scripted) setTimeout(async () => {
+    App.forceJsHash = true;                   // (WebCrypto runs off the virtual clock of headless test runs)
+    App.noDraft = !qs.get('draft');           // (scripted runs leave no draft unless asked: &draft=1)
     if (qs.get('noalign') === '1') App.devNoAlign = true;
     if (qs.get('nochemi') === '1') App.devNoChemi = true;      // (strips and ladder lanes without the exposures' check)
     if (qs.get('dbg') === '1') App._dbg = [];

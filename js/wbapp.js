@@ -29,13 +29,53 @@
   }
 
   const App = { images: new Map(), analysis: {}, S: null, hist: [], future: [], listeners: [], selRow: null, selSeg: null, selLane: null, viewBlot: null, viewImg: null, mode: null };
+  App.VERSION = '0.7.0';
   try { App.prefLadder = localStorage.getItem('blotfig.ladder') || null; } catch (e) { App.prefLadder = null; }
 
+  /* ---------- file fingerprints (as GelFigure): every picture's SHA-256, in the project, the processing log and
+   * the exports' summary ---------- */
+  App.sha256 = async function (buffer) {
+    // forceJsHash: headless test runs (off-thread WebCrypto does not keep to their virtual clock)
+    if (window.crypto && crypto.subtle && !App.forceJsHash) {
+      try { return [...new Uint8Array(await crypto.subtle.digest('SHA-256', buffer))].map(b => b.toString(16).padStart(2, '0')).join(''); } catch (e) { /* fall through */ }
+    }
+    return sha256js(new Uint8Array(buffer));
+  };
+  // small pure-JS fallback (some browsers have no crypto.subtle on file:// pages)
+  function sha256js(m) {
+    const K = new Uint32Array([0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2]);
+    const H = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
+    const l = m.length, nb = ((l + 9 + 63) >> 6) << 6, p = new Uint8Array(nb);
+    p.set(m); p[l] = 0x80;
+    const dv = new DataView(p.buffer);
+    dv.setUint32(nb - 8, Math.floor(l / 0x20000000)); dv.setUint32(nb - 4, (l << 3) >>> 0);
+    const w = new Uint32Array(64), r = (x, n) => (x >>> n) | (x << (32 - n));
+    for (let o = 0; o < nb; o += 64) {
+      for (let i = 0; i < 16; i++) w[i] = dv.getUint32(o + i * 4);
+      for (let i = 16; i < 64; i++) {
+        const s0 = r(w[i - 15], 7) ^ r(w[i - 15], 18) ^ (w[i - 15] >>> 3), s1 = r(w[i - 2], 17) ^ r(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+        w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
+      }
+      let [a, b, c, d, e, f, g, h] = H;
+      for (let i = 0; i < 64; i++) {
+        const t1 = (h + (r(e, 6) ^ r(e, 11) ^ r(e, 25)) + ((e & f) ^ (~e & g)) + K[i] + w[i]) >>> 0;
+        const t2 = ((r(a, 2) ^ r(a, 13) ^ r(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) >>> 0;
+        h = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+      }
+      H[0] += a; H[1] += b; H[2] += c; H[3] += d; H[4] += e; H[5] += f; H[6] += g; H[7] += h;
+    }
+    return [...H].map(x => x.toString(16).padStart(8, '0')).join('');
+  }
+
+  /* the figure's layout. Text sizes per kind (lane names, marker labels, protein names; null = fontPt); a group
+   * label wider than its line wraps ('wrap'), shrinks down to minFontPt ('shrink') or stays ('none') */
   const defaultStyle = () => ({ mmPerLane: 5, fontPt: 7, lineWidthPt: 0.5, labelAngle: 'auto', rowGapPt: 2, blotGapPt: 5,
-    tickLenPt: 2.5, labelGapPt: 2.5, unitHeader: true, showMW: true, panelLetter: '', dpi: 600, invert: true, border: false, mwSide: 'left', nameSide: 'right' });
+    tickLenPt: 2.5, labelGapPt: 2.5, unitHeader: true, showMW: true, panelLetter: '', dpi: 600, invert: true, border: false, mwSide: 'left', nameSide: 'right',
+    laneNumbers: false, lanePt: null, markerPt: null, namePt: null, groupFit: 'wrap', minFontPt: 5, groupTicks: false });
+  App.defaultStyle = defaultStyle;
   /* step: how far the user has come (1 Marker picture confirmed → 2 pieces confirmed → 3 boxes → 4 marker →
    * 5 names); each step works on what the one before established */
-  const newState = () => ({ step: 1, blots: [], rows: [], lanes: [], range: [1, 1], hiCol: 0, levels: {}, align: {}, conditions: [], groups: [], arrows: [], style: defaultStyle() });
+  const newState = () => ({ step: 1, blots: [], rows: [], lanes: [], range: [1, 1], hiCol: 0, levels: {}, align: {}, conditions: [], groups: [], arrows: [], brackets: [], style: defaultStyle() });
 
   /* ---------- events / undo ---------- */
   App.on = fn => App.listeners.push(fn);
@@ -46,15 +86,25 @@
     if (!App.S) return;
     roomLeft(); trimLeft();
     if (App.S.arrows) App.S.arrows = App.S.arrows.filter(a => App.row(a.row));     // (a deleted row takes its arrows; undo brings both)
+    if (App.S.brackets) App.S.brackets = App.S.brackets.filter(k => App.row(k.r0) && App.row(k.r1));
     App.fitLanes(false);
     App.refreshChoices();
     const snap = JSON.stringify(App.S);
-    if (App.hist[App.hist.length - 1] !== snap) { App.hist.push(snap); if (App.hist.length > 120) App.hist.shift(); App.future = []; }
+    if (App.hist[App.hist.length - 1] !== snap) { App.hist.push(snap); if (App.hist.length > 120) App.hist.shift(); App.future = []; App.saveDraftSoon(); }
     App.emit('change');
   };
-  // (pictures are resampled again where the restored state aligns them differently)
-  App.undo = () => { if (App.hist.length < 2) return; App.future.push(App.hist.pop()); App.S = JSON.parse(App.hist[App.hist.length - 1]); App.selLane = null; App.syncPieces(); App.syncAlign(); App.emit('change'); };
-  App.redo = () => { if (!App.future.length) return; const s = App.future.pop(); App.hist.push(s); App.S = JSON.parse(s); App.selLane = null; App.syncPieces(); App.syncAlign(); App.emit('change'); };
+  /* undo / redo put a new state object in place: open editors (they hold objects of the old one) are dropped
+   * without writing back, selections that no longer exist cleared; pictures are resampled again where the
+   * restored state aligns them differently */
+  function swapState(json) {
+    if (App.onSwap) App.onSwap();
+    App.S = JSON.parse(json);
+    App.selLane = null; App.selMark = null;
+    if (App.selRow && !App.row(App.selRow)) { App.selRow = null; App.selSeg = null; }
+    App.syncPieces(); App.syncAlign(); App.saveDraftSoon(); App.emit('change');
+  }
+  App.undo = () => { if (App.hist.length < 2) return; App.future.push(App.hist.pop()); swapState(App.hist[App.hist.length - 1]); };
+  App.redo = () => { if (!App.future.length) return; const s = App.future.pop(); App.hist.push(s); swapState(s); };
 
   function busy(on, text) {
     const b = document.getElementById('busy'); if (!b) return;
@@ -96,6 +146,8 @@
     return s.length > 14 ? s.slice(0, 13) + '…' : s;
   };
   App.blotName = b => b.name || `膜 ${App.S.blots.indexOf(b) + 1}`;
+  // in what leaves the app (uncropped images, CSV, the processing log): English unless the user named it
+  App.blotNameEn = b => b.name || `Membrane ${App.S.blots.indexOf(b) + 1}`;
   App.pieceName = (b, pc) => (App.S.blots.length > 1 ? App.blotName(b) + ' · ' : '') + '膜条 ' + (pc.letter || '?');
   App.rowLabel = row => { const k = App.rowKda(row); return row.name || (k ? `≈${Math.round(k)} kDa 行` : '未命名行'); };
 
@@ -151,8 +203,8 @@
   App.saveProject = async function () {
     const recs = [...App.images.values()], bufs = [];
     for (const r of recs) bufs.push(r.src && r.src.buffer ? r.src.buffer : await r.src.arrayBuffer());
-    const head = { version: 1, app: 'BlotFigure', viewBlot: App.viewBlot, S: App.S,
-      images: recs.map((r, i) => ({ id: r.id, name: r.name, kind: r.kind, exposure: r.exposure, size: bufs[i].byteLength })) };
+    const head = { version: 1, app: 'BlotFigure ' + App.VERSION, savedAt: new Date().toISOString(), viewBlot: App.viewBlot, S: App.S, initial: App.initial,
+      images: recs.map((r, i) => ({ id: r.id, name: r.name, kind: r.kind, exposure: r.exposure, size: bufs[i].byteLength, sha256: r.sha256 || null })) };
     const json = new TextEncoder().encode(JSON.stringify(head)), len = new Uint8Array(4);
     new DataView(len.buffer).setUint32(0, json.length, true);
     let blob = new Blob([new TextEncoder().encode(MAGIC), len, json, ...bufs]);
@@ -166,31 +218,112 @@
       if (u8[0] === 0x1f && u8[1] === 0x8b) { buf = await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer(); u8 = new Uint8Array(buf); }
       if (new TextDecoder().decode(u8.subarray(0, 8)) !== MAGIC) throw new Error('这不是 BlotFigure 项目文件（.blotfig）');
       const n = new DataView(buf, 8, 4).getUint32(0, true), head = JSON.parse(new TextDecoder().decode(u8.subarray(12, 12 + n)));
-      const recs = [];
+      const bufs = [];
       let at = 12 + n;
-      for (const im of head.images) {
-        busy(true, `打开项目：读取图片 ${recs.length + 1}/${head.images.length}…`); await tick();
-        const f = new File([buf.slice(at, at + im.size)], im.name); at += im.size;
-        const d = await G.TIFF.loadFile(f);
-        recs.push({ id: im.id, name: im.name, img: { w: d.width, h: d.height, data: d.data }, spp: d.spp, bits: d.bits, src: f, kind: im.kind, exposure: im.exposure });
-      }
-      App.images.clear(); App.analysis = {};
-      matchSizes(recs);
-      recs.forEach(r => { prepare(r); App.images.set(r.id, r); });
-      App.S = head.S;
-      if (!App.S.step) App.S.step = 5;          // (projects saved before the steps: everything done)
-      if (!App.S.arrows) App.S.arrows = [];
-      App.selRow = App.selSeg = App.selLane = App.selMark = null; App.mode = null;
-      App.viewBlot = App.blot(head.viewBlot) ? head.viewBlot : (App.S.blots[0] || {}).id; App.viewImg = null;
-      App.syncAlign();
-      busy(true, '打开项目：分析各张膜…'); await tick();
-      // the analysis again (pieces found at the same places keep their ids, the boxes on them stay as saved)
-      App.S.blots.forEach(b => App.analyze(b));
-      App.hist = []; App.future = [];
-      App.commit();
-      App.saved = App.hist[App.hist.length - 1];
-      App.emit('loaded');
+      for (const im of head.images) { bufs.push(buf.slice(at, at + im.size)); at += im.size; }
+      await restoreFrom(head, bufs, '打开项目');
       return App.images.size;
+    } finally { busy(false); }
+  };
+  /* a project's (or a draft's) pictures and state put in place: the pictures decoded and checked against their
+   * fingerprints, the membranes analysed again (pieces found at the same places keep their ids, the boxes on
+   * them stay as saved) */
+  async function restoreFrom(head, bufs, what) {
+    const recs = [];
+    for (let i = 0; i < head.images.length; i++) {
+      const im = head.images[i], b = bufs[i];
+      busy(true, `${what}：读取图片 ${i + 1}/${head.images.length}…`); await tick();
+      const sha = await App.sha256(b);
+      if (im.sha256 && sha !== im.sha256) throw new Error(`图片 ${im.name} 校验失败（SHA-256 不一致），文件可能已损坏`);
+      const d = await G.TIFF.decodeBuffer(b, im.name);
+      recs.push({ id: im.id, name: im.name, img: { w: d.width, h: d.height, data: d.data }, spp: d.spp, bits: d.bits, src: new File([b], im.name), kind: im.kind, exposure: im.exposure,
+        sha256: sha, bytes: b.byteLength, dpi: d.dpi || 0 });
+    }
+    if (App.onSwap) App.onSwap();
+    App.images.clear(); App.analysis = {};
+    matchSizes(recs);
+    recs.forEach(r => { prepare(r); App.images.set(r.id, r); });
+    App.S = head.S;
+    if (!App.S.step) App.S.step = 5;          // (projects saved before the steps: everything done)
+    if (!App.S.arrows) App.S.arrows = [];
+    if (!App.S.brackets) App.S.brackets = [];
+    App.S.style = Object.assign(defaultStyle(), App.S.style || {});      // (settings added since: their defaults)
+    App.selRow = App.selSeg = App.selLane = App.selMark = null; App.mode = null;
+    App.viewBlot = App.blot(head.viewBlot) ? head.viewBlot : (App.S.blots[0] || {}).id; App.viewImg = null;
+    App.loadWarnings = [];
+    App.syncAlign();
+    busy(true, `${what}：分析各张膜…`); await tick();
+    App.S.blots.forEach(b => App.analyze(b));
+    App.hist = []; App.future = [];
+    App.commit();
+    App.saved = App.hist[App.hist.length - 1];
+    // "back to import": the state saved with it (projects / drafts from before 0.7: the state as opened)
+    App.initialAsOpened = typeof head.initial !== 'string';
+    App.initial = App.initialAsOpened ? App.saved : head.initial;
+    App.emit('loaded');
+  }
+
+  /* ---------- autosaved draft (IndexedDB, as GelFigure): the pictures and the state survive a reload or a crash.
+   * Each picture is written once (keyed by its fingerprint), the state shortly after every change. ---------- */
+  const DB = 'blotfigure', STORE = 'drafts';
+  let dbP = null;
+  // some browsers never answer indexedDB.open for file:// pages: give up instead of hanging
+  function idb() {
+    if (!dbP) dbP = new Promise((res, rej) => {
+      if (!window.indexedDB) return rej(new Error('no indexedDB'));
+      const t = setTimeout(() => rej(new Error('indexedDB timeout')), 3000);
+      let rq;
+      try { rq = indexedDB.open(DB, 1); } catch (e) { clearTimeout(t); return rej(e); }
+      rq.onupgradeneeded = () => rq.result.createObjectStore(STORE);
+      rq.onsuccess = () => { clearTimeout(t); res(rq.result); };
+      rq.onerror = () => { clearTimeout(t); rej(rq.error); };
+      rq.onblocked = () => { clearTimeout(t); rej(new Error('indexedDB blocked')); };
+    });
+    dbP.catch(() => { dbP = null; });
+    return dbP;
+  }
+  async function idbDo(mode, fn) {
+    const db = await idb();
+    return new Promise((res, rej) => { const tx = db.transaction(STORE, mode), st = tx.objectStore(STORE), r = fn(st); tx.oncomplete = () => res(r && r.result); tx.onerror = () => rej(tx.error); });
+  }
+  let draftTimer = 0, draftOurs = false;      // draftOurs: the draft in the database is this session's
+  const draftHas = new Set();                 // fingerprints of the pictures already in it
+  App.saveDraftSoon = function () { if (App.noDraft) return; clearTimeout(draftTimer); draftTimer = setTimeout(App.saveDraft, 1000); };
+  App.saveDraft = async function () {
+    if (!App.S || !App.images.size || App.noDraft) return;
+    try {
+      const recs = [...App.images.values()], keep = new Set(recs.map(r => r.sha256)), fresh = [];
+      for (const r of recs) if (!draftHas.has(r.sha256) && !fresh.some(f => f.sha === r.sha256)) fresh.push({ sha: r.sha256, buf: r.src && r.src.buffer ? r.src.buffer : await r.src.arrayBuffer() });
+      await idbDo('readwrite', st => {
+        // (another session's draft is replaced by this one)
+        if (!draftOurs) st.clear();
+        [...draftHas].filter(s => !keep.has(s)).forEach(s => st.delete('img:' + s));
+        fresh.forEach(f => st.put(f.buf, 'img:' + f.sha));
+        st.put({ app: 'BlotFigure ' + App.VERSION, savedAt: Date.now(), viewBlot: App.viewBlot, S: JSON.stringify(App.S), initial: App.initial,
+          images: recs.map(r => ({ id: r.id, name: r.name, kind: r.kind, exposure: r.exposure, sha256: r.sha256 })),
+          summary: { membranes: App.S.blots.length, images: recs.length, rows: App.S.rows.filter(r => !r.hidden).length, step: App.S.step,
+            names: App.S.rows.filter(r => !r.hidden && r.name).map(r => r.name).slice(0, 6) } }, 'meta');
+      });
+      draftOurs = true;
+      [...draftHas].filter(s => !keep.has(s)).forEach(s => draftHas.delete(s));
+      fresh.forEach(f => draftHas.add(f.sha));
+    } catch (e) { /* private mode, a full quota, file:// without IndexedDB: drafts are best-effort */ }
+  };
+  App.peekDraft = async function () { try { return await idbDo('readonly', st => st.get('meta')); } catch (e) { return null; } };
+  App.dropDraft = async function () { draftHas.clear(); draftOurs = false; try { await idbDo('readwrite', st => st.clear()); } catch (e) { /* ignore */ } };
+  App.restoreDraft = async function () {
+    const meta = await App.peekDraft();
+    if (!meta) throw new Error('没有可恢复的草稿');
+    busy(true, '恢复上次的进度…'); await tick();
+    try {
+      const bufs = [];
+      for (const im of meta.images) {
+        const b = await idbDo('readonly', st => st.get('img:' + im.sha256));
+        if (!b) throw new Error(`草稿里缺少图片 ${im.name}`);
+        bufs.push(b);
+      }
+      await restoreFrom({ images: meta.images, S: JSON.parse(meta.S), viewBlot: meta.viewBlot, initial: meta.initial }, bufs, '恢复');
+      draftOurs = true; meta.images.forEach(im => draftHas.add(im.sha256));
     } finally { busy(false); }
   };
 
@@ -203,15 +336,19 @@
     await tick();
     try {
       const recs = [];
+      App.loadWarnings = [];
       for (const f of files) {
-        // {name, buffer} = already-read TIFF bytes (demo / tests)
-        const d = f.buffer ? await G.TIFF.decode(f.buffer) : await G.TIFF.loadFile(f);
+        // {name, buffer} = already-read bytes (demo / tests); the format told by the bytes, not the name
+        const buf = f.buffer || await f.arrayBuffer();
+        const d = await G.TIFF.decodeBuffer(buf, f.name);
+        App.loadWarnings.push(...(d.warnings || []));
         // (tests: the membrane as if moved by a known transform before this picture)
         // (what comes into view is background: the tray of a white-light photo, an exposure's own background)
         const mv = App.devMove && App.devMove[f.name];
         if (mv) { const im = { w: d.width, h: d.height, data: d.data }; d.data = WB.regWarp(im, WB.regInverse(mv), [], G.Engine.percentiles(d.data, [WB.classify(im, { name: f.name, spp: d.spp }) === 'marker' ? 3 : 50], 97)[0]); }
         // (src: the file itself, read again when the project is saved)
-        recs.push({ id: f.id || uid('i'), name: f.name, img: { w: d.width, h: d.height, data: d.data }, spp: d.spp, bits: d.bits, src: f });
+        recs.push({ id: f.id || uid('i'), name: f.name, img: { w: d.width, h: d.height, data: d.data }, spp: d.spp, bits: d.bits, src: f,
+          sha256: await App.sha256(buf), bytes: buf.byteLength, dpi: d.dpi || 0 });
         busy(true, `读取图片 ${recs.length}/${files.length}…`); await tick();
       }
       busy(true, '识别曝光图与 Marker 图…'); await tick();
@@ -260,6 +397,8 @@
       App.refreshChoices(true);
       App.hist = first ? [] : App.hist;
       App.commit();
+      App.initial = JSON.stringify(App.S);     // (reset to import: as the pictures were just loaded)
+      App.initialAsOpened = false;
       App.emit('loaded');
       return recs.length;
     } catch (e) {
@@ -995,6 +1134,18 @@
     (App.S.arrows = App.S.arrows || []).push(a);
     return a;
   };
+  /* side brackets (as GelFigure's): a bar beside the figure with its label, over several rows (IP / Input / WCL)
+   * or part of one (a smear: (Ub)n). S.brackets [{r0, f0, r1, f1, side, text, pt}]: from f0 of row r0 (0 = its
+   * top, 1 = its bottom) to f1 of row r1. Default side: away from the protein names. */
+  App.addBracket = function (r0, f0, r1, f1) {
+    const ix = id => App.S.rows.findIndex(r => r.id === id);
+    if (ix(r0) > ix(r1) || (r0 === r1 && f0 > f1)) [r0, f0, r1, f1] = [r1, f1, r0, f0];
+    const k = { r0, f0: Math.round(f0 * 1000) / 1000, r1, f1: Math.round(f1 * 1000) / 1000, side: App.S.style.nameSide === 'left' ? 'right' : 'left', text: '' };
+    (App.S.brackets = App.S.brackets || []).push(k);
+    return k;
+  };
+  // the rows a bracket spans, in the figure's order
+  App.bracketRows = k => { const ix = id => App.S.rows.findIndex(r => r.id === id), a = Math.min(ix(k.r0), ix(k.r1)), b = Math.max(ix(k.r0), ix(k.r1)); return a < 0 ? [] : App.S.rows.slice(a, b + 1); };
   // an arrow's size from the marks of its row's first box ('≈' beyond the marked bands); '' without 2 marks
   App.arrowSize = function (a) {
     const row = App.row(a.row), sg = row && row.segs[0], b = row && App.blot(row.blot), pcal = sg && App.pieceCal(b, App.piece(b, sg.piece), sg);
@@ -1003,9 +1154,10 @@
     const vs = pcal.knots.map(t => t.v), out = v < Math.min(...vs) - 2 || v > Math.max(...vs) + 2;
     return `${out ? '≈' : ''}${k < 10 ? k.toFixed(1) : Math.round(k)} kDa`;
   };
-  // the text beside an arrow: its name, its size (in brackets after a name)
+  /* the text beside an arrow: its name, its size (in brackets after a name) — typed in (a theoretical size), else
+   * the estimate for an arrowhead; a symbol (* # †) marks a band as "not the one" and carries no estimate */
   App.arrowLabel = function (a) {
-    const sz = a.auto && a.sym === '◀' ? App.arrowSize(a) : '';
+    const sz = a.auto ? (a.sizeText || (a.sym === '◀' ? App.arrowSize(a) : '')) : '';
     return a.text && sz ? `${a.text} (${sz})` : a.text || sz;
   };
   // lanes for a new box on a piece: those of the nearest other row on it (the user may have fixed them),
@@ -1515,14 +1667,168 @@
       });
     });
     if (C.gapAfter.size) legend.push('Non-adjacent lanes, or lanes from different pieces of a membrane, are separated by white space.');
-    if (S.style.invert) legend.push('Chemiluminescence images are shown inverted (dark bands on a light background) with linear whole-image contrast.');
-    if (vis.some(r => r.lv)) legend.push('Brightness and contrast were adjusted linearly for each cropped panel as a whole.');
-    if ((S.arrows || []).some(a => a.sym === '*' && vis.some(r => r.id === a.row))) legend.push('Asterisks (*) indicate non-specific bands.');
+    if (S.style.invert) legend.push('Chemiluminescence images are shown inverted (dark bands on a light background).');
+    // (levels of the whole picture, or a row's own: said as they are)
+    const ownLv = vis.filter(r => r.lv).length;
+    legend.push(!ownLv ? 'Brightness and contrast were adjusted linearly and applied to each whole image.'
+      : ownLv === vis.length ? 'Brightness and contrast were adjusted linearly for each cropped panel as a whole.'
+      : 'Brightness and contrast were adjusted linearly, applied to the whole image or, for some panels, to the cropped panel as a whole.');
+    // band marks: what they mean is the author's to say (as GelFigure)
+    const shownArrows = (S.arrows || []).filter(a => vis.some(r => r.id === a.row)), syms = new Set(shownArrows.map(a => a.sym));
+    if (syms.has('*')) legend.push('Asterisks (*) indicate non-specific bands.');
+    if (syms.has('#')) legend.push('# indicates [describe, e.g. degradation products].');
+    if (syms.has('†')) legend.push('† indicates [describe].');
+    if (shownArrows.some(a => a.sym === '◀' && a.auto && !a.sizeText && /≈/.test(App.arrowSize(a)))) legend.push('Sizes marked ≈ were extrapolated beyond the marked ladder bands.');
     const lads = [...new Set([...sized].map(bid => App.blot(bid).ladderId).filter(Boolean))].map(id => G.ProteinLadders.get(id)).filter(Boolean);
-    if (lads.length) legend.push(`Molecular weights (kDa) from ${lads.map(l => l.name.replace(/\s*\(.*\)|\*/g, '')).join(' / ')}.`);
+    if (lads.length) legend.push(`Molecular-weight marker positions (${lads.map(l => l.name.replace(/\s*\(.*\)|\*/g, '')).join(' / ')}) are indicated in kDa on the ${S.style.mwSide === 'right' ? 'right' : 'left'}; sizes are apparent molecular weights.`);
     const ex = [...new Set(vis.map(r => App.images.get(r.img)).filter(Boolean).map(rec => App.expoLabel(rec)))];
     if (ex.length) legend.push(`Exposure: ${vis.map(r => `${r.name || '?'} ${App.expoLabel(App.images.get(r.img))}`).join('; ')}.`);
-    return { warn, legend };
+    return { warn, legend, label };
+  };
+
+  /* ---------- resolution: image pixels behind each printed lane ----------
+   * A lane is printed mmPerLane wide from about one lane spacing (pitch) of picture pixels: the narrowest pitch
+   * among the shown rows sets the resolution of the bands themselves (exporting at a higher dpi only enlarges
+   * those pixels). */
+  const shownPitches = () => App.S.rows.filter(r => !r.hidden).flatMap(r => r.segs.filter(sg => App.nSample(sg)).map(sg => App.segPitch(sg)));
+  App.effectiveDpi = function () {
+    const ps = shownPitches();
+    return ps.length ? Math.min(...ps) / (App.S.style.mmPerLane / 25.4) : Infinity;
+  };
+  // the widest lane (mm, in 0.5 mm steps) that keeps the bands at dpi or more
+  App.maxSafeMmPerLane = function (dpi) {
+    const ps = shownPitches();
+    return ps.length ? Math.floor(Math.min(...ps) / (dpi || 300) * 25.4 * 2) / 2 : null;
+  };
+
+  /* ---------- pre-flight before export (as GelFigure): what a reviewer or a journal check would catch. Items
+   * {level: 'block' | 'warn' | 'info', text, fix: {label, run, leave}}; leave: the fix needs the user (the dialog
+   * closes, the export waits). ---------- */
+  App.preflight = function () {
+    const S = App.S, st = S.style, out = [], add = (level, text, fix) => out.push({ level, text, fix });
+    const vis = S.rows.filter(r => !r.hidden), ck = App.checks(), label = ck.label;
+    if (!vis.length) { add('block', '成图里还没有蛋白行。'); return out; }
+    const eff = App.effectiveDpi(), safe = App.maxSafeMmPerLane(300);
+    if (eff < 300) add('block', `条带本身的有效分辨率只有 ${Math.round(eff)} dpi（< 300）：每道 ${st.mmPerLane} mm 太宽，导出 ${st.dpi} dpi 也只是把像素放大。`,
+      safe >= 2 ? { label: `改为每道 ${safe} mm`, run: () => { st.mmPerLane = safe; } } : null);
+    // clipped pixels in the exposures shown: another exposure of the same row may be clean
+    vis.forEach(r => {
+      const ex = App.rowExpo(r), e = ex.find(x => x.id === r.img);
+      if (!e || !(e.satFrac > 0.002)) return;
+      const best = App.bestExpo(r), be = ex.find(x => x.id === best);
+      add('warn', `「${label(r)}」所选曝光中 ${(e.satFrac * 100).toFixed(1)}% 的条带像素过曝（相机饱和），这一行不能定量。`,
+        best !== r.img && be && be.satFrac < e.satFrac ? { label: '改用推荐曝光', run: () => { r.img = best; r.auto = true; } } : null);
+    });
+    // the smallest text actually printed (per-kind sizes count)
+    const f = G.BRender.build(false), minPt = Math.round((f.minPt || st.fontPt) * 10) / 10;
+    if (minPt < 5) add('warn', `最小字号 ${minPt} pt 偏小（多数期刊要求 ≥ 5–6 pt）。`, { label: '全部至少 6 pt', run: () => {
+      const up = v => (v && v < 6 ? 6 : v);
+      st.fontPt = Math.max(st.fontPt, 6); ['lanePt', 'markerPt', 'namePt'].forEach(k => { st[k] = up(st[k]); }); st.minFontPt = Math.max(st.minFontPt || 5, 6);
+      [S.groups, S.conditions, S.arrows, S.brackets].forEach(list => (list || []).forEach(o => { if (o.pt) o.pt = up(o.pt); }));
+    } });
+    if (st.lineWidthPt < 0.25) add('warn', `线宽 ${st.lineWidthPt} pt 太细。`, { label: '改为 0.5 pt', run: () => { st.lineWidthPt = 0.5; } });
+    const wmm = f.w / MM;
+    if (wmm > 183) add('warn', `成图宽 ${wmm.toFixed(0)} mm，超过双栏宽度（约 180 mm）。`);
+    (f.overlaps || []).forEach(w => add('warn', w));
+    const unnamed = vis.filter(r => !r.name);
+    if (unnamed.length) add('warn', `${unnamed.length} 行还没有蛋白名（成图上不显示名字）。`, { label: '去填名字', leave: true, run: () => { if (App.goNames) App.goNames(); } });
+    const lanesNoName = App.figLanes().filter(j => !(S.lanes[j - 1] || {}).name);
+    if (lanesNoName.length && lanesNoName.length < App.figLanes().length) add('info', `${lanesNoName.length} 条泳道还没有名字。`);
+    else if (lanesNoName.length) add('info', '泳道还没有名字（成图上方只有空白）。', { label: '去填泳道名', leave: true, run: () => { if (App.goNames) App.goNames(true); } });
+    ck.warn.filter(w => /同膜内参|还没标 Marker|顺序不对|相同的列|列范围/.test(w)).forEach(w => add('warn', w));
+    if (vis.some(r => r.lv)) add('info', '有的行单独调过亮度 / 对比度（逐块线性调整），图注提示里已加说明。');
+    if ((S.arrows || []).some(a => a.sym === '◀' && a.auto && /≈/.test(App.arrowSize(a)))) add('info', '有目标条带的分子量是外推值（已标 ≈）。');
+    if (st.showMW && S.blots.some(b => b.ladderId)) add('info', '预染 Marker 标注的是表观分子量（随胶浓度、缓冲体系偏移），图注中建议写 "apparent molecular weight"。');
+    return out;
+  };
+
+  /* ---------- the processing log (JSON, as GelFigure's): sources with fingerprints, how every row was made,
+   * every setting; and a short summary embedded in exported PNG / TIFF ---------- */
+  const r1 = v => Math.round(v * 10) / 10;
+  App.processingLog = function () {
+    const S = App.S, f = G.BRender.build(false), ck = App.checks();
+    const letter = (b, id) => (App.piece(b, id) || {}).letter || '?';
+    return {
+      tool: 'BlotFigure', version: App.VERSION, exportedAt: new Date().toISOString(),
+      environment: { userAgent: navigator.userAgent, figureFont: 'Arial, Helvetica, sans-serif (vector text)' },
+      images: [...App.images.values()].map(r => {
+        const b = S.blots.find(x => x.images.includes(r.id)), al = S.align[r.id], raw = r.raw || r;
+        return { file: r.name, sha256: r.sha256 || null, bytes: r.bytes || null, width: raw.img.w, height: raw.img.h, bitDepth: r.bits,
+          kind: r.kind === 'chemi' ? 'exposure' : 'marker picture', exposureSec: r.exposure != null ? r.exposure : null, membrane: b ? App.blotNameEn(b) : null,
+          markerPictureOf: b && b.marker === r.id ? App.blotNameEn(b) : undefined, resampledToExposureSize: !!r.resampled || undefined,
+          alignment: al ? { rotationDeg: Math.round(al.a * 1000) / 1000, shiftPx: [r1(al.tx), r1(al.ty)], by: al.how === 'manual' ? 'hand' : 'automatic', pieces: al.pieces ? Object.keys(al.pieces).map(id => letter(b, id)) : undefined } : null,
+          levels: S.levels[r.id] ? { black: S.levels[r.id].black, white: S.levels[r.id].white, manual: !!S.levels[r.id].manual, note: 'linear whole-image stretch; fractions of full scale' } : undefined };
+      }),
+      membranes: S.blots.map(b => ({ name: App.blotNameEn(b), markerPicture: (App.markerRec(b) || {}).name || null, ladder: (G.ProteinLadders.get(b.ladderId) || {}).name || null,
+        piecesSetByHand: !!b.userStrips,
+        pieces: (b.pieces || []).map(pc => ({ letter: pc.letter, centrePx: [r1(pc.cx), r1(pc.cy)], angleDeg: pc.angle, sizePx: [r1(pc.w), r1(pc.h)],
+          markerMarks: (pc.marks || []).filter(m => m.kda > 0).map(m => ({ kDa: m.kda, vPx: r1(m.v) })) })) })),
+      rows: S.rows.map(r => {
+        const b = App.blot(r.blot), e = App.rowExpo(r).find(x => x.id === r.img), lv = App.rowLevels(r);
+        return { name: r.name || null, shown: !r.hidden, membrane: App.blotNameEn(b), exposure: (App.images.get(r.img) || {}).name || null,
+          recommendedExposure: (App.images.get(App.bestExpo(r)) || {}).name || null, saturatedBandFrac: e ? +e.satFrac.toFixed(5) : null,
+          apparentKDa: App.rowKda(r) ? r1(App.rowKda(r)) : null,
+          levels: { black: lv.black, white: lv.white, ownToThisRow: !!r.lv },
+          boxes: r.segs.map(sg => ({ piece: letter(b, sg.piece), firstFigureColumn: sg.c0, tiltDeg: sg.rot || 0,
+            boxPx: { u0: r1(sg.x0), u1: r1(sg.x1), vTop: r1(sg.vc - r.above), vBottom: r1(sg.vc + r.below) },
+            lanes: sg.lanes.map(l => ({ uPx: r1(l.u), role: l.r === 's' ? 'sample' : l.r === 'm' ? 'marker' : 'left out' })) })) };
+      }),
+      figure: { widthMm: r1(f.w / MM), heightMm: r1(f.h / MM), columns: App.figLanes(), laneNames: App.figLanes().map(j => (S.lanes[j - 1] || {}).name || ''),
+        effectiveBandDpi: Math.round(Math.min(99999, App.effectiveDpi())), exportDpi: S.style.dpi },
+      arrows: (S.arrows || []).map(a => ({ row: (App.row(a.row) || {}).name || null, symbol: a.sym, side: a.side, text: a.text || null, size: a.sym === '◀' ? (a.sizeText || App.arrowSize(a) || null) : null, userSize: a.sizeText || null })),
+      brackets: (S.brackets || []).map(k => ({ fromRow: (App.row(k.r0) || {}).name || null, toRow: (App.row(k.r1) || {}).name || null, fromFrac: k.f0, toFrac: k.f1, side: k.side, text: k.text || null })),
+      groups: S.groups, conditions: S.conditions, style: S.style,
+      legendHints: ck.legend
+    };
+  };
+  /* ---------- resets and style files (as GelFigure) ---------- */
+  // the layout back to its defaults (the export resolution kept)
+  App.resetLayout = function () { App.S.style = Object.assign(defaultStyle(), { dpi: App.S.style.dpi }); };
+  // everything back to the moment after the pictures were loaded (one undoable step)
+  App.resetAll = function () {
+    if (!App.initial) return false;
+    if (App.onSwap) App.onSwap();
+    App.S = JSON.parse(App.initial);
+    App.selRow = App.selSeg = App.selLane = App.selMark = null;
+    App.syncPieces(); App.syncAlign();
+    return true;
+  };
+  /* a style file: what one figure of a series shares with the next — lane names, groups and condition rows
+   * (relative to the figure's first column), the protein names top to bottom, the ladder and the layout */
+  App.template = function () {
+    const S = App.S, fl = App.figLanes(), rel = j => fl.indexOf(j);
+    return { blotfigTemplate: 1, app: 'BlotFigure ' + App.VERSION,
+      lanes: fl.map(j => ({ name: (S.lanes[j - 1] || {}).name || '' })),
+      groups: S.groups.map(g => ({ from: rel(Math.min(g.from, g.to)), to: rel(Math.max(g.from, g.to)), text: g.text || '', pt: g.pt || null })).filter(g => g.from >= 0 && g.to >= 0),
+      conditions: S.conditions.map(c => ({ name: c.name || '', values: fl.map(j => c.values[j - 1] || ''), pt: c.pt || null })),
+      proteins: S.rows.filter(r => !r.hidden).map(r => r.name || ''),
+      ladderId: (S.blots.find(b => b.ladderId) || {}).ladderId || null,
+      style: S.style };
+  };
+  App.applyTemplate = function (t) {
+    if (!t || !t.blotfigTemplate) throw new Error('不是 BlotFigure 样式文件');
+    const S = App.S, fl = App.figLanes(), vis = S.rows.filter(r => !r.hidden);
+    const abs = k => fl[Math.max(0, Math.min(fl.length - 1, k))];
+    (t.lanes || []).forEach((l, k) => { if (fl[k] != null) S.lanes[fl[k] - 1].name = l.name || ''; });
+    S.groups = (t.groups || []).filter(g => g.from < fl.length).map(g => Object.assign({ from: abs(g.from), to: abs(g.to), text: g.text || '' }, g.pt ? { pt: g.pt } : {}));
+    S.conditions = (t.conditions || []).map(c => {
+      const values = S.lanes.map(() => '');
+      fl.forEach((j, k) => { values[j - 1] = (c.values || [])[k] || ''; });
+      return Object.assign({ name: c.name || '', values }, c.pt ? { pt: c.pt } : {});
+    });
+    (t.proteins || []).forEach((n, k) => { if (vis[k] && n) vis[k].name = n; });
+    if (t.ladderId && G.ProteinLadders.get(t.ladderId)) S.blots.forEach(b => App.setLadder(b, t.ladderId));
+    S.style = Object.assign(defaultStyle(), t.style || {});
+    return { lanes: (t.lanes || []).length, figLanes: fl.length, proteins: (t.proteins || []).filter(Boolean).length, rows: vis.length };
+  };
+  App.summaryText = function () {
+    const S = App.S, vis = S.rows.filter(r => !r.hidden);
+    return JSON.stringify({
+      tool: 'BlotFigure ' + App.VERSION,
+      sources: [...new Set(vis.map(r => r.img))].map(id => App.images.get(id)).filter(Boolean).map(r => ({ file: r.name, sha256: r.sha256 || null })),
+      rows: vis.map(r => ({ name: r.name || null, exposure: (App.images.get(r.img) || {}).name, levels: App.rowLevels(r), tilts: r.segs.map(sg => sg.rot || 0) })),
+      effectiveBandDpi: Math.round(Math.min(99999, App.effectiveDpi())), disclosure: App.checks().legend.join(' ')
+    });
   };
 
   G.BApp = App;

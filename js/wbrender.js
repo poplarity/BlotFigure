@@ -1,12 +1,33 @@
 /* Figure layout: state -> SVG (pt units). Figure columns on a common grid across rows, white gaps where
  * neighbouring columns are not neighbouring lanes of one box; each row is drawn from its boxes as
  * straightened crops scaled so the lane spacing matches the grid. Beside the bands, each on the side chosen:
- * kDa ticks, target-band arrows, protein names; lane labels / conditions / groups on top. */
+ * kDa ticks, target-band arrows, protein names, then side brackets; lane numbers / conditions / lane labels / groups
+ * on top.
+ * Text sizes: the figure font, else per kind (lane names, marker labels, protein names) or per item (a group,
+ * a condition row, an arrow). Group labels never collide (wrapped, shrunk or moved up a tier, as GelFigure). */
 (function (G) {
   'use strict';
-  const App = G.BApp, WB = G.WB, MM = 72 / 25.4;
+  const App = G.BApp, MM = 72 / 25.4;
   const mctx = document.createElement('canvas').getContext('2d');
-  const runs = t => String(t).split('*').map((s, i) => ({ t: s, it: i % 2 === 1 })).filter(r => r.t);
+  /* *italic* runs. A star opens only before a non-space and closes only after one, never right after its opener
+   * (as Markdown): the rest stay stars ("WT*", "siRNA* control", "**", "a * b") instead of vanishing.
+   * Private-use characters: LIT a star kept as it is; TOG an italic switch put in by the line breaking */
+  const LIT = '\uE000', TOG = '\uE001';
+  function litStar(s) {
+    s = String(s);
+    if (!s.includes('*')) return s;
+    const c = s.split(''), sp = ch => ch === undefined || /\s/.test(ch);
+    let open = -1;
+    for (let i = 0; i < c.length; i++) {
+      if (c[i] !== '*') continue;
+      if (open >= 0 && i > open + 1 && !sp(c[i - 1])) { open = -1; continue; }
+      if (!sp(c[i + 1])) { if (open >= 0) c[open] = LIT; open = i; continue; }
+      c[i] = LIT;
+    }
+    if (open >= 0) c[open] = LIT;
+    return c.join('');
+  }
+  const runs = t => { t = String(t); return (t.includes(TOG) ? t.split(TOG) : litStar(t).split('*')).map((s, i) => ({ t: s.replace(/\uE000/g, '*'), it: i % 2 === 1 })).filter(r => r.t); };
   function measure(text, pt, bold) {
     let w = 0;
     runs(text).forEach(r => { mctx.font = `${r.it ? 'italic ' : ''}${bold ? 'bold ' : ''}${pt * 4}px Arial`; w += mctx.measureText(r.t).width / 4; });
@@ -14,15 +35,56 @@
   }
   const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const f = v => (Math.round(v * 100) / 100).toString();
-  const text = (t, x, y, pt, anchor, extra) => `<text x="${f(x)}" y="${f(y)}" font-size="${f(pt)}" text-anchor="${anchor}"${extra || ''}>${runs(t).map(r => r.it ? `<tspan font-style="italic">${esc(r.t)}</tspan>` : esc(r.t)).join('')}</text>`;
+  const PH = '#aab3be';                 // grey placeholders in the preview (never exported)
+  let usedMin = Infinity;               // the smallest text printed in this build (pre-flight)
+  function text(t, x, y, pt, anchor, extra) {
+    if (!(extra || '').includes(PH) && String(t).trim()) usedMin = Math.min(usedMin, pt);
+    return `<text x="${f(x)}" y="${f(y)}" font-size="${f(pt)}" text-anchor="${anchor}"${extra || ''}>${runs(t).map(r => r.it ? `<tspan font-style="italic">${esc(r.t)}</tspan>` : esc(r.t)).join('')}</text>`;
+  }
   // a symbol as it is (in text() a * starts italics)
-  const symText = (t, x, y, pt, anchor) => `<text x="${f(x)}" y="${f(y)}" font-size="${f(pt)}" text-anchor="${anchor}">${esc(t)}</text>`;
+  const symText = (t, x, y, pt, anchor) => { usedMin = Math.min(usedMin, pt); return `<text x="${f(x)}" y="${f(y)}" font-size="${f(pt)}" text-anchor="${anchor}">${esc(t)}</text>`; };
   const symWidth = (t, pt) => { mctx.font = `${pt * 4}px Arial`; return mctx.measureText(t).width / 4; };
   const line = (x1, y1, x2, y2, lw) => `<line x1="${f(x1)}" y1="${f(y1)}" x2="${f(x2)}" y2="${f(y2)}" stroke="#000" stroke-width="${f(lw)}"/>`;
 
+  // ---- multi-line labels (as GelFigure) ----
+  const LEAD = 1.18;   // line spacing, × font size
+  // lines whose last baseline is y (they stack upwards from the line they label)
+  const textLines = (lines, x, y, pt, anchor, extra) => lines.map((t, i) => text(t, x, y - (lines.length - 1 - i) * pt * LEAD, pt, anchor, extra)).join('');
+  /* a label broken into lines no wider than maxW; typed breaks (\n) kept. Chinese / Japanese characters break
+   * anywhere, other words after a space, "-" or "/"; *italic* runs closed at a line end and reopened */
+  const CJK = '\\u2E80-\\u9FFF\\uF900-\\uFAFF\\uFF00-\\uFFEF\\u3000-\\u303F';
+  // (the italic switches as TOG: a line that ends or starts inside italics is closed / reopened unambiguously)
+  const TOKENS = new RegExp(`${TOG}|[${CJK}]|\\s+|[^\\s${TOG}${CJK}]+?[-/]|[^\\s${TOG}${CJK}]+`, 'g');
+  function wrapText(t, pt, maxW) {
+    const out = [];
+    let it = false;
+    litStar(t).replace(/\*/g, TOG).split('\n').forEach(par => {
+      let startIt = it, cur = '';
+      const ln = (s, endIt) => (startIt ? TOG : '') + s.replace(new RegExp(`\\s+(${TOG}*)$`), '$1') + (endIt ? TOG : '');
+      for (const tk of par.match(TOKENS) || []) {
+        if (tk === TOG) { cur += tk; it = !it; continue; }
+        if (cur.split(TOG).join('').trim() && measure(ln(cur + tk, it), pt) > maxW) { out.push(ln(cur, it)); startIt = it; cur = /^\s+$/.test(tk) ? '' : tk; }
+        else cur += tk;
+      }
+      out.push(ln(cur, it));
+    });
+    return out.filter((l, i, a) => l.split(TOG).join('').trim() || a.length === 1);
+  }
+  // as few lines as wrapText needs, evened out ("磷酸化 / 蛋白" rather than "磷酸化蛋 / 白")
+  function balancedWrap(t, pt, maxW) {
+    const first = wrapText(t, pt, maxW);
+    if (first.length < 2) return first;
+    let lo = maxW * 0.2, hi = maxW, best = first;
+    for (let i = 0; i < 14; i++) { const mid = (lo + hi) / 2, l = wrapText(t, pt, mid); if (l.length <= first.length) { hi = mid; best = l; } else lo = mid; }
+    return best;
+  }
+
   function build(preview) {
+    usedMin = Infinity;
     const S = App.S, st = S.style, pt = st.fontPt, lw = st.lineWidthPt, P = !!preview;
-    const ph = ' fill="#aab3be"';
+    // per-kind sizes (null = the figure font)
+    const lp = st.lanePt || pt, mp = st.markerPt || pt, np = st.namePt || pt;
+    const ph = ` fill="${PH}"`;
     const ed = (attrs, inner) => (P ? `<g ${attrs} class="ed">${inner}</g>` : inner);
     const C = App.columns(), segs = C.segs, lanes = segs.flat();
     const laneW = st.mmPerLane * MM, gap = 1.6;
@@ -30,17 +92,18 @@
     const X = new Map(); let x = 0;
     segs.forEach((sg, si) => { if (si) x += gap; sg.forEach(j => { X.set(j, x + laneW / 2); x += laneW; }); });
     const W = x;
-    const els = [], warnings = [];
+    const els = [], warnings = [], overlaps = [];
+    const overlap = msg => { if (!overlaps.includes(msg)) { overlaps.push(msg); warnings.push(msg); } };
     const box = { x0: 0, y0: 0, x1: W, y1: 0 };
     const grow = (a, b, c, d) => { box.x0 = Math.min(box.x0, a); box.y0 = Math.min(box.y0, b); box.x1 = Math.max(box.x1, c); box.y1 = Math.max(box.y1, d); };
-    if (!lanes.length) return { svg: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>', w: 10, h: 10, warnings, angle: 0 };
+    if (!lanes.length) return { svg: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>', w: 10, h: 10, warnings, overlaps, angle: 0, minPt: pt };
 
     /* ---- rows ---- */
     // (protein names and the kDa scale each on the left or the right; on the same side the names go outside)
     const mwRight = st.mwSide === 'right', nameLeft = st.nameSide === 'left';
     const rows = C.rows, rowNames = [], ticksOut = [], arrowsOut = [];
     let y = 0, prevBlot = null, maxLeft = 0, maxRight = 0, tickLabW = 0;
-    const rowBoxes = [], placedTicks = [{ y: -pt * 0.6 }];   // the kDa header sits just above the first row
+    const rowBoxes = [], placedTicks = [{ y: -mp * 0.6 }];   // the kDa header sits just above the first row
     rows.forEach((row, ri) => {
       if (prevBlot !== null) y += row.blot === prevBlot ? st.rowGapPt : st.blotGapPt;
       prevBlot = row.blot;
@@ -71,12 +134,12 @@
       // protein name (placed once the width of the kDa scale is known)
       const nm = row.name || (P ? '蛋白名' : '');
       const kdaHint = App.rowKda(row);
-      rowNames.push({ row, nm, y: y + h / 2, hint: !row.name && P && kdaHint ? `≈${Math.round(kdaHint)} kDa` : '' });
+      rowNames.push({ row, nm, y: y + h / 2, h, hint: !row.name && P && kdaHint ? `≈${Math.round(kdaHint)} kDa` : '' });
       // target-band arrows of the row, at their band (placed once the widths beside the bands are known)
       (S.arrows || []).forEach((a, k) => {
         if (a.row !== row.id) return;
         const ya = y + (App.arrowV(a) - (row.segs[0].vc - row.above)) * sc, lab = App.arrowLabel(a), wait = !lab && P && a.sym === '◀' && a.auto;
-        if (ya >= y - 0.5 && ya <= y + h + 0.5) arrowsOut.push({ a, k, y: ya, label: lab || (wait ? '? kDa' : ''), wait });
+        if (ya >= y - 0.5 && ya <= y + h + 0.5) arrowsOut.push({ a, k, y: ya, label: lab || (wait ? '? kDa' : ''), wait, pt: a.pt || pt });
       });
       // kDa ticks, from the leftmost piece of the row that has marker sizes
       const b = App.blot(row.blot);
@@ -89,13 +152,13 @@
         // too close to fit both: the tick nearest the band wins (it tells the size best);
         // also keep clear of ticks already printed for the row above
         ticks.slice().sort((a, c) => Math.abs(a.y - yBand) - Math.abs(c.y - yBand))
-          .forEach(t => { if (kept.concat(placedTicks).every(o => Math.abs(o.y - t.y) >= pt * 0.95)) kept.push(t); });
+          .forEach(t => { if (kept.concat(placedTicks).every(o => Math.abs(o.y - t.y) >= mp * 0.95)) kept.push(t); });
         kept.sort((a, c) => a.y - c.y);
         placedTicks.push(...kept);
         kept.forEach(t => {
-          if (mwRight) { els.push(line(W + 1, t.y, W + st.tickLenPt + 1, t.y, lw)); els.push(text(String(t.k), W + st.tickLenPt + 2.5, t.y + pt * 0.35, pt, 'start')); }
-          else { els.push(line(-st.tickLenPt - 1, t.y, -1, t.y, lw)); els.push(text(String(t.k), -st.tickLenPt - 2.5, t.y + pt * 0.35, pt, 'end')); }
-          tickLabW = Math.max(tickLabW, measure(String(t.k), pt));
+          if (mwRight) { els.push(line(W + 1, t.y, W + st.tickLenPt + 1, t.y, lw)); els.push(text(String(t.k), W + st.tickLenPt + 2.5, t.y + mp * 0.35, mp, 'start')); }
+          else { els.push(line(-st.tickLenPt - 1, t.y, -1, t.y, lw)); els.push(text(String(t.k), -st.tickLenPt - 2.5, t.y + mp * 0.35, mp, 'end')); }
+          tickLabW = Math.max(tickLabW, measure(String(t.k), mp));
           ticksOut.push(t);
         });
         // (said once the piece's marks are done — 2 of them — not while they are being set)
@@ -108,112 +171,183 @@
     // beside the bands, outwards: the kDa scale, the target-band arrows, the names (each on its own side)
     const scaleW = ticksOut.length ? st.tickLenPt + 2.5 + tickLabW : 0;
     if (mwRight) maxRight = scaleW; else maxLeft = scaleW;
-    const scaleOn = right => (right === mwRight && scaleW ? scaleW + 2 : 0), AS = pt * 0.8, arrowW = { left: 0, right: 0 };
+    const scaleOn = right => (right === mwRight && scaleW ? scaleW + 2 : 0), arrowW = { left: 0, right: 0 };
     arrowsOut.forEach(t => {
       t.right = t.a.side !== 'left';
-      t.w = (t.a.sym === '◀' ? AS : symWidth(t.a.sym, pt)) + (t.label ? 2 + measure(t.label, pt) : 0);
+      t.as = t.pt * 0.8;
+      t.w = (t.a.sym === '◀' ? t.as : symWidth(t.a.sym, t.pt)) + (t.label ? 2 + measure(t.label, t.pt) : 0);
       arrowW[t.right ? 'right' : 'left'] = Math.max(arrowW[t.right ? 'right' : 'left'], t.w);
     });
     arrowsOut.forEach(t => {
       // an arrowhead pointing at the band (or a symbol: *, #, †) and its text
-      const dir = t.right ? 1 : -1, x0 = (t.right ? W : 0) + dir * (2 + scaleOn(t.right)), anchor = t.right ? 'start' : 'end';
+      const dir = t.right ? 1 : -1, x0 = (t.right ? W : 0) + dir * (2 + scaleOn(t.right)), anchor = t.right ? 'start' : 'end', apt = t.pt;
       let g;
       if (t.a.sym === '◀') {
-        const b = x0 + dir * AS;
-        g = `<path d="M${f(x0)} ${f(t.y)}L${f(b)} ${f(t.y - AS * 0.55)}L${f(b)} ${f(t.y + AS * 0.55)}Z"/>` + (t.label ? text(t.label, b + dir * 2, t.y + pt * 0.35, pt, anchor, t.wait ? ph : '') : '');
+        const b = x0 + dir * t.as;
+        g = `<path d="M${f(x0)} ${f(t.y)}L${f(b)} ${f(t.y - t.as * 0.55)}L${f(b)} ${f(t.y + t.as * 0.55)}Z"/>` + (t.label ? text(t.label, b + dir * 2, t.y + apt * 0.35, apt, anchor, t.wait ? ph : '') : '');
       } else {
         // (an asterisk sits high in its line: lowered onto the band)
-        const sw = symWidth(t.a.sym, pt);
-        g = symText(t.a.sym, x0, t.y + pt * (t.a.sym === '*' ? 0.55 : 0.35), pt, anchor) + (t.label ? text(t.label, x0 + dir * (sw + 2), t.y + pt * 0.35, pt, anchor) : '');
+        const sw = symWidth(t.a.sym, apt);
+        g = symText(t.a.sym, x0, t.y + apt * (t.a.sym === '*' ? 0.55 : 0.35), apt, anchor) + (t.label ? text(t.label, x0 + dir * (sw + 2), t.y + apt * 0.35, apt, anchor) : '');
       }
-      const hit = P ? `<rect x="${f(Math.min(x0, x0 + dir * t.w))}" y="${f(t.y - pt * 0.7)}" width="${f(t.w)}" height="${f(pt * 1.4)}" fill="transparent"/>` : '';
+      const hit = P ? `<rect x="${f(Math.min(x0, x0 + dir * t.w))}" y="${f(t.y - apt * 0.7)}" width="${f(t.w)}" height="${f(apt * 1.4)}" fill="transparent"/>` : '';
       els.push(ed(`data-edit="arrow" data-k="${t.k}"`, hit + g));
     });
     if (arrowW.right) maxRight = Math.max(maxRight, 2 + scaleOn(true) + arrowW.right);
     if (arrowW.left) maxLeft = Math.max(maxLeft, 2 + scaleOn(false) + arrowW.left);
     const sideW = nameLeft ? arrowW.left : arrowW.right;
     const off = 3 + ((nameLeft ? !mwRight : mwRight) && scaleW ? scaleW + 2 : 0) + (sideW ? sideW + 4 : 0);
-    rowNames.forEach(n => {
+    rowNames.forEach((n, i) => {
       const x = nameLeft ? -off : W + off, anchor = nameLeft ? 'end' : 'start';
       if (n.nm) {
-        els.push(ed(`data-edit="rowname" data-row="${n.row.id}"`, text(n.nm, x, n.y + pt * 0.35, pt, anchor, n.row.name ? '' : ph)));
-        const w = off + measure(n.nm, pt);
+        els.push(ed(`data-edit="rowname" data-row="${n.row.id}"`, text(n.nm, x, n.y + np * 0.35, np, anchor, n.row.name ? '' : ph)));
+        const w = off + measure(n.nm, np);
         if (nameLeft) maxLeft = Math.max(maxLeft, w); else maxRight = Math.max(maxRight, w);
+        // names of neighbouring thin rows run into each other
+        const nx = rowNames[i + 1];
+        if (nx && nx.nm && n.row.name && nx.row.name && nx.y - n.y < np * 1.05) overlap(`「${n.row.name}」和「${nx.row.name}」两行太窄，蛋白名会重叠：减小蛋白名字号，或加大行距、把框上下拉高`);
       }
       if (n.hint) {
-        els.push(text(n.hint, x, n.y + pt * 1.35, pt * 0.8, anchor, ph));
-        const w = off + measure(n.hint, pt * 0.8);
+        els.push(text(n.hint, x, n.y + np * 1.35, np * 0.8, anchor, ph));
+        const w = off + measure(n.hint, np * 0.8);
         if (nameLeft) maxLeft = Math.max(maxLeft, w); else maxRight = Math.max(maxRight, w);
       }
     });
+    /* side brackets (as GelFigure's), outermost on their side: over rows (IP / Input) or part of one (a smear).
+     * Narrow ones first; one stepped out past another on its side at the same heights. A hidden end row: the
+     * bracket ends at the nearest row shown */
+    const ord = new Map(S.rows.map((r, i) => [r.id, i])), rbOf = new Map(rowBoxes.map(rb => [rb.id, rb])), brs = [];
+    (S.brackets || []).forEach((bk, k) => {
+      let a = { id: bk.r0, f: bk.f0 }, c = { id: bk.r1, f: bk.f1 };
+      if (!ord.has(a.id) || !ord.has(c.id)) return;
+      if (ord.get(a.id) > ord.get(c.id) || (a.id === c.id && a.f > c.f)) [a, c] = [c, a];
+      const inside = rowBoxes.filter(rb => ord.get(rb.id) >= ord.get(a.id) && ord.get(rb.id) <= ord.get(c.id));
+      if (!inside.length) return;
+      const ta = rbOf.get(a.id), tc = rbOf.get(c.id), last = inside[inside.length - 1];
+      const y1 = ta ? ta.y + a.f * ta.h : inside[0].y, y2 = tc ? tc.y + c.f * tc.h : last.y + last.h;
+      if (y2 - y1 >= 1) brs.push({ bk, k, y1, y2 });
+    });
+    const base = { left: maxLeft, right: maxRight }, placedBr = { left: [], right: [] };
+    brs.sort((p, q) => (p.y2 - p.y1) - (q.y2 - q.y1)).forEach(o => {
+      const side = o.bk.side === 'right' ? 'right' : 'left', dir = side === 'right' ? 1 : -1, bp = o.bk.pt || pt, tk = pt * 0.45;
+      const txt = o.bk.text || (P ? '点击输入' : ''), ls = txt ? String(txt).split('\n') : [];
+      const tw = Math.max(0, ...ls.map(t => measure(t, bp))), th = ls.length ? bp + (ls.length - 1) * bp * LEAD : 0;
+      const ym = (o.y1 + o.y2) / 2, yy1 = Math.min(o.y1, ym - th / 2), yy2 = Math.max(o.y2, ym + th / 2);
+      let off = base[side] + 3;
+      // (groups one above the other, IP over Input, share a column: only a real overlap steps out)
+      placedBr[side].filter(q => yy1 < q.y2 - 0.5 && yy2 > q.y1 + 0.5).forEach(q => { off = Math.max(off, q.end + 2.5); });
+      const xb = (side === 'right' ? W : 0) + dir * (off + tk), tx = xb + dir * 2;
+      const path = `M${f(xb - dir * tk)} ${f(o.y1)}L${f(xb)} ${f(o.y1)}L${f(xb)} ${f(o.y2)}L${f(xb - dir * tk)} ${f(o.y2)}`;
+      const hit = P ? `<rect x="${f(Math.min(xb - dir * tk, tx + dir * tw) - 1)}" y="${f(yy1 - 1)}" width="${f(tk + 2 + tw + 2)}" height="${f(yy2 - yy1 + 2)}" fill="transparent"/>` : '';
+      els.push(ed(`data-edit="bracket" data-k="${o.k}"`, hit + `<path d="${path}" fill="none" stroke="#000" stroke-width="${f(lw)}"/>` +
+        (ls.length ? textLines(ls, tx, ym + bp * 0.35 + (ls.length - 1) * bp * LEAD / 2, bp, side === 'right' ? 'start' : 'end', o.bk.text ? '' : ph) : '')));
+      const end = off + tk + 2 + tw;
+      placedBr[side].push({ y1: yy1, y2: yy2, end });
+      if (side === 'right') maxRight = Math.max(maxRight, end); else maxLeft = Math.max(maxLeft, end);
+      grow(0, yy1, W, yy2);
+    });
     grow(-maxLeft, 0, W + maxRight, H);
 
-    /* ---- top stack ---- */
+    /* ---- top stack (y grows negative): lane numbers, conditions, lane names, groups ---- */
     let yTop = -st.labelGapPt;
+    if (st.laneNumbers) {
+      lanes.forEach((j, i) => { els.push(text(String(i + 1), X.get(j), yTop, lp, 'middle')); });
+      grow(0, yTop - lp, W, yTop);
+      yTop -= lp * 1.25;
+    }
     const conds = S.conditions.map((c, r) => Object.assign({ r }, c)).filter(c => P || c.name || c.values.some(v => v));
     for (let k = conds.length - 1; k >= 0; k--) {
-      const c = conds[k];
+      const c = conds[k], cp = c.pt || pt;
       lanes.forEach(j => {
-        const v = c.values[j - 1] || '', hit = P ? `<rect x="${f(X.get(j) - laneW * 0.45)}" y="${f(yTop - pt)}" width="${f(laneW * 0.9)}" height="${f(pt * 1.25)}" fill="transparent"/>` : '';
-        if (v || P) els.push(ed(`data-edit="cond" data-r="${c.r}" data-j="${j}"`, hit + text(v || '·', X.get(j), yTop, pt, 'middle', v ? '' : ph)));
+        const v = c.values[j - 1] || '', hit = P ? `<rect x="${f(X.get(j) - laneW * 0.45)}" y="${f(yTop - cp)}" width="${f(laneW * 0.9)}" height="${f(cp * 1.25)}" fill="transparent"/>` : '';
+        if (v || P) els.push(ed(`data-edit="cond" data-r="${c.r}" data-j="${j}"`, hit + text(v || '·', X.get(j), yTop, cp, 'middle', v ? '' : ph)));
       });
       const nm = c.name || (P ? '条件' : '');
-      if (nm) { els.push(ed(`data-edit="condname" data-r="${c.r}"`, text(nm, -st.labelGapPt * 2, yTop, pt, 'end', c.name ? '' : ph))); grow(-st.labelGapPt * 2 - measure(nm, pt), yTop - pt, 0, yTop); }
-      yTop -= pt * 1.3;
+      if (nm) { els.push(ed(`data-edit="condname" data-r="${c.r}"`, text(nm, -st.labelGapPt * 2, yTop, cp, 'end', c.name ? '' : ph))); grow(-st.labelGapPt * 2 - measure(nm, cp), yTop - cp, 0, yTop); }
+      yTop -= cp * 1.3;
     }
-    // placeholders count the lanes shown (hidden ladder lanes skipped), the order bulk paste fills them in
-    const names = lanes.map((j, i) => S.lanes[j - 1].name || (P ? String(i + 1) : ''));
+    // placeholders count the lanes shown (hidden ladder lanes skipped), the order bulk paste fills them in (with the
+    // lane numbers printed: a dot, not the number twice)
+    const names = lanes.map((j, i) => S.lanes[j - 1].name || (P ? (st.laneNumbers ? '·' : String(i + 1)) : ''));
     const unitY = yTop;
     let angle = 0;
     if (names.some(t => t)) {
-      const maxW = Math.max(...names.map(t => measure(t, pt)));
-      angle = st.labelAngle === 'auto' ? (maxW <= laneW * 0.92 ? 0 : laneW >= pt * 1.6 ? 45 : 90) : +st.labelAngle;
+      const maxW = Math.max(...names.map(t => measure(t, lp)));
+      angle = st.labelAngle === 'auto' ? (maxW <= laneW * 0.92 ? 0 : laneW >= lp * 1.6 ? 45 : 90) : +st.labelAngle;
       const rad = angle * Math.PI / 180, sn = Math.sin(rad), cs = Math.cos(rad);
-      let hMax = pt;
+      let hMax = lp;
       lanes.forEach((j, i) => {
         const t = names[i]; if (!t) return;
-        const tw = measure(t, pt), xc = X.get(j), extra = S.lanes[j - 1].name ? '' : ph;
-        if (angle === 0 || !S.lanes[j - 1].name) { els.push(ed(`data-edit="lane" data-j="${j}"`, text(t, xc, yTop, pt, 'middle', extra))); grow(xc - tw / 2, yTop - pt, xc + tw / 2, yTop); }
+        const tw = measure(t, lp), xc = X.get(j), extra = S.lanes[j - 1].name ? '' : ph;
+        if (angle === 0 || !S.lanes[j - 1].name) { els.push(ed(`data-edit="lane" data-j="${j}"`, text(t, xc, yTop, lp, 'middle', extra))); grow(xc - tw / 2, yTop - lp, xc + tw / 2, yTop); }
         else {
-          const ox = xc + pt * 0.35 * sn;
-          els.push(ed(`data-edit="lane" data-j="${j}"`, `<g transform="translate(${f(ox)},${f(yTop)}) rotate(${-angle})">${text(t, 0, 0, pt, 'start', extra)}</g>`));
-          hMax = Math.max(hMax, tw * sn + pt * cs * 0.8);
-          grow(ox - pt * sn, yTop - tw * sn - pt * cs, ox + tw * cs + pt * sn * 0.2, yTop);
+          const ox = xc + lp * 0.35 * sn;
+          els.push(ed(`data-edit="lane" data-j="${j}"`, `<g transform="translate(${f(ox)},${f(yTop)}) rotate(${-angle})">${text(t, 0, 0, lp, 'start', extra)}</g>`));
+          hMax = Math.max(hMax, tw * sn + lp * cs * 0.8);
+          grow(ox - lp * sn, yTop - tw * sn - lp * cs, ox + tw * cs + lp * sn * 0.2, yTop);
         }
       });
-      yTop -= angle === 0 ? pt * 1.3 : hMax + pt * 0.35;
+      const named = lanes.filter(j => S.lanes[j - 1].name).map(j => measure(S.lanes[j - 1].name, lp));
+      if (angle !== 0 && named.length && laneW < lp * 1.15) overlap('泳道太窄：即使 90° 泳道名也会重叠，请减小泳道名字号或加宽每道');
+      if (angle === 0 && st.labelAngle !== 'auto' && named.length && Math.max(...named) > laneW * 1.02) overlap('水平的泳道名互相重叠：改用"自动"或倾斜角度，或减小字号');
+      yTop -= angle === 0 ? lp * 1.3 : hMax + lp * 0.35;
     }
     // kDa header aligned with the lane-label row
     if (st.showMW && st.unitHeader && scaleW > 0) {
-      if (mwRight) { els.push(text('kDa', W + st.tickLenPt + 2.5, unitY, pt, 'start')); grow(W, unitY - pt, W + st.tickLenPt + 2.5 + measure('kDa', pt), unitY); }
-      else { els.push(text('kDa', -st.tickLenPt - 2.5, unitY, pt, 'end')); grow(-st.tickLenPt - 2.5 - measure('kDa', pt), unitY - pt, 0, unitY); }
+      if (mwRight) { els.push(text('kDa', W + st.tickLenPt + 2.5, unitY, mp, 'start')); grow(W, unitY - mp, W + st.tickLenPt + 2.5 + measure('kDa', mp), unitY); }
+      else { els.push(text('kDa', -st.tickLenPt - 2.5, unitY, mp, 'end')); grow(-st.tickLenPt - 2.5 - measure('kDa', mp), unitY - mp, 0, unitY); }
     }
-    // groups
+    /* groups: a line over the lanes (one piece per run of neighbouring columns: a group line never bridges a white
+     * gap) and its text above; a text wider than its line is wrapped (default), shrunk (not below minFontPt) or
+     * kept on one line, and stacked by its real width so labels never run into each other */
     const groups = S.groups.map((g, k) => Object.assign({ k }, g)).filter(g => lanes.some(j => j >= Math.min(g.from, g.to) && j <= Math.max(g.from, g.to)));
     if (groups.length) {
-      const tiers = [], tierOf = [];
-      groups.map((g, i) => ({ i, a: Math.min(g.from, g.to), b: Math.max(g.from, g.to) })).sort((p, q) => (p.b - p.a) - (q.b - q.a)).forEach(s => {
-        let t = 0; while ((tiers[t] || []).some(o => !(s.b < o.a || s.a > o.b))) t++;
-        (tiers[t] = tiers[t] || []).push(s); tierOf[s.i] = t;
+      const fit = st.groupFit || 'wrap', minPt = st.minFontPt || 5, half = laneW * 0.42;
+      const items = groups.map(g => {
+        const a = Math.min(g.from, g.to), b = Math.max(g.from, g.to), parts = [];
+        segs.forEach(run => { const ins = run.filter(j => j >= a && j <= b); if (ins.length) parts.push([X.get(ins[0]) - half, X.get(ins[ins.length - 1]) + half]); });
+        const x0 = parts[0][0], x1 = parts[parts.length - 1][1], cx = (x0 + x1) / 2;
+        const gp = g.pt || pt, txt = g.text || (P ? '点击输入' : '');
+        let size = gp, ls = txt ? String(txt).split('\n') : [];
+        const widest = () => Math.max(0, ...ls.map(t => measure(t, size)));
+        const room = Math.max(x1 - x0, gp * 2);
+        if (g.text && widest() > room) {
+          if (fit === 'wrap') ls = balancedWrap(g.text, size, room);
+          else if (fit === 'shrink') size = Math.max(Math.min(minPt, gp), gp * room / widest());
+        }
+        const tw = widest(), th = ls.length ? size * 0.3 + (ls.length - 1) * size * LEAD + size : pt;
+        return { g, parts, x0, x1, cx, size, ls, tw, th, ext0: Math.min(x0, cx - tw / 2), ext1: Math.max(x1, cx + tw / 2) };
       });
-      const base = yTop - pt * 0.15, tierH = pt * 1.7;
-      groups.forEach((g, i) => {
-        const inL = lanes.filter(j => j >= Math.min(g.from, g.to) && j <= Math.max(g.from, g.to));
-        const x0 = X.get(inL[0]) - laneW * 0.42, x1 = X.get(inL[inL.length - 1]) + laneW * 0.42, yy = base - tierOf[i] * tierH;
-        els.push(line(x0, yy, x1, yy, lw));
-        const t = g.text || (P ? '点击输入' : '');
-        if (t) { els.push(ed(`data-edit="group" data-k="${g.k}"`, text(t, (x0 + x1) / 2, yy - pt * 0.3, pt, 'middle', g.text ? '' : ph))); grow((x0 + x1) / 2 - measure(t, pt) / 2, yy - pt * 1.3, (x0 + x1) / 2 + measure(t, pt) / 2, yy); }
-        grow(x0, yy - pt, x1, yy);
+      // tiers: a group goes to the lowest tier where neither its line nor its text touches another's (narrow first)
+      const tiers = [], pad = pt * 0.25;
+      items.map((o, i) => i).sort((p, q) => (items[p].x1 - items[p].x0) - (items[q].x1 - items[q].x0)).forEach(i => {
+        const o = items[i]; let t = 0;
+        while ((tiers[t] || []).some(q => !(o.ext1 + pad < q.ext0 || o.ext0 - pad > q.ext1))) t++;
+        (tiers[t] = tiers[t] || []).push(o); o.tier = t;
       });
-      yTop = base - tiers.length * tierH;
+      const tierH = tiers.map(ts => Math.max(pt * 1.7, ...ts.map(o => o.th + pt * 0.4)));
+      const base = yTop - pt * 0.15, tierY = t => base - tierH.slice(0, t).reduce((s, v) => s + v, 0);
+      items.forEach(o => {
+        const yy = tierY(o.tier);
+        o.parts.forEach(([r0, r1]) => {
+          els.push(line(r0, yy, r1, yy, lw));
+          if (st.groupTicks) { els.push(line(r0, yy, r0, yy + pt * 0.35, lw)); els.push(line(r1, yy, r1, yy + pt * 0.35, lw)); }
+        });
+        if (o.ls.length) {
+          els.push(ed(`data-edit="group" data-k="${o.g.k}"`, textLines(o.ls, o.cx, yy - o.size * 0.3, o.size, 'middle', o.g.text ? '' : ph)));
+          grow(o.cx - o.tw / 2, yy - o.th, o.cx + o.tw / 2, yy);
+        }
+        grow(o.x0, yy - pt, o.x1, yy);
+      });
+      yTop = tierY(tiers.length);
     }
     if (st.panelLetter) { const px = box.x0 - 2, py = box.y0 - 1; els.push(text(st.panelLetter, px, py + 8, 8, 'end', ' font-weight="bold"')); grow(px - measure(st.panelLetter, 8, true), py, px, py + 8); }
 
     const m = 2, vx = box.x0 - m, vy = box.y0 - m, vw = box.x1 - box.x0 + 2 * m, vh = box.y1 - box.y0 + 2 * m;
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${f(vw / MM)}mm" height="${f(vh / MM)}mm" viewBox="${f(vx)} ${f(vy)} ${f(vw)} ${f(vh)}" font-family="Arial, Helvetica, sans-serif" fill="#000">` +
       `<rect x="${f(vx)}" y="${f(vy)}" width="${f(vw)}" height="${f(vh)}" fill="#fff"/>` + els.join('') + '</svg>';
-    return { svg, w: vw, h: vh, warnings, angle, rowBoxes, laneX: X, laneW, figW: W };
+    return { svg, w: vw, h: vh, warnings, overlaps, angle, rowBoxes, laneX: X, laneW, figW: W, minPt: usedMin === Infinity ? pt : usedMin };
   }
 
-  G.BRender = { build, measure };
+  G.BRender = { build, measure, wrapText };
 })(window);

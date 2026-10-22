@@ -705,7 +705,8 @@
     view.ox = sx - (sx - view.ox) * ns / view.s; view.oy = sy - (sy - view.oy) * ns / view.s; view.s = ns;
     draw();
   }, { passive: false });
-  window.addEventListener('keydown', e => { if (e.code === 'Space' && !/input|textarea|select/i.test(e.target.tagName || '')) { spaceDown = true; if (e.target === box) e.preventDefault(); } });
+  // space = pan (not on form fields, buttons and links, where Space types or presses)
+  window.addEventListener('keydown', e => { if (e.code === 'Space' && !/^(input|textarea|select|button|summary|a)$/i.test(e.target.tagName || '')) { spaceDown = true; if (e.target === box) e.preventDefault(); } });
   window.addEventListener('keyup', e => { if (e.code === 'Space') spaceDown = false; });
   // keys only when the image area has focus: a selected lane moves / goes; else the selected box's lanes
   // move together (Alt: their spacing), ↑↓ moves the row, Delete removes it

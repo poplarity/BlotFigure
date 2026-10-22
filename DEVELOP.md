@@ -30,6 +30,7 @@ cd BlotFigure
 | `&selpiece=B` | 选中的行跨几条膜条时，泳道工具对准膜条 B 上的那个框（需同时用 `&sel=`） |
 | `&zoomsel=1` | 膜图放大到选中的行（截图用） |
 | `&mode=marks` / `&mode=addrow` / `&mode=pieces` | 进入标 Marker（`&markpiece=D`：放大到膜条 D） / 添加蛋白框 / 调整膜条模式 |
+| `&draft=1` | 脚本运行时也写自动草稿（平时带调试参数载入时不写，免得盖掉真正的草稿）；脚本运行时 SHA-256 用纯 JS 算（无界面的虚拟时钟下 WebCrypto 不返回） |
 | `&tour=1` | 脚本运行时也显示首次打开的三栏引导（平时只在 `localStorage` 没有 `blotfig.tour` 时显示一次） |
 | `&nochemi=1` | 认膜条切缝、找 Marker 道时不对照曝光图（对比用） |
 | `&pose=merge` / `align` / `order` | 在成图上停在拖动的半路（截图用）：把拆开的 B 行拖到 A 行上 / 把膜条 C 往右拖一列 / 把最下面一行往上拖 |
@@ -85,7 +86,14 @@ msedge --headless=new --disable-gpu --user-data-dir=$env:TEMP\wb_dbg --allow-fil
 - 泳道（GelFigure 的"首尾泳道等间距"）：拖最左 / 最右一条泳道线时中间的泳道均匀排开（`App.dragLane`，Alt 只动这一条），"首尾对齐"按泳道数在首尾两条之间等分（`App.evenEnds`）。框的左右边拖出第 1 列以左时 `sg.c0` 暂时 < 1，`App.commit` 里 `roomLeft` 给所有行在左边补列。
 - 膜条可以手动调整（第 2 步的 `'pieces'` 模式，`wbview.js` 的 `pedit` 是工作副本，点"下一步"或离开第 2 步时才生效）：`App.setPieces(blot, list)` 把膜条存进 `blot.userStrips`（`{id, cx, cy, angle, w, h}`，网格坐标），之后的分析都用它们（`analyzeSession` 的 `opt.strips`，按顺序，id 跟着走），框按 id 换算、留在图上原处，删掉的膜条上的框交给最近的一条；`null` = 回到自动。撤销 / 重做后 `App.syncPieces` 发现分析用的膜条和状态里的不一致就重新分析。
 - 拖动时（`App.dragging`）成图跟着刷新，但不重新评分各张曝光、不重算警告；膜图上行标签的 ★ 用上次提交时的推荐曝光（`App.bestSeen`）。`WB.evalExposure` 用定长类型数组和原生排序（一个框可以有几十万像素）。
-- 项目文件（`App.saveProject` / `App.openProject`）：`'BLOTFIG1'` + 头的长度（u32）+ 头（JSON：状态 `S`、每张图的 id / 名字 / 类型 / 曝光时间 / 字节数）+ 各张图原样的文件字节，整体 gzip（浏览器支持 `CompressionStream` 时）。打开时按原 id 解码图片，套用 `S.align`，再分析每张膜（膜条 id 按位置对上，框、刻度原样）。`rec.src` 是载入时的文件（`File` 或 `{name, buffer}`），保存时才重新读。
+- 项目文件（`App.saveProject` / `App.openProject`）：`'BLOTFIG1'` + 头的长度（u32）+ 头（JSON：状态 `S`、导入时的状态 `initial`、每张图的 id / 名字 / 类型 / 曝光时间 / 字节数 / `sha256`）+ 各张图原样的文件字节，整体 gzip（浏览器支持 `CompressionStream` 时）。打开时（`restoreFrom`，草稿也走它）核对每张图的 SHA-256，按原 id 解码图片，套用 `S.align`，再分析每张膜（膜条 id 按位置对上，框、刻度原样）。`rec.src` 是载入时的文件（`File` 或 `{name, buffer}`），保存时才重新读。
+- 自动草稿（和 GelFigure 一样，IndexedDB 库 `blotfigure` / 表 `drafts`）：`img:<sha256>` 存每张图的原始字节（每张只写一次），`meta` 存状态、`initial`、图片列表和开始页显示的摘要；`App.commit` 之后约 1 秒写（`saveDraftSoon`）。另一个会话的草稿会被这一个替换；`file://` 下有的浏览器打不开 IndexedDB（3 秒超时），草稿是尽力而为。"新建"先 `dropDraft` 再刷新。
+- "回到刚导入时"：`App.initial` 是载入图片、分析完那一刻的状态（之后再添加图片时更新）；项目和草稿把它一起存下，打开后仍回到当初导入时。0.7 以前的项目没有它，`App.initialAsOpened` 为真，回到打开时的样子（确认框里会说明）。`App.resetAll` 是一次普通的提交，可以撤销。
+- 样式文件（`App.template` / `App.applyTemplate`）：泳道名、分组和条件行（按成图第一列起的相对位置）、蛋白名从上到下、Marker 型号、`S.style`；套用时按顺序对应，多的忽略。
+- 导出前检查 `App.preflight()`：`[{level: 'block' | 'warn' | 'info', text, fix?: {label, run, leave?}}]`，`leave` 的修正是跳回某一步（关掉对话框）；`wbui.js` 的 `preflight()` 只在有 block / warn 时弹出，选择记在 `localStorage` 的 `blotfig.preflight`。最小字号来自 `BRender.build().minPt`（实际印出来的最小字，占位灰字不算）。
+- 处理日志 `App.processingLog()`（JSON）和嵌进 PNG / TIFF 的摘要 `App.summaryText()`；`export.js` 写 PNG 的 `pHYs`（dpi）、`sRGB`、`iTXt`（Software、Description），TIFF 为 LZW 8 位灰度带分辨率。
+- 文字标记（`wbrender.js` 的 `runs` / `litStar`）：`*斜体*` 的星号只在后面紧跟非空白时开、前面紧跟非空白时关（同 Markdown），配不上对的星号原样显示（`WT*`、`siRNA* ctrl`、`**`）。分组文字换行（`wrapText` / `balancedWrap`）把斜体开关换成私用字符 `TOG`，原样的星号换成 `LIT`，所以行尾、行首补上的开关不会和用户打的星号混淆。
+- 行旁括号 `S.brackets [{r0, f0, r1, f1, side, text, pt}]`：从行 `r0` 的 `f0`（0 = 上沿，1 = 下沿）到行 `r1` 的 `f1`。按行存，所以行换顺序、框改高度时括号跟着行走；一端的行删掉时 `App.commit` 去掉它；一端的行隐藏时停在范围内最近的可见行。排版在刻度、箭头、蛋白名之外，窄的先放，同一边真正重叠的才往外错开一列（上下相邻的共用一列）。工具在 `wbui.js` 的 `'bracket'` 模式（`bdrag`、`rowAtY`：离行边 20% 以内吸附到行边，Alt 不吸附；点一下 = 整行）。
 - Marker 型号列表（`wbladders.js`）与 GelFigure 的预染蛋白 Marker 一致（含 `ref` 参考带、`vendor` 分组），只去掉了在膜上看不见的非预染 Marker；老的 id（`br_pp` 等）不变。标 Marker 时右上角的参考图（`ladderCard`）按 log 分子量等距画。
 - 重新分析（改图片类型、移图、移除图、重新对齐）用 `App.reanalyze`：膜条按位置和大小一一对上旧的（保留 id、字母、手动刻度），行和框原样保留，只把框换算到新膜条的坐标里（`carryRows`）；只有"重新识别"（`{fresh: true}`）才丢掉现在的行重新识别。`findStrips` 认切缝时，一条暗线如果大部分落在曝光图里一条带的正中（不是旁边强带的拖尾），就当作条带而不是切缝。
 - 同一张膜的各张图在同一个网格上：`blot.frame` 是网格基准（大多数图所在位置的一张白光图），`S.align[imgId] = {a, tx, ty, pieces: {pieceId: {a, tx, ty}}, how: 'auto' | 'manual', by}` 把网格坐标映射到这张图的原图坐标（绕图片中心旋转 a 度再平移；`pieces` 是单独挪动过的膜条自己的变换）。没有条目 = 和网格一致。原图留在 `rec.raw`，`rec.img` / `rec.cs` 是重采样到网格上的图（`App.applyAlign`；撤销/重做后 `App.syncAlign` 重新采样），所以别的代码都直接用对齐后的图。分析读膜条和 Ladder 的白光图（`blot.marker`，保持最先那张：之后拍的白光图常透出曝光里的强带）用原图读，再按它的变换映射到网格（重采样会把膜条之间几个像素的切缝糊掉）。
@@ -97,7 +105,8 @@ msedge --headless=new --disable-gpu --user-data-dir=$env:TEMP\wb_dbg --allow-fil
 - `js/wbengine.js`（`G.WB`）：分类、归膜、膜条分割（`findStrips`）、Ladder 识别（`findLadders`）与标定（`calibrate` / `fitSeries`）、条带行（`detectRows`）、每条膜条的泳道格点（`pieceLattice` / `jointPitch`）、默认列号（`assignColumns`）、整体分析（`analyzeSession`）、框内识别泳道（`detectBoxLanes`）与条带（`bandInBox`）、曝光评分（`exposureScore`）、图与图的刚性配准（`registerRigid` / `registerPieces` / `regWarp`，FFT 相位相关）
 - `js/wbapp.js`（`G.BApp`）：状态、撤销、同一张膜各张图的对齐（`alignBlot` / `alignPieces` / `applyAlign`）、行与框、框里的泳道编辑、行的拼接与拆开、框选添加、手动 Marker、曝光与显示范围、规范检查
 - `js/wbrender.js`：排版成 SVG；`js/wbview.js`：中间膜图（框的 8 个角柄、泳道竖线与列号、双击加道、框选添加、标 Marker 的 `marks` 模式：`drawMarking` / `marksOf` / `markGeom`，手动对齐 `align` 模式；`fitFull` 放大到整张膜的膜条，`fitPiece` 放大到一条膜条的 Marker 道）；`js/wbui.js`：5 步面板（第 1 步 `renderBlots`、第 2 步 `renderPieces`、第 3 步 `renderRows` 和选中一行展开的曝光、泳道、倾斜工具 `rowDetail`、第 4 步 `renderMarker` / `ladderCard` 和刻度的分子量选择框 `markPicker`、第 5 步 `renderNames`；步骤切换 `openStep` / `nextStep` / `renderSteps`）、顶栏的提示 `updateCoach`（点它执行 `coachAct`）、首次引导 `showTour`、成图上的编辑与拖动排列（`rowRects` / `drawRowTags`，预览上的拖动在 `pdrag`，列表里的在 `ldrag`）、导出、调试参数
-- `js/tiff.js` `engine.js` `export.js`：与 GelFigure 共用，改动时注意两边同步
+- `js/tiff.js` `engine.js`：与 GelFigure 共用，改动时注意两边同步（`tiff.js` 已同步到 GelFigure 0.6.5：按文件内容判断格式，8 位图片给出提示）
+- `js/export.js`：从 GelFigure 0.6.5 移植（PNG 元数据、LZW TIFF、下载），去掉了凝胶专用的部分
 
 ## 已知待办
 
