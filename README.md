@@ -4,7 +4,7 @@
 
 **Turn the raw pictures of a Western blot experiment into a publication-ready figure — in your browser, offline.**
 
-[**Download the single HTML file**](https://github.com/poplarity/BlotFigure/releases/download/v0.8.1/BlotFigure-v0.8.1.html) · [Use online](https://poplarity.github.io/BlotFigure/) · [中文说明](README.zh-CN.md)
+[**Download the single HTML file**](https://github.com/poplarity/BlotFigure/releases/download/v0.8.2/BlotFigure-v0.8.2.html) · [Use online](https://poplarity.github.io/BlotFigure/) · [中文说明](README.zh-CN.md)
 
 [![CI](https://github.com/poplarity/BlotFigure/actions/workflows/ci.yml/badge.svg)](https://github.com/poplarity/BlotFigure/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -17,13 +17,13 @@
 
 **Download one file, open it in your browser, and start making your figure. No installation, ZIP extraction or GitHub account is needed.**
 
-1. **[Download BlotFigure-v0.8.1.html](https://github.com/poplarity/BlotFigure/releases/download/v0.8.1/BlotFigure-v0.8.1.html)** (about 710 KB). Save it to your Desktop or Downloads folder.
+1. **[Download BlotFigure-v0.8.2.html](https://github.com/poplarity/BlotFigure/releases/download/v0.8.2/BlotFigure-v0.8.2.html)** (about 700 KB). Save it to your Desktop or Downloads folder.
 2. **Double-click the downloaded file.** It opens in your browser. If a text editor opens instead, right-click → **Open with** → Firefox, Chrome, Edge or Safari.
 3. **Drop in all pictures of one experiment**: every exposure of each membrane plus a picture that shows the marker (the white-light picture, or white light merged with chemiluminescence). Then follow the 5 steps on the left and choose **Export PNG**.
 
 That one HTML file is the complete tool. Keep it on your computer or send the same file to a colleague. Once downloaded, it works without an internet connection.
 
-**Get the right file:** choose the release attachment named **BlotFigure-v0.8.1.html**, not the repository's **index.html**, **Source code (zip)** or **Source code (tar.gz)**. If you reach the [release page](https://github.com/poplarity/BlotFigure/releases/latest), expand **Assets** and click the file ending in **.html**.
+**Get the right file:** choose the release attachment named **BlotFigure-v0.8.2.html**, not the repository's **index.html**, **Source code (zip)** or **Source code (tar.gz)**. If you reach the [release page](https://github.com/poplarity/BlotFigure/releases/latest), expand **Assets** and click the file ending in **.html**.
 
 **Keep your work:** use **File → Save project** (Ctrl+S) before closing. Your **.blotfig** file contains all the pictures and every adjustment; reopen it in BlotFigure to continue, on any computer.
 
@@ -61,7 +61,7 @@ Drop in everything the imager saved for one experiment. BlotFigure tells exposur
 - **Membranes moved between captures** (substrate added, strips lifted and put back) are recognised as one membrane and aligned, as a whole or strip by strip, and can be adjusted by hand.
 - **The best exposure per row**: every protein row gets its own exposure (no saturated pixels in the band, enough signal, clean background), with a side-by-side comparison of all exposures and saturated pixels in red.
 - **Boxes you can put anywhere**: resize, move, tilt; the figure shows exactly what a box covers. Lanes as in GelFigure: drag the first and last lane onto their lanes and the others spread evenly.
-- **Arrange independent boxes**: drag rows up and down; drag each box left or right without moving other boxes on its membrane. Separate crops from the same strip can be joined into one row using a single exposure.
+- **Arrange independent boxes**: drag rows up and down; drag each box left or right without moving other boxes on its membrane. Each detected protein region stays independent. Vertical dragging only reorders; dropping onto another row never combines it.
 - **Marker by hand, in a few clicks**: choose the ladder once (40 prestained ladders with their reference bands), click the bands you can see. One mark displays a tick; two or more enable size estimates and hints for the remaining bands.
 - **Edit on the figure**: click a lane or protein name and type, Enter jumps to the next; group lines, +/− condition rows, target-band arrows with estimated sizes, side brackets for IP / Input groups or (Ub)n smears, `*` / `#` / `†` marks.
 - **Flexible labels**: group labels wrap, shrink or stay on one line; every label can have its own font size; protein names and molecular weights can each go on the left or right.
@@ -81,7 +81,7 @@ The panel on the left opens one step at a time; look, fix what needs fixing, and
 
 ## Versions
 
-The current version is **0.8.1**: faster import and image organisation, independent protein boxes, and single-band marker annotation. The bilingual interface and single-file offline download from 0.8.0 are included. 0.7.0 brought everything from GelFigure 0.6.5 a blot figure needs (file menu with drafts and style files, pre-flight check, PNG / TIFF metadata, processing log, journal widths, side brackets). See the [changelog](CHANGELOG.md).
+The current version is **0.8.2**: a simpler workflow without automatic or drag-triggered joining. Protein regions keep independent exposures and levels; legacy combined rows can be detached. Fast image organisation and single-band marker annotation from 0.8.1 remain available. The bilingual interface and single-file offline download from 0.8.0 are included. 0.7.0 brought everything from GelFigure 0.6.5 a blot figure needs (file menu with drafts and style files, pre-flight check, PNG / TIFF metadata, processing log, journal widths, side brackets). See the [changelog](CHANGELOG.md).
 
 ## Privacy
 
@@ -99,11 +99,19 @@ The page carries a [Content Security Policy](index.html) that **forbids it from 
 
 Exposures are recognised by their file names (`Chemi`, `ECL`, `_30s`, `2min` …) or, failing that, by the picture itself; marker pictures by names such as `Marker`, `White`, `Merge`, `Overlay`, or by a large bright membrane on a dark tray.
 
+## Independent editing, without joining
+
+- New detected regions stay separate, even when pieces have matching heights or similar signal strength.
+- Drag vertically to reorder only. There is no drop-to-merge gesture.
+- Changing one region's exposure or brightness leaves other regions unchanged. Existing automatic image display ranges stay fixed; whole-exposure adjustments require explicitly choosing the advanced control.
+- An old project keeps its layout on opening. Step 3 shows any legacy binding and offers **Detach and edit separately** or **Detach all**. This retains the currently displayed settings; it cannot reconstruct choices that an old merge already overwrote.
+- Fragments made by omitting an internal marker lane from a single original protein region remain that one region, with a visible gap. This is distinct from joining unrelated protein regions.
+
 ## Fast image organisation and independent crops
 
 - Step 1 reads and groups pictures first. Alignment and strip analysis wait until you confirm the groups.
 - Drag thumbnails between membrane groups (select several to move them together), or drop on **New membrane group**. Each thumbnail has a remove button; **Remove selected** works in bulk. Ctrl+Z restores removed pictures.
-- Every protein box has its own **B1, B2, …** ID. It moves independently, including when several crops share one physical strip. Rows can be joined without merging their source boxes or changing their individual crop heights.
+- Every protein box has its own **B1, B2, …** ID. It moves independently, including when several crops share one physical strip. Independent regions are never joined. For legacy combined rows, step 3 offers **Detach and edit separately** or **Detach all**, preserving current exposures, levels, names and crop bounds.
 - Weak detected rows stay visible. Hide them explicitly if unwanted; hidden rows have a **Show** button and **Show all hidden boxes** restores them together.
 - An excluded internal marker lane produces separate editable source boxes. Their splice gap appears only in that row. **Include middle lanes; restore continuous box** undoes a mistaken exclusion.
 - Set the lane count directly, then drag the two end lane lines. No extra spacing button is needed; automatic detection is still available as a fallback.
@@ -118,10 +126,10 @@ Exposures are recognised by their file names (`Chemi`, `ECL`, `_30s`, `2min` …
 | Membrane | Exposures are grouped by correlation, marker pictures by the outline of the membrane. |
 | Membrane moved between captures | White-light pictures that match after a shift and rotation (as a whole, or strip by strip) are taken as one membrane; every picture is aligned to the position most of them share. Exposures alone are never merged automatically (different membranes probed for the same protein look alike). |
 | Strips | Segmented on the confirmed marker picture, each with its angle; without one, from the signal regions. |
-| Protein rows | One row per protein (a doublet such as p-ERK1/2 is one row); strips side by side join only when the bands match in height and strength. Each box levels itself along its bands (robust slope over at least 3 clear lanes). |
+| Protein rows | One row per protein (a doublet such as p-ERK1/2 is one row); separate source regions are never combined based on height or strength. Each box levels itself along its bands (robust slope over at least 3 clear lanes). |
 | Best exposure per row | Scored per row without needing exposure times: no saturation inside the band, enough signal, clean background; a saturated exposure is used only when there is no suitable unsaturated one, prioritising the least clipping. |
 | Lanes | Every box has its own lanes, read from the membrane's lane spacing and the box's own pixels; noise and the two edges of one band never count as extra lanes; empty slots between lanes still count. |
-| Figure columns | Strips put back in place line up by position; a protein across two strips continues the left box's numbering; the rest start at column 1. |
+| Figure columns | Initial columns follow the detected lane positions and can be adjusted per region. Matching columns never bind exposure or level settings. |
 | Contrast | One linear adjustment per picture, background kept light grey; the white point is set from the pixel noise, so a smear never pushes strong bands to grey. Per-row levels are possible and stated in the legend. |
 | Molecular weights | **Not read automatically** (missing, faint or cut marker bands make a wrong automatic scale harder to fix than marking by hand): you click marker bands, which snap; after two marks per strip the other sizes are shown where they are expected. Row sizes are interpolated between neighbouring ticks. |
 

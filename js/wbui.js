@@ -715,6 +715,13 @@
       box.innerHTML = `<p class="hint">${L('没有找到蛋白条带：点下面的"+ 添加一个蛋白框"，再到膜上点一下放下。',
         'No protein bands found: click "+ Add a protein box" below, then click on the membrane to place it.')}</p>`;
     }
+    const bound = App.boundRows();
+    if (bound.length && !(bound.length === 1 && App.selRow === bound[0].id)) {
+      const note = document.createElement('div'); note.className = 'legacy-binding';
+      note.innerHTML = `<b>${L(`发现 ${bound.length} 处旧版合并`, `${bound.length} legacy combined rows`)}</b><p>${L('这里的不同区域共用曝光。可一键解除，保留当前图像设置；也可选中某行单独处理。', 'These regions share exposure. Detach all while preserving their current settings, or select a row to detach just that one.')}</p><button class="btn sm primary">${L('全部解除绑定', 'Detach all')}</button>`;
+      note.querySelector('button').onclick = done(() => { App.unbindAll(); toast(L('各区域已独立；Ctrl+Z 可撤销', 'Regions are independent; Ctrl+Z to undo')); });
+      box.prepend(note);
+    }
     const vis = st.rows.filter(r => !r.hidden).length, hid = st.rows.length - vis;
     if (hid) { const restore = document.createElement('button'); restore.className = 'btn sm show-all-rows'; restore.textContent = L(`显示全部 ${hid} 个隐藏框`, `Show all ${hid} hidden boxes`); restore.onclick = done(() => st.rows.forEach(r => { r.hidden = false; })); box.prepend(restore); }
     $('stRows').textContent = st.rows.length ? L(`${vis} 行${hid ? ` · ${hid} 行隐藏` : ''}`, `${pl(vis, 'row')}${hid ? ` · ${hid} hidden` : ''}`) : '';
@@ -756,9 +763,9 @@
       : L('★ 推荐：信号都偏弱，★ 是相对最清楚的一张；可以考虑补拍更长曝光', '★ recommended: the signal is weak in all of them; ★ is the clearest. Consider a longer exposure');
     const b = App.blot(row.blot), cur = App.curSeg(row), clash = App.rowClash(row).length > 0;
     // the pieces this row runs across side by side (one protein on a membrane cut through), and splitting them
-    const segLine = row.segs.length > 1 ? `<div class="seg-line">${L(`并排的蛋白框 <b>${esc(modLabel(row))}</b>（各框独立，可分别移动）`, `Boxes side by side <b>${esc(modLabel(row))}</b> (each box moves independently)`)}<button class="link" data-act="split" title="${L('每个框各成一行', 'One row per box')}">${L('拆开', 'Split')}</button></div>` : '';
+    const segLine = App.bindingGroups(row).length > 1 ? `<div class="legacy-binding"><b>${L('旧版把这些独立区域合成了一行', 'These independent regions were combined by an older version')}</b><p>${L('所以它们共用曝光和亮度。解除后保留当前图像设置，再分别编辑。', 'They currently share exposure and levels. Detach to keep their current image settings and edit them separately.')}</p><button class="btn sm primary" data-act="split">${L('解除绑定，分别编辑', 'Detach and edit separately')}</button></div>` : '';
     const cutIds = [...new Set(row.segs.filter(s => s.cut).map(s => s.cut.id))];
-    const cutInfo = cutIds.map(id => `<p class="hint">${L('中间的 Marker / 不用泳道被排除，原图中已拆成独立框。', 'An internal marker / unused lane was excluded; the source crops are shown separately.')} <button class="link" data-restore-cut="${id}">${L('包含中间泳道，恢复连续框', 'Include middle lanes; restore continuous box')}</button></p>`).join('');
+    const cutInfo = cutIds.map(id => `<p class="hint">${L('这些是同一个原始框排除中间泳道后的片段，使用同一曝光。', 'These fragments come from one original crop with an internal lane omitted, so they use the same exposure.')} <button class="link" data-restore-cut="${id}">${L('包含中间泳道，恢复连续框', 'Include middle lanes; restore continuous box')}</button></p>`).join('');
     const boxes = row.segs.map(sg => {
       const pc = App.piece(b, sg.piece), n = App.nSample(sg), nm = sg.lanes.filter(l => l.r === 'm').length, nx = sg.lanes.filter(l => l.r === 'x').length;
       const cols = n > 1 ? `${sg.c0}–${App.segEnd(sg)}` : n ? String(sg.c0) : '—';
@@ -783,7 +790,7 @@
       if (!App.restoreContinuous(row, btn.dataset.restoreCut)) toast(L('这些框的位置或角度已分开，请撤销移动后再恢复连续框。', 'These boxes have moved apart or rotated. Undo those changes before restoring a continuous box.'));
     }));
     const split = wrap.querySelector('[data-act="split"]');
-    if (split) split.onclick = done(() => { App.splitRow(row); toast(L('已拆开：每个框各成一行', 'Split: one row per box')); });
+    if (split) split.onclick = done(() => { App.splitRow(row); toast(L('已解除绑定：当前曝光、亮度和名称保留，之后各自编辑', 'Detached: exposure, levels and names kept; edit each region independently'), 3800); });
     const tiles = wrap.querySelector('.tiles');
     if (tiles) App.expoOrder(row).forEach(e => {
       const rec = App.images.get(e.id), th = App.rowThumb(row, e.id, 150), v = App.expoVerdict(e);
@@ -1041,37 +1048,41 @@
     const isC = rec && rec.kind === 'chemi';
     $('levelBar').classList.toggle('hidden', !isC);
     if (isC) {
-      // the selected row shown in its own picture: the bar adjusts that row alone (else the whole picture)
+      // No implicit whole-image editing. Browsing another exposure must not change other protein regions.
       const row = lvRow(), sel = App.selRow && App.row(App.selRow), users = st.rows.filter(r => r.img === rec.id && !r.hidden);
       const lv = row ? App.rowLevels(row) : App.levelsOf(rec.id);
       const nu = users.length, rl = row && esc(App.rowLabel(row).replace(L(/ 行$/, / row$/), ''));
       $('levelName').innerHTML = row ? L(`调整 <b>${rl}</b>（只这一行）`, `Adjusting <b>${rl}</b> (this row only)`)
-          + `<button class="link" id="lvToImg" title="${L('改这张图的所有行', 'Change every row of this picture')}">${L('改整张图', 'Whole picture')}</button>`
-        : `${nu ? L(`调整整张图（${nu} 行用它）`, `Adjusting the whole picture (${pl(nu, 'row')} ${nu === 1 ? 'uses' : 'use'} it)`) : L('这张图未被使用', 'This picture is not used')}`
-          + `${sel && sel.img === rec.id ? `<button class="link" id="lvToRow">${L('只调选中的行', 'Selected row only')}</button>` : ''}`;
+          + `<button class="link" id="lvToImg" title="${L('改这张曝光图的所有区域，已有单独设置的除外', 'Change all regions of this exposure except those with their own levels')}">${L('高级：整张曝光', 'Advanced: whole exposure')}</button>`
+        : lvImage ? L(`调整整张曝光（${nu} 个区域用它）`, `Adjusting the whole exposure (${nu} regions use it)`) + `<button class="link" id="lvToRow">${L('返回单区调整', 'Back to region editing')}</button>`
+        : sel ? L('正在查看另一张图，先返回所选区域的曝光', 'Viewing another picture; return to the selected region’s exposure') + `<button class="link" id="lvBackPic">${L('返回', 'Return')}</button>`
+        : L('先点一个蛋白框，再调整它的亮度', 'Select a protein region to adjust its levels');
       if ($('lvToImg')) $('lvToImg').onclick = () => { lvImage = true; renderStageHead(); };
       if ($('lvToRow')) $('lvToRow').onclick = () => { lvImage = false; renderStageHead(); };
+      if ($('lvBackPic')) $('lvBackPic').onclick = () => { App.viewImg = sel.img; App.viewBlot = sel.blot; App.emit('select'); };
+      ['lvBlack', 'lvWhite', 'btnLvAuto'].forEach(id => { $(id).disabled = !row && !lvImage; });
       $('lvBlack').value = toSl(lv.black); $('lvWhite').value = toSl(lv.white);
     }
   }
   // the bar on the whole picture although a row is selected (until another row is)
-  let lvImage = false, lvSel = null;
+  let lvImage = false, lvSel = null, lvPic = null;
   function lvRow() {
-    if (App.selRow !== lvSel) { lvSel = App.selRow; lvImage = false; }
     const r = App.selRow && App.row(App.selRow), rec = G.View.curImage();
+    if (App.selRow !== lvSel || (rec && rec.id) !== lvPic) { lvSel = App.selRow; lvPic = rec && rec.id; lvImage = false; }
     return !lvImage && r && rec && r.img === rec.id ? r : null;
   }
   $('viewBlot').addEventListener('change', e => { App.viewBlot = e.target.value; App.viewImg = null; App.emit('select'); G.View.fitFull(); });
   const lvSet = (key) => live(e => {
     const rec = G.View.curImage(); if (!rec) return;
     const row = lvRow(), lv = Object.assign({}, row ? App.rowLevels(row) : App.levelsOf(rec.id)), v = fromSl(+e.target.value);
+    if (!row && !lvImage) return;
     if (key === 'black') lv.black = Math.min(v, lv.white - 0.0005); else lv.white = Math.max(v, lv.black + 0.0005);
     if (row) row.lv = { black: lv.black, white: lv.white };
     else { lv.manual = true; S().levels[rec.id] = lv; G.View.draw(); }
   });
   $('lvBlack').addEventListener('input', lvSet('black')); $('lvWhite').addEventListener('input', lvSet('white'));
   $('lvBlack').addEventListener('change', done()); $('lvWhite').addEventListener('change', done());
-  $('btnLvAuto').onclick = done(() => { const rec = G.View.curImage(), row = lvRow(); if (row) delete row.lv; else if (rec) { delete S().levels[rec.id]; App.refreshChoices(); } });
+  $('btnLvAuto').onclick = done(() => { const rec = G.View.curImage(), row = lvRow(); if (row) delete row.lv; else if (rec && lvImage) { delete S().levels[rec.id]; App.refreshChoices(); } });
   $('showSat').addEventListener('change', () => G.View.draw());
   $('fitFull').onclick = () => G.View.fitFull();
   $('fitSel').onclick = () => { const r = App.selRow && App.row(App.selRow); if (!r) return; if (App.viewBlot !== r.blot) { App.viewBlot = r.blot; App.viewImg = r.img; App.emit('select'); } G.View.fitRow(r); };
@@ -1330,12 +1341,9 @@
     }
   });
 
-  /* ---------- arranging the figure ----------
-   * Every row comes from one or more pieces of membrane (modules: own angle, lanes, marker). In the figure a
-   * row is dragged up / down to its place, onto another row to stand side by side with it (one protein on a
-   * membrane cut through), or left / right to line its piece's lanes up with the other rows — every row on
-   * that piece moves along (they share its lanes); Alt: only that box. Tags left of the rows name the pieces
-   * and drag rows too; in the list, the ⋮⋮ grip drags rows. */
+  /* ---------- arranging independent protein regions ----------
+   * Vertical dragging only changes order, including when dropped over another region.
+   * Horizontal dragging positions the selected crop. Neither gesture combines data or settings. */
   let prevScale = 1, pdrag = null, ldrag = null, swallowClick = false;
   // rows of the figure on screen, relative to #preview (top / bottom, left / right of the lanes)
   function rowRects(f) {
@@ -1353,8 +1361,8 @@
       const row = App.row(r.id); if (!row) return;
       const t = document.createElement('div');
       t.className = 'rowtag' + (row.id === App.selRow ? ' sel' : ''); t.dataset.row = r.id; t.textContent = shortLabel(row);
-      t.title = L(`蛋白框 ${modLabel(row)}。上下拖动调整顺序，拖到另一行上并排成一行；在成图上左右拖动条带对齐泳道`,
-        `Boxes ${modLabel(row)}. Drag up or down to reorder, onto another row to join them side by side; drag the bands left or right on the figure to line up lanes`);
+      t.title = L(`蛋白框 ${modLabel(row)}。上下拖动只调整顺序；左右拖动对齐泳道，设置各自独立`,
+        `Boxes ${modLabel(row)}. Drag up or down to reorder only; drag bands left or right to line up lanes. Settings stay independent`);
       t.style.left = (left - 5) + 'px'; t.style.top = ((r.top + r.bot) / 2) + 'px';
       ov.appendChild(t);
     });
@@ -1401,24 +1409,16 @@
     if (pdrag.mode === 'order') {
       ghost(`[data-row="${pdrag.id}"]`, 0, dy / prevScale);
       const rs = rowRects(lastFig), me = rs.findIndex(r => r.id === pdrag.id);
-      // on the middle of another row: side by side with it; else between the rows nearest the pointer
-      let drop = null;
-      for (let i = 0; i < rs.length && !drop; i++) {
-        const r = rs[i], hh = r.bot - r.top;
-        if (i !== me && my > r.top + hh * 0.3 && my < r.bot - hh * 0.3) drop = { onto: r.id, r };
-        else if (my < (r.top + r.bot) / 2) drop = { at: i };
-      }
-      if (!drop) drop = { at: rs.length };
-      pdrag.drop = drop;
-      line.classList.toggle('hidden', !!drop.onto); boxEl.classList.toggle('hidden', !drop.onto);
-      if (drop.onto) {
-        Object.assign(boxEl.style, { left: drop.r.x0 - 3 + 'px', top: drop.r.top - 3 + 'px', width: drop.r.x1 - drop.r.x0 + 6 + 'px', height: drop.r.bot - drop.r.top + 6 + 'px' });
-        tipAt(ov, mx + 14, my + 10, L('松开：把这些框并排成一行', 'Release to place these boxes side by side'));
-      } else {
-        const a = rs[drop.at - 1], b = rs[drop.at], y = !rs.length ? 0 : !a ? b.top - 3 : !b ? a.bot + 3 : (a.bot + b.top) / 2, ref = rs[0] || { x0: 0, x1: 100 };
-        Object.assign(line.style, { left: ref.x0 - 8 + 'px', top: y + 'px', width: ref.x1 - ref.x0 + 16 + 'px' });
-        tipAt(ov, mx + 14, my + 10, '');
-      }
+      // Vertical dragging only reorders. Dropping over another row never combines its data/settings.
+      let at = rs.findIndex(r => my < (r.top + r.bot) / 2);
+      if (at < 0) at = rs.length;
+      pdrag.drop = { at };
+      line.classList.remove('hidden'); boxEl.classList.add('hidden');
+      const a = rs[at - 1], b = rs[at], yy = !rs.length ? 0 : !a ? b.top - 3 : !b ? a.bot + 3 : (a.bot + b.top) / 2;
+      const ref = rs[0] || { x0: 0, x1: 100 };
+      Object.assign(line.style, { left: ref.x0 - 8 + 'px', top: yy + 'px', width: ref.x1 - ref.x0 + 16 + 'px' });
+      tipAt(ov, mx + 14, my + 10, L('松开：调整上下顺序', 'Release to reorder'));
+
     } else {
       const k = Math.round(dx / prevScale / lastFig.laneW), row = App.row(pdrag.id), pc = row && App.findPiece(pdrag.piece);
       pdrag.k = k; pdrag.alt = e.altKey;
@@ -1435,19 +1435,7 @@
     swallowClick = true; setTimeout(() => { swallowClick = false; }, 0);
     const row = App.row(d.id);
     if (!row) { updatePreview(); return; }
-    if (d.mode === 'order' && d.drop && d.drop.onto) {
-      const res = App.mergeRows(App.row(d.drop.onto), row);
-      if (res === 'joined') {
-        App.selRow = d.drop.onto; App.commit();
-        toast(L('已并排成一行：两个框按左右接成连续的列；"拆开"可撤回', 'Joined side by side: the two boxes make continuous columns, left to right ("Split" undoes it)'));
-        return;
-      }
-      toast(res === 'blot' ? L('这两行来自不同的膜（不同的图片），不能并成一行', 'These rows come from different membranes (different pictures) and cannot be joined')
-        : res === 'overlap' ? L('两个框覆盖了重复的原图区域，请先调整范围再拼接', 'The boxes overlap in the original picture. Adjust their crops before joining')
-        : res === 'stacked' ? L('这两条膜条上下叠放、泳道相同，是不同的蛋白，不能并成一行', 'These strips lie one above the other on the same lanes: different proteins, they cannot be joined')
-        : L('没有改动', 'Nothing changed'), 3400);
-      updatePreview();
-    } else if (d.mode === 'order' && d.drop) {
+    if (d.mode === 'order' && d.drop) {
       const rs = (lastFig.rowBoxes || []).map(b => b.id), rows = S().rows;
       const to = d.drop.at < rs.length ? rows.findIndex(r => r.id === rs[d.drop.at]) : rows.findIndex(r => r.id === rs[rs.length - 1]) + 1;
       if (App.moveRow(d.id, to)) { App.commit(); toast(L('已调整行的上下顺序', 'Row order changed')); } else updatePreview();
@@ -1599,7 +1587,11 @@
     const st = S(), n = App.curStep || st.step, vis = st.rows.filter(r => !r.hidden), fl = App.figLanes();
     let msg, ok = false;
     coachAct = null;
-    if (n === 1) {
+    const bound = App.boundRows();
+    if (n >= 3 && bound.length) {
+      msg = L(`有 ${bound.length} 处<b>旧版绑定</b>：点这里解除后，分别选择曝光和亮度`, `${bound.length} <b>legacy combined rows</b>: click to detach and edit exposure and levels separately`);
+      coachAct = () => { openStep(3); selectRow(bound[0].id, true); };
+    } else if (n === 1) {
       msg = L('第 1 步：确认每张膜的 <b>Marker 图</b>（左边标 ★ 的那张），对了就点"下一步"', 'Step 1: check the <b>marker picture</b> of each membrane (the one marked ★ on the left), then click "Next"');
       coachAct = () => flash('next1');
     } else if (n === 2) {

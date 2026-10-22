@@ -8,9 +8,9 @@
 
 ## 1. 下载
 
-**[点击下载 BlotFigure-v0.8.1.html](https://github.com/poplarity/BlotFigure/releases/download/v0.8.1/BlotFigure-v0.8.1.html)**，保存到桌面或"下载"文件夹。
+**[点击下载 BlotFigure-v0.8.2.html](https://github.com/poplarity/BlotFigure/releases/download/v0.8.2/BlotFigure-v0.8.2.html)**，保存到桌面或"下载"文件夹。
 
-这是完整的工具，约 710 KB。网页界面、样式和图像处理代码都已经装在这个文件里。
+这是完整的工具，约 700 KB。网页界面、样式和图像处理代码都已经装在这个文件里。
 
 如果你打开的是 [GitHub 版本下载页](https://github.com/poplarity/BlotFigure/releases/latest)：
 

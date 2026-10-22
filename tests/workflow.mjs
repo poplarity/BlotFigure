@@ -71,30 +71,57 @@ export async function workflowChecks(browser, base) {
       assert.equal(await page.evaluate(() => BApp.curSeg(BApp.row(BApp.selRow)).lanes.length), 6);
       assert.equal(await page.locator('[data-act="even"]').count(), 0);
     });
-    await check('boxes on the same strip move alone and join without losing either crop', async () => {
-      const r = await page.evaluate(() => {
-        const row = BApp.S.rows[0], original = row.segs[0], clone = x => JSON.parse(JSON.stringify(x));
-        const a = clone(original), b = clone(original);
-        a.lanes = a.lanes.slice(0,2); b.lanes = b.lanes.slice(-2); b.id = null; b.label = null;
-        a.x1 = BApp.laneRight(a,1); b.x0 = BApp.laneLeft(b,0); b.c0 = 3; b.above = row.above * 0.75; b.below = row.below * 0.8;
-        row.segs = [a,b]; BApp.splitRow(row); BApp.commit();
-        const other = BApp.S.rows[BApp.S.rows.indexOf(row)+1], old = other.segs[0].c0, before = JSON.stringify(other.segs[0]);
-        BApp.shiftAlign(row, a, 2); BApp.commit(); const alone = other.segs[0].c0 === old;
-        const result = BApp.mergeRows(row, other); BApp.commit();
-        const right = row.segs.find(s=>s.id===b.id), saved = JSON.parse(before);
-        return { alone, result, n: row.segs.length, exact: right.x0===saved.x0 && right.x1===saved.x1 && right.vc===saved.vc && right.above===saved.above && right.below===saved.below };
-      }); assert(r.alone && r.result === 'joined' && r.n === 2 && r.exact, JSON.stringify(r));
+    await check('legacy combined regions detach without losing exposure, levels or names', async () => {
+      await page.evaluate(() => {
+        const row=BApp.S.rows[0], original=row.segs[0], clone=x=>JSON.parse(JSON.stringify(x));
+        const a=clone(original), b=clone(original);
+        a.lanes=a.lanes.slice(0,2);b.lanes=b.lanes.slice(-2);b.id=null;b.label=null;
+        a.x1=BApp.laneRight(a,1);b.x0=BApp.laneLeft(b,0);b.c0=3;b.above=row.above*.75;b.below=row.below*.8;
+        row.segs=[a,b];row.name='Legacy target';row.lv={black:.01,white:.7};row.auto=false;BApp.commit();
+        window.legacyBefore={img:row.img,lv:JSON.stringify(row.lv),name:row.name,boxes:row.segs.map(s=>s.id)};
+        BApp.selRow=row.id;BApp.emit('select');
+      });
+      await page.locator('[data-act="split"]').click();
+      const r=await page.evaluate(()=>{
+        const rows=BApp.S.rows.filter(r=>r.name===legacyBefore.name);
+        return rows.length===2&&rows.every(r=>r.img===legacyBefore.img&&JSON.stringify(r.lv)===legacyBefore.lv&&!r.auto)&&BApp.boundRows().length===0;
+      });assert(r);
     });
-    await check('preview drag moves the picked box only', async () => {
-      const info = await page.evaluate(() => { const r=BApp.S.rows[0],s=r.segs[0];return {id:s.id,row:r.id,c0:s.c0,other:r.segs[1].c0}; });
-      const img = page.locator(`#preview image[data-box="${info.id}"]`).first(), rect = await img.boundingBox();
-      await page.mouse.move(rect.x+rect.width/2,rect.y+rect.height/2); await page.mouse.down();
-      await page.mouse.move(rect.x+rect.width/2+rect.width/2,rect.y+rect.height/2,{steps:5}); await page.mouse.up();
-      const after = await page.evaluate(id => { const r=BApp.row(id);return [r.segs[0].c0,r.segs[1].c0]; },info.row);
-      assert(after[0] > info.c0 && after[1] === info.other, JSON.stringify({info,after}));
+    await check('preview horizontal drag moves the picked region only', async () => {
+      const info=await page.evaluate(()=>{const r=BApp.S.rows[0],s=r.segs[0],o=BApp.S.rows[1];return {id:s.id,row:r.id,otherId:o.id,c0:s.c0,other:o.segs[0].c0};});
+      const rect=await page.locator(`#preview image[data-box="${info.id}"]`).first().boundingBox();
+      await page.mouse.move(rect.x+rect.width/2,rect.y+rect.height/2);await page.mouse.down();
+      await page.mouse.move(rect.x+rect.width,rect.y+rect.height/2,{steps:5});await page.mouse.up();
+      const after=await page.evaluate(i=>[BApp.row(i.row).segs[0].c0,BApp.row(i.otherId).segs[0].c0],info);
+      assert(after[0]>info.c0&&after[1]===info.other,JSON.stringify({info,after}));
+    });
+    await check('dropping onto another protein only reorders, never combines it', async () => {
+      const orderBefore=await page.evaluate(()=>BApp.S.rows.map(r=>r.id));
+      const before=await page.evaluate(()=>BApp.S.rows.map(r=>({id:r.id,boxes:r.segs.map(s=>s.id),img:r.img,lv:r.lv})).sort((a,b)=>a.id.localeCompare(b.id)));
+      const imgs=page.locator('#preview image[data-row]'),a=await imgs.nth(0).boundingBox(),b=await imgs.nth(1).boundingBox();
+      await page.mouse.move(a.x+a.width/2,a.y+a.height/2);await page.mouse.down();
+      await page.mouse.move(a.x+a.width/2,b.y+b.height*.7,{steps:6});await page.mouse.up();
+      const after=await page.evaluate(()=>BApp.S.rows.map(r=>({id:r.id,boxes:r.segs.map(s=>s.id),img:r.img,lv:r.lv})).sort((a,b)=>a.id.localeCompare(b.id)));
+      assert.deepEqual(after,before);assert.notDeepEqual(await page.evaluate(()=>BApp.S.rows.map(r=>r.id)),orderBefore);
+    });
+    await check('switching exposure or levels of one region leaves the other pixels unchanged', async () => {
+      const r=await page.evaluate(()=>{
+        const rows=BApp.S.rows.filter(r=>r.name==='Legacy target'),[a,b]=rows,ch=BApp.chemiOf(BApp.blot(a.blot));
+        a.img=b.img=ch[0].id;a.auto=b.auto=false;delete a.lv;delete b.lv;BApp.commit();
+        const raster=r=>{const s=r.segs[0];return BApp.runRaster(r,s,BApp.pieceOf(r,s),0,s.lanes.length-1,1).href;};
+        const before=raster(b),bi=b.img,lv=JSON.stringify(BApp.rowLevels(b));
+        a.img=ch[ch.length-1].id;BApp.commit();const exposure=before===raster(b)&&b.img===bi&&JSON.stringify(BApp.rowLevels(b))===lv;
+        a.lv={black:.02,white:.6};BApp.commit();return exposure&&before===raster(b);
+      });assert(r);
+    });
+    await check('browsing another picture never silently enables whole-image level editing', async () => {
+      await page.evaluate(()=>{const r=BApp.S.rows[0];BApp.selRow=r.id;BApp.viewBlot=r.blot;BApp.viewImg=BApp.chemiOf(BApp.blot(r.blot)).find(c=>c.id!==r.img).id;BApp.emit('select');});
+      assert(await page.locator('#lvBlack').isDisabled());
+      await page.click('#lvBackPic');assert(!(await page.locator('#lvBlack').isDisabled()));
     });
     await check('splicing one row does not insert a gap in continuous neighbouring rows', async () => {
       const r = await page.evaluate(() => {
+        const cut=BApp.S.rows.find(r=>r.segs.length===1&&r.segs[0].lanes.length>=5);cut.segs[0].lanes[2].r='m';BApp.splitExcluded(cut);BApp.commit();
         const row = BApp.S.rows.find(r => r.segs.length === 1 && r.segs[0].lanes.every(l=>l.r==='s'));
         const d = new DOMParser().parseFromString(BRender.build(true).svg, 'image/svg+xml');
         return row && d.querySelectorAll(`image[data-row="${row.id}"]`).length === 1;
@@ -122,7 +149,7 @@ export async function workflowChecks(browser, base) {
         return svg.includes('data-marker-size="51"')&&svg.includes('data-marker-size="49"');
       });assert(r);
     });
-    await check('independent joined boxes survive project save and reopening', async () => {
+    await check('independent regions and marker-cut fragments survive project save and reopening', async () => {
       const r = await page.evaluate(async () => {
         const snapshot = () => JSON.stringify(BApp.S, (k,v)=>typeof v==='number'?Math.round(v*1e6)/1e6:v);
         const before = snapshot(), data = await BApp.saveProject();
@@ -142,6 +169,15 @@ export async function workflowChecks(browser, base) {
       await page.locator('.thumb .more').first().click();
       const r=await page.locator('#popover').evaluate(el=>({w:el.clientWidth,scroll:el.scrollWidth}));
       assert(r.scroll<=r.w+2,JSON.stringify(r));
+    });
+    await check('side-by-side membrane pieces are never automatically combined by the app engine', async () => {
+      const r=await page.evaluate(()=>{
+        const ses=WBDemo.movedSession(),image=i=>({w:i.width,h:i.height,data:i.data});
+        const chemi=ses.images.filter(i=>i.exposure).map(i=>({id:i.name,img:image(i),exposure:i.exposure}));
+        const marker=ses.images.find(i=>!i.exposure);
+        const out=WB.analyzeSession(chemi,{id:marker.name,img:image(marker)},{noCalib:true});
+        return {n:out.rows.length,independent:out.rows.every(r=>r.segs.length===1)};
+      });assert(r.n>=4&&r.independent,JSON.stringify(r));
     });
     await check('workflow has no JavaScript errors', async () => assert.deepEqual(errors,[]));
   } catch(e) { results.push(['FAIL','workflow run',e.stack]); }

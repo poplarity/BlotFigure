@@ -40,7 +40,7 @@ cd BlotFigure
 | `&noalign=1` / `&dbg=1` | 不做对齐（各张图保持原样） / 标题 JSON 的 `dbg` 里记下认膜时的配准过程 |
 | `&popimg=12` / `&alignimg=12&alignby=dx,dy,度&alignhold=1` | 打开第 1 步和名字以 12 开头的图的 ⋯ 菜单 / 进入它的手动对齐并拖动（`alignhold` 停在拖动中，截图用） |
 | `&scrollto=secRows` | 把左侧面板滚到某个元素（截图用；`&sel=` 选中的行会自动滚到能看见） |
-| `&scenario=…` | 脚本化地跑一遍编辑功能，每步状态记在标题 JSON 的 `scen` 里（每行：`膜条:起始列:泳道角色` 和成图列）：`lanes` 框的缩放、框内重新识别、均分、加减/切换泳道、挪列、拼接行跟随；`drag` 用鼠标/键盘事件在膜图上拖角柄、拖竖线、双击加道、Delete、移动框、框选添加；`detect` 每行的框在每张曝光里只按框内像素识别的结果（原框 t、整条膜条宽的框 l）；`stitch` 拆开与并成一行（`App.mergeRows`，相同膜组内独立框可拼接，仅重复原图区域应被拒绝）；`arrange` 用鼠标事件在成图上排列：上下拖行、拖到另一行上并排、按蛋白框左右拖（其他框不动）、往左最多到第 1 列（已经在第 1 列的不动，也不推别的行；差几列的只挪到第 1 列）、拖标签、列表里拖、Alt+↑↓；`realign` 手动对齐曝光 12：拖动、[ ] 旋转、完成、撤销/重做、不对齐、恢复自动（每步记下对齐参数和像素签名）；`kind` 先改一个框和行名，再把 09 改成白光又改回、01 改成曝光图又改回、14 移到新膜又移回、重新对齐、移除 07，每步记下所有框（膜条字母、位置、范围、列）——调过的东西都应保持不变（加 `&dbgpcs=1` 还记下膜条和每条候选切缝的判定）；`marks` / `picker` 手动 Marker 的数据层（没标时没有分子量，1 条也没有，2 条才有；清除）/ 分子量选择框；`mark2` 用鼠标和键盘标 Marker：选型号后记住、点膜条标签放大（开始时一条刻度、一个推算位置都不显示）、在条带旁 3 px 点一下（吸附到带上，第一条不推荐大小）、第二条推荐型号里的下一个、标满 2 条后才出现虚线的推算位置、拖刻度吸附（Alt 不吸附）、"不加了"、输入分子量、从选择框删除、↑↓、Delete、点虚线的推算刻度、下一步、清除这张膜的刻度；`focus` 在左侧列表里输入蛋白名（输入框不应丢焦点，回车跳到下一行）；`edit2` 在 C、D 两条膜条之间的缝上拖出一个框（成图应正好是框住的部分）、把它拖到 D 上（归到 D）、拖最右一条泳道线（中间均匀排开；Alt 只动这一条）、改泳道数多一道，再调整膜条：C 右移、D 下边上移并旋转、删掉 E、画一条新的、应用，撤销 / 重做；`proj` 保存项目再打开，所有行、刻度、显示范围应与之前完全一样；`perf` 拖一个框的右边 20 次，记下每次鼠标移动和刷新成图的耗时（`window.__perfRun` 可以在性能分析器下再跑一遍）。`lanes` `drag` `detect` `stitch` `arrange` `realign` `kind` `edit2` `proj` `perf` 用真实样例（膜条 A–E），`marks` `picker` `mark2` `focus` 用示例（`demo=1`） |
+| `&scenario=…` | 脚本化地跑一遍编辑功能，每步状态记在标题 JSON 的 `scen` 里（每行：`膜条:起始列:泳道角色` 和成图列）：`lanes` 框的缩放、框内重新识别、均分、加减/切换泳道、挪列、拼接行跟随；`drag` 用鼠标/键盘事件在膜图上拖角柄、拖竖线、双击加道、Delete、移动框、框选添加；`detect` 每行的框在每张曝光里只按框内像素识别的结果（原框 t、整条膜条宽的框 l）；`stitch` 为旧诊断入口；合并操作现返回 disabled，请用 workflow 套件测解绑；`arrange` 用鼠标事件在成图上排列：上下拖行、落到另一行上也只排序、按蛋白框左右拖（其他框不动）、往左最多到第 1 列（已经在第 1 列的不动，也不推别的行；差几列的只挪到第 1 列）、拖标签、列表里拖、Alt+↑↓；`realign` 手动对齐曝光 12：拖动、[ ] 旋转、完成、撤销/重做、不对齐、恢复自动（每步记下对齐参数和像素签名）；`kind` 先改一个框和行名，再把 09 改成白光又改回、01 改成曝光图又改回、14 移到新膜又移回、重新对齐、移除 07，每步记下所有框（膜条字母、位置、范围、列）——调过的东西都应保持不变（加 `&dbgpcs=1` 还记下膜条和每条候选切缝的判定）；`marks` / `picker` 手动 Marker 的数据层（没标时没有分子量，1 条也没有，2 条才有；清除）/ 分子量选择框；`mark2` 用鼠标和键盘标 Marker：选型号后记住、点膜条标签放大（开始时一条刻度、一个推算位置都不显示）、在条带旁 3 px 点一下（吸附到带上，第一条不推荐大小）、第二条推荐型号里的下一个、标满 2 条后才出现虚线的推算位置、拖刻度吸附（Alt 不吸附）、"不加了"、输入分子量、从选择框删除、↑↓、Delete、点虚线的推算刻度、下一步、清除这张膜的刻度；`focus` 在左侧列表里输入蛋白名（输入框不应丢焦点，回车跳到下一行）；`edit2` 在 C、D 两条膜条之间的缝上拖出一个框（成图应正好是框住的部分）、把它拖到 D 上（归到 D）、拖最右一条泳道线（中间均匀排开；Alt 只动这一条）、改泳道数多一道，再调整膜条：C 右移、D 下边上移并旋转、删掉 E、画一条新的、应用，撤销 / 重做；`proj` 保存项目再打开，所有行、刻度、显示范围应与之前完全一样；`perf` 拖一个框的右边 20 次，记下每次鼠标移动和刷新成图的耗时（`window.__perfRun` 可以在性能分析器下再跑一遍）。`lanes` `drag` `detect` `stitch` `arrange` `realign` `kind` `edit2` `proj` `perf` 用真实样例（膜条 A–E），`marks` `picker` `mark2` `focus` 用示例（`demo=1`） |
 
 载入完成后页面标题变成 `READY {...}`，里面是各张图的对齐（`align`：`grid` 网格基准图、`marker` 读膜条和 Ladder 的白光图、每张挪动过的图 `名=角度,tx,ty+单独对齐的膜条/依据`）、膜、膜条（`pieces`：分析得到的泳道格点与 Ladder 位置 `lad`）、行（`rowsGeo`：每个框 `膜条:vc:起始列:泳道角色`、框的范围 `box`、成图列 `cols`）、曝光、显示范围（`levels`）、警告等状态的 JSON，方便脚本检查。
 
@@ -125,7 +125,7 @@ msedge --headless=new --disable-gpu --user-data-dir=$env:TEMP\wb_dbg --allow-fil
 ## 代码地图
 
 - `js/wbengine.js`（`G.WB`）：分类、归膜、膜条分割（`findStrips`）、Ladder 识别（`findLadders`）与标定（`calibrate` / `fitSeries`）、条带行（`detectRows`）、每条膜条的泳道格点（`pieceLattice` / `jointPitch`）、默认列号（`assignColumns`）、整体分析（`analyzeSession`）、框内识别泳道（`detectBoxLanes`）与条带（`bandInBox`）、曝光评分（`exposureScore`）、图与图的刚性配准（`registerRigid` / `registerPieces` / `regWarp`，FFT 相位相关）
-- `js/wbapp.js`（`G.BApp`）：状态、撤销、同一张膜各张图的对齐（`alignBlot` / `alignPieces` / `applyAlign`）、行与框、框里的泳道编辑、行的拼接与拆开、框选添加、手动 Marker、曝光与显示范围、规范检查
+- `js/wbapp.js`（`G.BApp`）：状态、撤销、同一张膜各张图的对齐（`alignBlot` / `alignPieces` / `applyAlign`）、行与框、框里的泳道编辑、旧版绑定的解除、框选添加、手动 Marker、曝光与显示范围、规范检查
 - `js/wbrender.js`：排版成 SVG；`js/wbview.js`：中间膜图（框的 8 个角柄、泳道竖线与列号、双击加道、框选添加、标 Marker 的 `marks` 模式：`drawMarking` / `marksOf` / `markGeom`，手动对齐 `align` 模式；`fitFull` 放大到整张膜的膜条，`fitPiece` 放大到一条膜条的 Marker 道）；`js/wbui.js`：5 步面板（第 1 步 `renderBlots`、第 2 步 `renderPieces`、第 3 步 `renderRows` 和选中一行展开的曝光、泳道、倾斜工具 `rowDetail`、第 4 步 `renderMarker` / `ladderCard` 和刻度的分子量选择框 `markPicker`、第 5 步 `renderNames`；步骤切换 `openStep` / `nextStep` / `renderSteps`）、顶栏的提示 `updateCoach`（点它执行 `coachAct`）、首次引导 `showTour`、成图上的编辑与拖动排列（`rowRects` / `drawRowTags`，预览上的拖动在 `pdrag`，列表里的在 `ldrag`）、导出、调试参数
 - `js/storage.js` `i18n.js`：偏好存储（`PrefStorage`）和界面语言（`L` / `I18N`），与 GelFigure 相同，最先载入
 - `js/tiff.js` `engine.js`：与 GelFigure 共用，改动时注意两边同步（`tiff.js` 已同步到 GelFigure 0.6.5：按文件内容判断格式，8 位图片给出提示）
@@ -152,3 +152,12 @@ msedge --headless=new --disable-gpu --user-data-dir=$env:TEMP\wb_dbg --allow-fil
 - `pieceTicks()` 接受一条手动刻度；`pieceCal()` 仍要求两条才能估算。渲染所有在裁切范围内的手动刻度；拥挤时增加文字列，不删除刻度。框外刻度给出明确提示。
 - `tests/workflow.mjs` 覆盖批量整理和撤销、原生拖放、延后分析、默认显示弱带、独立框/同膜拼接/项目存档、泳道数即时应用、单 Marker 与拥挤刻度，以及文件名溢出。WebKit 可能过滤自定义拖放 MIME，因此同页拖动还保留图片 ID，不能仅依赖 dataTransfer 自定义类型。
 - 只检查这轮交互：`node tests/run.mjs --suite=workflow`（默认三种内核，也可用 `--browser=webkit`）。完整 CI 仍运行所有套件。
+
+
+## 0.8.2：取消拼接
+
+- 引擎删除跨膜条的高度/强度匹配合并，只保留同一区域内重复检测的去重。每个独立区域有自己的行、曝光选择和亮度参数。
+- 成图竖向拖动只排序；`App.mergeRows` 仅保留 disabled 返回值供旧诊断 URL 使用，不再有合并数据的实现或用户入口。
+- `App.bindingGroups(row)` 按源框分组；同一个 `cut.id` 的片段代表原来一个蛋白区域剔除内部泳道后的片段，不是不同区域的绑定。`boundRows()` 找旧版绑定，`splitRow()`/`unbindAll()` 将其分成独立行，保留当前图片、名称、亮度和裁切范围，锁定当前曝光以免解绑瞬间自动换图。旧版已丢失的独立设置无法恢复。
+- 自动生成的 `S.levels[imageId].stable` 防止一个区域换曝光后，其他区域所用图片的显示范围跟着重算。全图调整只在用户明确选择高级控制后生效；浏览不匹配的图片时禁用滑块并提供返回所选区域曝光的入口。
+- 测试增加真实鼠标的落行排序、解绑保留设置、改一个区域后另一区域像素不变，以及移动膜条样例不自动合并的检查。

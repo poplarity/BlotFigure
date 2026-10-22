@@ -4,6 +4,23 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-10-22
+
+Simplify the workflow: independent protein regions, without joining.
+
+**中文摘要**
+- 取消根据高度/强度自动拼接不同膜条，也取消拖到另一行时误触发的拼接；上下拖动只排序。
+- 每个蛋白区域独立选择曝光和调整亮度。固定已确定的图片默认显示范围，避免一个区域换曝光后其他区域跟着变。
+- 只有明确选择「高级：整张曝光」才全图调整；浏览其他图片时不会自动切成全图调整。
+- 旧项目的合并区域提供「解除绑定，分别编辑」和「全部解除绑定」，沿用当前曝光、亮度、名称及裁切范围。已被旧版覆盖的历史独立设置无法推回。
+- 保留同一原始区域剔除内部 Marker 泳道后的片段和可见分隔，不把这些片段误当作旧版跨区域绑定。
+
+### Changed
+- Removed the cross-strip height/intensity joining heuristic and the drop-on-another-row merge gesture. Vertical drags only reorder independent protein regions.
+- Existing automatic image display ranges remain stable when other regions change exposure. Whole-exposure editing requires an explicit advanced action, with no silent fallback when viewing a different picture.
+- Legacy combined rows can be detached individually or together, keeping current exposures, levels, names and crop bounds. Opening a project does not silently rearrange it.
+- Updated guidance, examples and regression coverage, including pixel invariance of an untouched region when another is edited.
+
 ## [0.8.1] - 2026-10-22
 
 Faster image organisation, independent protein boxes and manual marker labels that stay visible.

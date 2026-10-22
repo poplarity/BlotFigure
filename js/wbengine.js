@@ -953,68 +953,9 @@
       const b0 = (r.v0 - r.vc) * f, b1 = (r.v1 - r.vc) * f;
       return { region: ri, segs: [{ region: ri, vc: r.vc * f, b0, b1, ms }], ox, oy, angle: Math.round(rg.angle * 100) / 100, bandH: Math.max(4, b1 - b0), strength: r.strength };
     }).filter(Boolean);
-    // band contrast of a row in each picture (raw signal, its own lanes and band height)
-    const rowContrast = r => {
-      if (r._contrast) return r._contrast;
-      const q2 = (a, p) => { if (!a.length) return 0; a.sort((x, y) => x - y); return a[Math.min(a.length - 1, Math.round(p * (a.length - 1)))]; };
-      const per = [];
-      sigs.forEach(s => {
-        const band = [], bgv = [], im = { w: s.w, h: s.h, data: s.raw };
-        r.segs.forEach(sg => {
-          const rg = regions[sg.region], F = frame(rg.cx, rg.cy, rg.angle), L = lat[sg.region];
-          const v0 = (sg.vc + sg.b0) / f, v1 = (sg.vc + sg.b1) / f;
-          sg.ms.forEach(m => {
-            const uc = L.u0 + m * L.pitch, hw = L.pitch * 0.3;
-            for (let u = uc - hw; u <= uc + hw; u += 1) {
-              for (let v = v0; v <= v1; v += 1) { const [x, y] = toImg(F, u, v); const val = bilinear(im, x, y); if (!isNaN(val)) band.push(val); }
-              for (const dv of [-6, -4, 4, 6]) { const [x, y] = toImg(F, u, (dv < 0 ? v0 : v1) + dv); const val = bilinear(im, x, y); if (!isNaN(val)) bgv.push(val); }
-            }
-          });
-        });
-        const hi = q2(band, 0.9), clipped = hi >= 0.98 * Math.min(1, s.clipDs);
-        per.push({ c: hi - q2(bgv, 0.5), clipped });
-      });
-      return (r._contrast = per);
-    };
-    // relative strength of two rows, measured in the same pictures (where neither is clipped)
-    const sameStrength = (a, b) => {
-      const A = rowContrast(a), B = rowContrast(b), ratios = [];
-      A.forEach((x, k) => { const y = B[k]; if (x.clipped || y.clipped || Math.max(x.c, y.c) < 0.03) return; ratios.push(Math.min(x.c, y.c) / Math.max(x.c, y.c)); });
-      if (!ratios.length) return 1;     // no fair comparison possible: do not block on it
-      ratios.sort((x, y) => x - y);
-      return ratios[ratios.length >> 1];
-    };
-    // strength of a row relative to the strongest row on its own piece (1 = the piece's main band).
-    // A faint secondary band of one antibody must not join the main band of another piece.
-    const pieceRank = r => {
-      if (r._rank != null) return r._rank;
-      const A = rowContrast(r);
-      let rank = 1;
-      out.forEach(s => {
-        if (s === r || s.region !== r.region) return;
-        const B = rowContrast(s), ratios = [];
-        A.forEach((x, k) => { const y = B[k]; if (x.clipped || y.clipped || Math.max(x.c, y.c) < 0.03) return; ratios.push(x.c / Math.max(y.c, 1e-9)); });
-        if (!ratios.length) return;
-        ratios.sort((x, y) => x - y);
-        rank = Math.min(rank, ratios[ratios.length >> 1]);
-      });
-      return (r._rank = rank);
-    };
-    // --- one protein running across pieces placed side by side = one figure row
-    const xExt = ri => { const b = pieceBox(regions[ri]); return [b[0], b[2]]; };
-    const sideBySide = (ra, rb) => { const A = xExt(ra), B = xExt(rb), ov = Math.min(A[1], B[1]) - Math.max(A[0], B[0]); return ov < 0.25 * Math.min(A[1] - A[0], B[1] - B[0]); };
-    out.sort((a, b) => b.segs[0].ms.length - a.segs[0].ms.length);
-    const merged = [];
-    out.forEach(r => {
-      // same height is not enough: a neighbouring piece probed with another antibody can have faint bands
-      // at that height. Require comparable band contrast (in the same pictures), and unless the contrast is
-      // clearly alike, a comparable rank on the own piece (main band vs main band, not main vs secondary).
-      const host = merged.find(m => !m.regions.has(r.region) && [...m.regions].every(ri => sideBySide(ri, r.region)) &&
-        Math.abs(m.oy - r.oy) < Math.max(m.bandH, r.bandH) * 0.9 + 6 && Math.abs(m.angle - r.angle) < 3 &&
-        sameStrength(m, r) > 0.3 && (sameStrength(m, r) > 0.6 || Math.min(pieceRank(m), pieceRank(r)) / Math.max(pieceRank(m), pieceRank(r)) > 0.35));
-      if (host) { host.segs.push(r.segs[0]); host.regions.add(r.region); host.strength += r.strength; host.bandH = Math.max(host.bandH, r.bandH); }
-      else merged.push(Object.assign(r, { regions: new Set([r.region]) }));
-    });
+    // Membrane identity, height and intensity do not establish protein identity.
+    // Keep every detected source region independent; only duplicate detections inside one region are reconciled below.
+    const merged = out.map(r => Object.assign(r, { regions: new Set([r.region]) }));
     // two detections of one heavy band (core + smear edge) on the same piece: same lanes, close in height
     for (let i = 0; i < merged.length; i++) for (let j = merged.length - 1; j > i; j--) {
       const a = merged[i], b = merged[j];

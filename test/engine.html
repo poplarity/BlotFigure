@@ -31,11 +31,12 @@
       const truth = ses.truth;
       const rows = A.rows.map(r => ({ strip: r.strip, ang: r.angle, oy: Math.round(r.oy), kda: r.kda && +r.kda.toFixed(1), ks: r.ks.join(','), lanes: r.ks.length,
         choice: chemis[r.choice] && chemis[r.choice].exposure, sat: r.expo.map(e => e.sat).join('/'), snr: r.expo.map(e => e.snr.toFixed(0)).join('/') }));
-      // match rows to truth by y
+      // Match source regions to truth by y. A protein across cut pieces remains separate regions.
       const match = truth.map(tr => {
         const r = A.rows.slice().sort((a, b) => Math.abs(a.oy - tr.cy) - Math.abs(b.oy - tr.cy))[0];
+        const parts = A.rows.filter(p => Math.abs(p.oy - tr.cy) < 12);
         return { name: tr.name, kda: tr.kda, gotKda: r && r.kda && +r.kda.toFixed(1), dy: r && Math.round(r.oy - tr.cy), best: tr.bestExposure, got: r && chemis[r.choice].exposure,
-          lanes: r && r.ks.length, ang: tr.angle, gotAng: r && r.angle };
+          lanes: parts.reduce((n, p) => n + p.ks.length, 0), regions: parts.length, ang: tr.angle, gotAng: r && r.angle };
       });
       R[key] = { gen, ms, kinds: kinds.join(','), strips: A.strips.map(s => `${Math.round(s.cx)},${Math.round(s.cy)} ${s.angle}° ${Math.round(s.w)}x${Math.round(s.h)}`),
         pitch: +A.pitch.toFixed(1), truthPitch: ses.opts.pitch, factors: A.factors.map(x => +x.toFixed(3)), ladder: A.ladderId, ladderRank: A.ladderRank.slice(0, 3).map(x => x.id + ':' + x.q.toFixed(3)),

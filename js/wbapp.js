@@ -30,7 +30,7 @@
   }
 
   const App = { images: new Map(), analysis: {}, S: null, hist: [], future: [], listeners: [], selRow: null, selSeg: null, selLane: null, viewBlot: null, viewImg: null, mode: null };
-  App.VERSION = '0.8.1';
+  App.VERSION = '0.8.2';
   const retiredImages = new Map(); // reversible removal; only active images are saved/exported
   App.activeImageIds = () => new Set((App.S ? App.S.blots : []).flatMap(b => b.images));
   App.syncImages = () => {
@@ -1328,7 +1328,9 @@
     App.images.forEach((rec, id) => {
       if (rec.kind !== 'chemi') return;
       const cur = S.levels[id];
-      if (cur && cur.manual && !forceLevels) return;
+      if (cur && cur.manual) return;
+      // Once established, an exposure's baseline must not change because another protein switched pictures.
+      if (cur && cur.stable) return;
       const es = used.get(id);
       let black, white;
       if (es && es.length) {
@@ -1344,7 +1346,7 @@
         if (!rec._defaultLevels) { const [p50, p999] = G.Engine.percentiles(rec.cs.sig, [50, 99.95], 7); rec._defaultLevels = { black: p50, white: Math.max(p999, p50 + 0.01) }; }
         ({black, white} = rec._defaultLevels);
       }
-      S.levels[id] = { black, white, manual: false };
+      S.levels[id] = { black, white, manual: false, stable: !!(es && es.length) };
     });
   };
   App.levelsOf = id => App.S.levels[id] || { black: 0, white: 1 };
@@ -1500,50 +1502,28 @@
     return a.filter(x => c.some(y => Math.abs(x - y) < tol)).length >= 0.7 * Math.min(a.length, c.length);
   }
   App.stacked = (row, pc) => App.rowPieces(row).some(q => q !== pc && sameLanes(q, pc));
-  /* Columns of boxes newly joined to a row: a box whose columns clash with the row's other boxes goes right
-   * after them (or right before, if it lies to their left and there is room). */
-  function placeNew(row, added) {
-    const cols = segs => segs.flatMap(s => App.segCols(s).filter(x => x.col != null).map(x => x.col));
-    const old = row.segs.filter(s => !added.includes(s));
-    added.slice().sort((s, t) => App.segX(row, s) - App.segX(row, t)).forEach(sg => {
-      const have = cols(old);
-      if (have.length && cols([sg]).some(c => have.includes(c))) {
-        const lo = Math.min(...have), hi = Math.max(...have), n = App.nSample(sg), left = old.every(o => App.segX(row, sg) < App.segX(row, o));
-        sg.c0 = left && lo - n >= 1 ? lo - n : hi + 1;
-      }
-      old.push(sg);
-    });
-    row.segs.sort((s, t) => s.c0 - t.c0);
-  }
-  App.joinRows = function (row, other) {
-    const added = other.segs;
-    [row, other].forEach(r => r.segs.forEach(s => { s.above = App.boxAbove(r, s); s.below = App.boxBelow(r, s); }));
-    row.segs.push(...added);
-    if (!row.name && other.name) row.name = other.name;
-    App.S.rows = App.S.rows.filter(r => r !== other);
-    if (App.selRow === other.id) App.selRow = row.id;
-    placeNew(row, added);
-    App.fitRowHeight(row);
+  // A single source protein crop may have several fragments after excluding an internal marker lane.
+  // Those fragments are one region; formerly joined independent crops have different region keys.
+  App.bindingGroups = row => {
+    const groups = new Map();
+    row.segs.forEach(sg => { const key = sg.cut ? sg.cut.id : App.boxId(sg); if (!groups.has(key)) groups.set(key, []); groups.get(key).push(sg); });
+    return [...groups.values()];
   };
-  /* User-directed joining: independent non-overlapping crops, including several on one strip, may share a row.
-   * All boxes use the row's single exposure. Different membrane groups and duplicated source areas are refused. */
-  App.mergeRows = function (row, other) {
-    if (!row || !other || row === other) return 'none';
-    if (row.blot !== other.blot) return 'blot';
-    // Same strip is valid: separate crops can represent the same protein after a lane was cut out.
-    // Refuse only duplicated source pixels, never the shared strip identity.
-    if (other.segs.some(s => row.segs.some(t => s.piece === t.piece && Math.min(s.x1, t.x1) > Math.max(s.x0, t.x0) + 1 &&
-      Math.min(s.vc + App.boxBelow(other, s), t.vc + App.boxBelow(row, t)) > Math.max(s.vc - App.boxAbove(other, s), t.vc - App.boxAbove(row, t)) + 1))) return 'overlap';
-    App.joinRows(row, other);
-    return 'joined';
-  };
+  App.boundRows = () => App.S.rows.filter(r => App.bindingGroups(r).length > 1);
+  // Kept only so old diagnostic URLs fail gracefully. The product has no merge operation.
+  App.mergeRows = () => 'disabled';
   App.splitRow = function (row) {
-    if (row.segs.length < 2) return;
-    const rest = row.segs.slice(1).map(sg => ({ id: uid('r'), blot: row.blot, name: '', img: row.img, auto: row.auto, hidden: false, segs: [sg], above: row.above, below: row.below }));
-    row.segs = [row.segs[0]];
+    if (!row) return [];
+    const groups = App.bindingGroups(row);
+    if (groups.length < 2) return [];
+    const current = App.rowLevels(row), level = { black: current.black, white: current.white }, original = { ...row };
+    const rest = groups.slice(1).map(segs => ({ ...original, id: uid('r'), segs, lv: { ...level }, auto: false }));
+    row.segs = groups[0]; row.lv = { ...level }; row.auto = false;
     App.S.rows.splice(App.S.rows.indexOf(row) + 1, 0, ...rest);
     [row, ...rest].forEach(App.fitRowHeight);
+    return [row, ...rest];
   };
+  App.unbindAll = () => App.boundRows().forEach(App.splitRow);
 
   /* ---------- marker bands set by hand ---------- */
   App.ladderU = pc => {
@@ -1764,7 +1744,8 @@
           `Marker ticks on ${App.pieceName(b, pc)} are out of order: molecular weights should decrease from top to bottom`));
       });
     });
-    if (C.gapAfter.size) legend.push('Non-adjacent lanes, or lanes from different pieces of a membrane, are separated by white space.');
+    const localCuts = C.src.some(rs => rs.some((a, i) => i > 0 && a && rs[i - 1] && (a.sg !== rs[i - 1].sg || a.i !== rs[i - 1].i + 1)));
+    if (C.gapAfter.size || localCuts) legend.push('White gaps indicate discontinuities between the displayed source lanes or crop fragments.');
     if (S.style.invert) legend.push('Chemiluminescence images are shown inverted (dark bands on a light background).');
     // (levels of the whole picture, or a row's own: said as they are)
     const ownLv = vis.filter(r => r.lv).length;
@@ -1807,6 +1788,8 @@
     const vis = S.rows.filter(r => !r.hidden), ck = App.checks(), label = ck.label;
     if (S.blots.some(b => b.dirty)) { add('block', L('图片分组已修改，请先在第 1 步确认，再导出。', 'Picture groups changed. Confirm step 1 before exporting.')); return out; }
     if (!vis.length) { add('block', L('成图里还没有蛋白行。', 'The figure has no protein rows yet.')); return out; }
+    if (App.boundRows().length) add('warn', L('旧版合并的独立区域仍共用曝光和亮度，建议先解除绑定，再分别检查。', 'Independent regions combined by an older version still share exposure and levels. Detach and review them separately.'),
+      { label: L('解除旧版绑定', 'Detach legacy regions'), run: () => App.unbindAll() });
     const eff = App.effectiveDpi(), safe = App.maxSafeMmPerLane(300);
     if (eff < 300) add('block', L(`条带本身的有效分辨率只有 ${Math.round(eff)} dpi（< 300）：每道 ${st.mmPerLane} mm 太宽，导出 ${st.dpi} dpi 也只是把像素放大。`,
       `Effective resolution of the bands ${Math.round(eff)} dpi (< 300): ${st.mmPerLane} mm per lane is too wide, and exporting at ${st.dpi} dpi only enlarges the pixels.`),
