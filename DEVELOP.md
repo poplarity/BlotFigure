@@ -190,3 +190,11 @@ msedge --headless=new --disable-gpu --user-data-dir=$env:TEMP\wb_dbg --allow-fil
 - App 的 analyzeSession 传 `autoMarkerLanes:false`；diagnostic engine 的自动 Marker 方法保留用于独立测试，不能通过 `roleAt()` 自动影响用户的样本道。source geometry 不再按成图全局范围裁切。
 - `hiCol:0` 表示本排版列当前没有源泳道。首次重新添加时重建完整范围并恢复该范围的可见标记；已有内容的其他列不受影响。
 - `tests/lanecount.mjs`（`--suite=lanecount`）及 `test/boxlanes.html` 检查固定条数定位误差、实际条带落在框内、手动裁切、清空后真实点击新增、多列隔离、预设和重开。
+
+## 0.12.0：图片组、独立区域与 PPT
+
+- `blots` 是内部历史字段名，对外叫图片组。同一拍摄布局的参考图和各次曝光是一组，一组不等同于一张物理膜；蛋白框独立，不能共享曝光或自动拼接。
+- `wbui.focusProtein()` 只切换侧栏，不在拖动中缩放画布。进入第 3 步必须同步 `openSteps`；第 1 步正常继续时清空 `pcSeen`、从第一组检查。
+- `laneCount` 约束每个区域，不压缩宽膜的完整泳道网格；宽膜可生成多个独立行。`blot.dividerLane` 是用户明确的分隔泳道，不能用缺带推测代替。未指定的余道保留为 `partialBlock` 候选。
+- `BRender.build(false,true)` 返回 `exportSlices` 与带来源 ID 的 SVG；PPT 复用其排版。`pptx.js` 根据每个来源的完整图像、总角度和独立色阶生成全图 PNG，以原生 `a:srcRect` 表达裁切；不能换成截取后的小图或整张截图。相同来源去重。任何未知 SVG 元素直接报错，防止静默丢标注。
+- `tests/iteration012.mjs` 以真实点击检验步骤和选框，同时测试 9 道分隔、kDa/条件相交、PPT 原生对象、多图片来源和离线导出。`scripts/check-pptx.ps1` 可用本机 PowerPoint 做额外验证；仅用合成图，勿提交 Office 另存文件。

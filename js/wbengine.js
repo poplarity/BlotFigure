@@ -944,7 +944,10 @@
     const pJoint = jointPitch(cands.map(c => c.anchors), pitchDs);
     const fixedCount=Number.isInteger(opt.laneCount)&&opt.laneCount>=1&&opt.laneCount<=60?opt.laneCount:0;
     const lat = regions.map((rg, ri) => {
-      if(!fixedCount)return pieceLattice(rg, cands[ri], ladderU[ri], pJoint);
+      const natural=pieceLattice(rg, cands[ri], ladderU[ri], pJoint);
+      // A requested box count must not compress the entire membrane to that many lanes.
+      // Preserve a wide lattice so all blocks can become independent protein regions below.
+      if(!fixedCount || natural && natural.roles.length>=2*fixedCount)return natural;
       const fit=detectBoxLanes(compImg,frame(rg.cx,rg.cy,rg.angle),-rg.w/2,rg.w/2,-rg.h/2,rg.h/2,{count:fixedCount});
       return {u0:fit.lanes[0],pitch:fit.pitch,roles:Array(fixedCount).fill('sample')};
     });
@@ -1010,12 +1013,33 @@
         u0: L ? L.u0 * f : 0, pitch: L ? L.pitch * f : pitch, roles: L ? L.roles.slice() : [], col0: 1, ladderUs: ladderU[ri].map(u => u * f) };
     });
     assignColumns(pieces, out);
+    if(fixedCount)out=out.flatMap(r=>{
+      const sg=r.segs[0],pc=pieces[sg.region],n=pc.roles.length;
+      if(n<2*fixedCount)return [r];
+      const divider=Number.isInteger(opt.dividerLane)&&opt.dividerLane>0&&opt.dividerLane<=n?opt.dividerLane-1:null;
+      const blocks=[];
+      const add=(a,z)=>{if(z>=a)blocks.push([a,z]);};
+      const chunk=(a,z)=>{for(let k=a;k<=z;k+=fixedCount)add(k,Math.min(z,k+fixedCount-1));};
+      if(divider!=null){chunk(0,divider-1);chunk(divider+1,n-1);}
+      else {
+        // Full blocks from both edges. Keep any middle remainder as an explicit candidate:
+        // a missing or weak band is not evidence that a lane is a marker.
+        let a=0,z=n-1;
+        while(z-a+1>=2*fixedCount){add(a,a+fixedCount-1);add(z-fixedCount+1,z);a+=fixedCount;z-=fixedCount;}
+        chunk(a,z);
+      }
+      return blocks.sort((a,b)=>a[0]-b[0]).map(([a,z])=>{
+        const x0=a===0?-pc.w/2:pc.u0+(a-.5)*pc.pitch,x1=z===n-1?pc.w/2:pc.u0+(z+.5)*pc.pitch;
+        const part={...sg,ms:Array.from({length:z-a+1},(_,i)=>a+i),x0,x1,laneCount:z-a+1};
+        return {...r,segs:[part],partialBlock:z-a+1<fixedCount,dividerLane:divider==null?null:divider+1};
+      });
+    });
     const colOf = (pc, m) => { if (pc.roles[m] !== 'sample') return null; let c = pc.col0; for (let k = 0; k < m; k++) if (pc.roles[k] === 'sample') c++; return c; };
     // --- exposure choice per row (over all the lanes of its pieces)
     out.forEach(r => {
       const parts = r.segs.map(sg => {
         const pc = pieces[sg.region], sl = pc.roles.map((x, m) => m).filter(m => pc.roles[m] === 'sample');
-        return { F: frame(pc.cx, pc.cy, pc.angle), u0: pc.u0 + (sl[0] - 0.5) * pc.pitch, u1: pc.u0 + (sl[sl.length - 1] + 0.5) * pc.pitch,
+        return { F: frame(pc.cx, pc.cy, pc.angle), u0: sg.x0 ?? pc.u0 + (sl[0] - 0.5) * pc.pitch, u1: sg.x1 ?? pc.u0 + (sl[sl.length - 1] + 0.5) * pc.pitch,
           vTop: sg.vc - r.above, vBot: sg.vc + r.below, b0: sg.vc + sg.b0, b1: sg.vc + sg.b1 };
       });
       r.expo = chemis.map((c, k) => evalExposure(c.img, sigs[k].cs, parts, factors[k]));

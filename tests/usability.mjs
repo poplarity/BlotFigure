@@ -37,13 +37,13 @@ export async function usabilityChecks(browser,base){
       assert(await page.evaluate(()=>{const body=document.querySelector('#secRows .step-body');return body.firstElementChild.contains(document.getElementById('btnAddRow'));}));
     });
     await check('photo workspace supports large previews, zoom and return to editing without resets',async()=>{
-      const before=await page.evaluate(()=>JSON.stringify(BApp.S.rows));
+      const before=await page.evaluate(()=>JSON.stringify(BApp.S.rows)),returnStep=await page.evaluate(()=>BApp.curStep);
       await page.evaluate(()=>UI.openStep(1));assert(await page.locator('#imageGallery #blotList').count()===1);
       assert(await page.locator('#galleryCanvas').isVisible());
       const ids=await page.evaluate(()=>[...BApp.images.keys()]);await page.locator(`.thumb[data-image="${ids[1]}"] canvas`).click();
       assert(await page.locator('.gallery-caption b').textContent()===await page.evaluate(id=>BApp.images.get(id).name,ids[1]));
       await page.click('#galleryZoomIn');assert(await page.locator('#galleryCanvas').evaluate(el=>el.style.width==='150%'));
-      await page.click('#galleryDone');await page.waitForFunction(()=>BApp.curStep===5);
+      await page.click('#galleryDone');await page.waitForFunction(n=>BApp.curStep===n,returnStep);
       assert.equal(await page.evaluate(()=>JSON.stringify(BApp.S.rows)),before);
     });
     await check('global marker font ignores legacy overrides and ticks never extend into extra label columns',async()=>{

@@ -59,6 +59,10 @@
   $('rawCol').appendChild(gallery);gallery.appendChild($('blotList'));
   const inspect=document.createElement('div');inspect.id='galleryInspect';inspect.className='gallery-inspect';$('figCol').appendChild(inspect);
   const launcher=document.createElement('button');launcher.className='btn sm';launcher.textContent=L('打开图片浏览','Browse pictures');launcher.onclick=()=>G.UI.openStep(1);$('secImages').querySelector('.step-body').prepend(launcher);
+  const groupGuide=document.createElement('div'); groupGuide.className='group-guide';
+  const renderGroupGuide=()=>{groupGuide.innerHTML=`<b>${L('先按拍摄内容分组，再选参考图','Group by capture, then choose a reference')}</b><p>${L('同一批膜条、摆放布局基本一致的各次曝光，与对应的白光／复合图放一组。程序只在组内比较曝光，并用参考图定位膜条；分错会把不对应的图片放到一起。','Keep exposures of the same strips in the same layout with their white-light / merged reference. Exposure comparison and strip positioning happen within each group; unrelated pictures cannot serve as each other’s reference.')}</p><p>${L('例如：同一布局的短曝光、长曝光、复合图 → 图片组 1；另一批膜或无法对应的新布局 → 图片组 2。一张图包含多条膜也只需一组。','Example: short exposure + long exposure + merged reference of one layout → image group 1; other strips or an unrelated layout → group 2. A picture containing several strips still needs only one group.')}</p><span>${L('不按蛋白名、曝光强弱或成图顺序分组。自动分组不对时，直接拖动图片；勾选多张可一起拖。','Do not group by protein name, exposure strength or figure order. Correct an automatic group by dragging pictures; select several to move together.')}</span>`;
+  };renderGroupGuide();
+  gallery.querySelector('.gallery-top').after(groupGuide);
   $('galleryDone').onclick=()=>G.UI.finishImages();
   let shownCanvas=null, zoom=1;
   function updateGallery(){
@@ -78,6 +82,6 @@
   App.on(what=>{if(['loaded','change','select','empty'].includes(what))updateGallery();});updateGallery();
   ['btnHistory','btnHistoryStart','cacheStatus'].forEach(id=>$(id).onclick=history);
   $('btnPresets').onclick=presets;$('btnCustomMarker').onclick=customMarker;
-  G.I18N?.onChange(()=>{updateStatus();updateGallery();launcher.textContent=L('打开图片浏览','Browse pictures');gallery.querySelector('.gallery-top b').textContent=L('整理这一批图片','Organise these pictures');gallery.querySelector(':scope > .hint').textContent=L('点图片在右侧放大查看；拖到另一组即可移动。勾选后可批量整理。','Click a picture to inspect it on the right. Drag between groups, or select several to organise together.');});
+  G.I18N?.onChange(()=>{renderGroupGuide();updateStatus();updateGallery();launcher.textContent=L('打开图片浏览','Browse pictures');gallery.querySelector('.gallery-top b').textContent=L('整理这一批图片','Organise these pictures');gallery.querySelector(':scope > .hint').textContent=L('点图片在右侧放大查看；拖到另一组即可移动。勾选后可批量整理。','Click a picture to inspect it on the right. Drag between groups, or select several to organise together.');});
   G.Extras={newProject,importFiles,archiveCurrent,history,presets,customMarker};
 })(window);

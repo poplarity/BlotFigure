@@ -566,6 +566,7 @@
       draw();
     }
     if (h.row) {
+      G.UI.focusProtein();
       if (App.selRow !== h.row.id || App.selSeg !== App.boxId(h.sg)) App.selLane = null;
       App.selRow = h.row.id; App.selSeg = App.boxId(h.sg);
       if (h.type === 'lane') App.selLane = h.i; else if (h.type === 'move') App.selLane = null;

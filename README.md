@@ -4,7 +4,7 @@
 
 **Turn the raw pictures of a Western blot experiment into a publication-ready figure — in your browser, offline.**
 
-[**Download the single HTML file**](https://github.com/poplarity/BlotFigure/releases/download/v0.11.0/BlotFigure-v0.11.0.html) · [Use online](https://poplarity.github.io/BlotFigure/) · [中文说明](README.zh-CN.md)
+[**Download the single HTML file**](https://github.com/poplarity/BlotFigure/releases/download/v0.12.0/BlotFigure-v0.12.0.html) · [Use online](https://poplarity.github.io/BlotFigure/) · [中文说明](README.zh-CN.md)
 
 [![CI](https://github.com/poplarity/BlotFigure/actions/workflows/ci.yml/badge.svg)](https://github.com/poplarity/BlotFigure/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -17,13 +17,13 @@
 
 **Download one file, open it in your browser, and start making your figure. No installation, ZIP extraction or GitHub account is needed.**
 
-1. **[Download BlotFigure-v0.11.0.html](https://github.com/poplarity/BlotFigure/releases/download/v0.11.0/BlotFigure-v0.11.0.html)** (about 750 KB). Save it to your Desktop or Downloads folder.
+1. **[Download BlotFigure-v0.12.0.html](https://github.com/poplarity/BlotFigure/releases/download/v0.12.0/BlotFigure-v0.12.0.html)** (about 800 KB). Save it to your Desktop or Downloads folder.
 2. **Double-click the downloaded file.** It opens in your browser. If a text editor opens instead, right-click → **Open with** → Firefox, Chrome, Edge or Safari.
 3. **Drop in all pictures of one experiment**: every exposure of each membrane plus a picture that shows the marker (the white-light picture, or white light merged with chemiluminescence). Then follow the 5 steps on the left and choose **Export PNG**.
 
 That one HTML file is the complete tool. Keep it on your computer or send the same file to a colleague. Once downloaded, it works without an internet connection.
 
-**Get the right file:** choose the release attachment named **BlotFigure-v0.11.0.html**, not the repository's **index.html**, **Source code (zip)** or **Source code (tar.gz)**. If you reach the [release page](https://github.com/poplarity/BlotFigure/releases/latest), expand **Assets** and click the file ending in **.html**.
+**Get the right file:** choose the release attachment named **BlotFigure-v0.12.0.html**, not the repository's **index.html**, **Source code (zip)** or **Source code (tar.gz)**. If you reach the [release page](https://github.com/poplarity/BlotFigure/releases/latest), expand **Assets** and click the file ending in **.html**.
 
 **Keep your work:** use **File → Save project** (Ctrl+S) before closing. Your **.blotfig** file contains all the pictures and every adjustment; reopen it in BlotFigure to continue, on any computer.
 
@@ -33,7 +33,7 @@ Need help? See [the download and opening guide](docs/getting-started.md) or pres
 
 <img src="docs/screenshot-en.png" alt="BlotFigure: the steps on the left, the membrane in the middle, the finished figure on the right" width="900">
 
-Drop in everything the imager saved for one experiment. BlotFigure tells exposures from marker pictures, groups the pictures by membrane (also when the membrane was moved between captures), finds the strips of a cut membrane and their tilt, makes one box per protein, picks the best exposure for every row (no saturation, enough signal), and lays the rows out as one figure with lane names, molecular-weight ticks and protein names. You confirm each step, mark the ladder bands with a few clicks and type the names. Everything happens in the browser; **nothing is uploaded, nothing is installed**.
+Drop in everything the imager saved for one experiment. BlotFigure tells exposures from marker pictures, groups matching captures and exposures (also allowing aligned pictures taken after movement), finds the strips of a cut membrane and their tilt, makes one box per protein, picks the best exposure for every row (no saturation, enough signal), and lays the rows out as one figure with lane names, molecular-weight ticks and protein names. You confirm each step, mark the ladder bands with a few clicks and type the names. Everything happens in the browser; **nothing is uploaded, nothing is installed**.
 
 <p align="center"><img src="docs/example-figure.png" alt="Example output" width="520"></p>
 
@@ -82,7 +82,7 @@ Drop in everything the imager saved for one experiment. BlotFigure tells exposur
 
 Follow the sequence once for a new experiment. Afterwards use each tool’s **Expand / Collapse** button directly; switching tools applies pending strip edits and preserves existing regions, including your deletions. In the protein tool, **Add a protein box** is at the top. Click a box and press **Backspace** to remove just that box; text editing keeps normal keyboard behavior.
 
-1. **Marker picture** — each membrane needs one picture that shows the marker. The guess is marked ★; if it is wrong, click "Use as marker picture" under the right one.
+1. **Groups & marker reference** — put exposures of the same strips in the same capture layout with their white-light / merged reference. One group can contain multiple strips. Exposure comparison and strip positioning happen within the group. Use separate groups for unrelated strips/layouts, not different proteins, brightness levels or figure order. Drag to correct a group, then select its ★ reference.
 2. **Strips** — the blue boxes are the strips found on the marker picture. Move, resize, rotate, draw or delete them right on the picture. Set the expected lanes per protein box here before generating the boxes.
 3. **Protein boxes** — one box per protein, and the figure appears on the right. Resize, move or tilt a box; drag the leftmost and rightmost lane lines onto the lanes; add a box for a protein that was missed.
 4. **Marker** — choose your ladder and click its bands on the marker picture (they snap); one mark displays its known size; two or more allow estimates for the other bands.
@@ -98,7 +98,7 @@ In step 5 choose **Add a layout column**, then drag regions into it or use **⋯
 
 ## Versions
 
-The current version is **0.11.0**: set a default lane count before protein detection, fit lane positions independently inside each box, and reuse the count when adding boxes. Local exceptions and explicit batch application are supported. Clearing every box no longer leaves a one-lane display range. Automatic marker guesses no longer exclude lanes or split protein crops; only manual exclusions do that. See the [changelog](CHANGELOG.md).
+The current version is **0.12.0**: clearer capture groups, reliable step/box selection, default borders, compact kDa headings, multiple independent count-constrained regions per strip, and [editable, recroppable PowerPoint export](docs/pptx.md). See the [changelog](CHANGELOG.md).
 
 ## Privacy
 
@@ -127,7 +127,7 @@ Exposures are recognised by their file names (`Chemi`, `ECL`, `_30s`, `2min` …
 ## Fast image organisation and independent crops
 
 - Step 1 reads and groups pictures first. Alignment and strip analysis wait until you confirm the groups.
-- Drag thumbnails between membrane groups (select several to move them together), or drop on **New membrane group**. Each thumbnail has a remove button; **Remove selected** works in bulk. Ctrl+Z restores removed pictures.
+- Drag thumbnails between image groups (select several to move them together), or drop on **New image group**. Each thumbnail has a remove button; **Remove selected** works in bulk. Ctrl+Z restores removed pictures.
 - Every protein box has its own **B1, B2, …** ID. It moves independently, including when several crops share one physical strip. Independent regions are never joined. For legacy combined rows, step 3 offers **Detach and edit separately** or **Detach all**, preserving current exposures, levels, names and crop bounds.
 - Weak detected rows stay visible. Hide them explicitly if unwanted; hidden rows have a **Show** button and **Show all hidden boxes** restores them together.
 - An excluded internal marker lane produces separate editable source boxes. Their splice gap appears only in that row. **Include middle lanes; restore continuous box** undoes a mistaken exclusion.

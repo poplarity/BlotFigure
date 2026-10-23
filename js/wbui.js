@@ -63,7 +63,7 @@
     $('viewModeExtra').innerHTML = m === 'align' ? `<button id="vmAuto" title="${L('按白光图和条带自动对齐（整张膜的图都重新对齐）', 'Align automatically by the white-light picture and the bands (every picture of this membrane is aligned again)')}">${L('自动对齐', 'Auto-align')}</button>`
         + `<button id="vmNone" title="${L('按原样使用这张图，不移动', 'Use this picture as taken, without moving it')}">${L('不对齐', "Don't align")}</button>`
       : m === 'pieces' ? `${vb && vb.userStrips ? `<button id="vmPcAuto" title="${L('丢掉手动调整，按 Marker 图重新自动找膜条', 'Discard the changes made by hand and find the strips on the marker picture again')}">${L('恢复自动', 'Back to automatic')}</button>` : ''}`
-        + `<button id="vmPcNext" class="go">${pcUnseen() ? L('这张对了，看下一张膜 →', 'This one is right. Next membrane →') : L('下一步 →', 'Next →')}</button>`
+        + `<button id="vmPcNext" class="go">${pcUnseen() ? L('这张对了，看下一组 →', 'This one is right. Next group →') : L('下一步 →', 'Next →')}</button>`
       : m === 'marks' ? `<button id="vmMkNext" class="go">${L('下一步 →', 'Next →')}</button>` : '';
     if (m === 'align') {
       const id = App.alignImg;
@@ -147,9 +147,9 @@
     if (!n) return;
     const st = S(), moved = st.blots.reduce((s, b) => s + nMoved(b), 0);
     const nb = st.blots.length;
-    toast(L(`已载入 ${n} 张图片（${nb} 张膜）`, `Loaded ${pl(n, 'picture')} (${pl(nb, 'membrane')})`)
+    toast(L(`已载入 ${n} 张图片（${nb} 个图片组）`, `Loaded ${pl(n, 'picture')} (${pl(nb, 'image group')})`)
       + (moved ? L(`，${moved} 张拍摄时膜的位置不同，已自动对齐`, `; ${moved} ${moved === 1 ? 'was' : 'were'} taken with the membrane elsewhere and aligned automatically`) : '')
-      + L('。第 1 步：确认每张膜的 Marker 图', '. Step 1: check the marker picture of each membrane'), moved ? 5200 : 4000);
+      + L('。第 1 步：整理图片分组，确认各组的 Marker 参考图', '. Step 1: organise image groups and choose each marker reference'), moved ? 5200 : 4000);
     // (8-bit pictures: said once, not once per file)
     const lw = App.loadWarnings || [];
     if (lw.length) {
@@ -317,6 +317,12 @@
   }
   $('btnPNG').onclick = () => exportRaster('png');
   $('btnTIFF').onclick = () => exportRaster('tiff');
+  $('btnPPTX').onclick=async()=>{
+    if(needFigure() || !(await preflight()))return;
+    App.busy(true,L('生成可编辑 PPT…','Building editable PPT…'));
+    try { await new Promise(r=>setTimeout(r,20));await G.PPTX.exportFile(baseName()+'.pptx');toast(L('已导出：文字可编辑，图片格式 → 裁剪可恢复全图','Exported: edit text or use Picture Format → Crop to restore the full picture'),5000); }
+    catch(e){toast(L('PPT 导出失败：','PPT export failed: ')+e.message,6000);}finally{App.busy(false);}
+  };
   $('btnSVG').onclick = async () => { if (needFigure() || !(await preflight())) return; G.Export.exportSVG(G.BRender.build(false).svg, baseName() + '.svg'); toast(L('已导出 SVG', 'Exported SVG')); };
   $('btnLog').onclick = () => {
     if (needFigure()) return;
@@ -377,10 +383,10 @@
     const st = S(), box = $('blotList'); box.innerHTML = '';
     const active = App.activeImageIds(); imageSelection.forEach(id => { if (!active.has(id)) imageSelection.delete(id); });
     const tools = document.createElement('div'); tools.className = 'image-tools';
-    tools.innerHTML = `<p class="hint">${L('拖动图片到正确的膜组；勾选多张可一起移动或移除。', 'Drag pictures into the correct membrane group. Select several to move or remove together.')}</p>
+    tools.innerHTML = `<p class="hint">${L('拖动图片到正确的图片组；勾选多张可一起移动或移除。', 'Drag pictures into the correct image group. Select several to move or remove together.')}</p>
       <div class="image-actions"><label><input type="checkbox" id="selectImages" ${active.size && imageSelection.size === active.size ? 'checked' : ''}> ${L('全选', 'All')}</label><span>${L(`已选 ${imageSelection.size} 张`, `${imageSelection.size} selected`)}</span>
       <button class="btn sm danger" id="removeImages" ${imageSelection.size ? '' : 'disabled'}>${L('移除所选', 'Remove selected')}</button></div>
-      ${imageSelection.size ? `<select id="moveImages" aria-label="${L('移动所选图片', 'Move selected pictures')}"><option value="">${L('移动到…', 'Move to…')}</option>${st.blots.map(b=>`<option value="${b.id}">${esc(App.blotName(b))}</option>`).join('')}<option value="new">${L('新膜组', 'New membrane group')}</option></select>` : ''}`;
+      ${imageSelection.size ? `<select id="moveImages" aria-label="${L('移动所选图片', 'Move selected pictures')}"><option value="">${L('移动到…', 'Move to…')}</option>${st.blots.map(b=>`<option value="${b.id}">${esc(App.blotName(b))}</option>`).join('')}<option value="new">${L('新图片组', 'New image group')}</option></select>` : ''}`;
     box.appendChild(tools);
     tools.querySelector('#selectImages').onchange = e => { imageSelection.clear(); if (e.target.checked) active.forEach(id => imageSelection.add(id)); renderBlots(); };
     tools.querySelector('#removeImages').onclick = () => deletePictures([...imageSelection]);
@@ -391,7 +397,7 @@
       card.dataset.blot = b.id; imageDropTarget(card, b.id);
       const nCh = App.chemiOf(b).length, nM = App.markersOf(b).length, mk = App.markerRec(b);
       const nMv = nMoved(b);
-      card.innerHTML = `<div class="blot-head"><input type="text" value="${esc(b.name)}" placeholder="${esc(App.blotName(b))}" title="${L('膜的名字（几张膜时用来区分）', 'Membrane name (tells several membranes apart)')}"><button class="link group-select">${L('选本组', 'Select group')}</button></div>
+      card.innerHTML = `<div class="blot-head"><input type="text" value="${esc(b.name)}" placeholder="${esc(App.blotName(b))}" title="${L('图片组名称（同一拍摄布局的参考图与各次曝光）', 'Image group name (one capture layout and its exposures)')}"><button class="link group-select">${L('选本组', 'Select group')}</button></div>
         <div class="blot-sub">${L(`${nCh} 张曝光 · ${nM} 张白光 / 复合图`, `${pl(nCh, 'exposure')} · ${nM} white-light / merged`)}${nMv ? ` · <span title="${L('拍摄之间膜的位置变过：这些图已对齐到同一位置', 'The membrane moved between captures: these pictures are aligned to one position')}">${L(`${nMv} 张已对齐`, `${nMv} aligned`)}</span>` : ''}</div>
         ${mk ? '' : `<p class="hint warn-t">${L('没认出 Marker 图：点看得见 Marker 的那张下面的"设为 Marker 图"。确实没有的话也可以继续，只是不能标分子量。',
           'No marker picture recognised: click "Set as marker picture" under the one that shows the marker. If there is none you can go on, only without molecular weights.')}</p>`}
@@ -449,8 +455,8 @@
       box.appendChild(card);
     });
     const newGroup = document.createElement('div'); newGroup.className = 'new-image-group';
-    newGroup.textContent = L('拖到这里，新建膜组', 'Drop here to create a membrane group'); imageDropTarget(newGroup, 'new'); box.appendChild(newGroup);
-    $('stBlots').textContent = L(`${st.blots.length} 张膜 · ${App.images.size} 张图`, `${pl(st.blots.length, 'membrane')} · ${pl(App.images.size, 'picture')}`);
+    newGroup.textContent = L('拖到这里，新建图片组', 'Drop here to create an image group'); imageDropTarget(newGroup, 'new'); box.appendChild(newGroup);
+    $('stBlots').textContent = L(`${st.blots.length} 个图片组 · ${App.images.size} 张图`, `${pl(st.blots.length, 'image group')} · ${pl(App.images.size, 'picture')}`);
     $('sum1').innerHTML = st.blots.map(b => {
       const mk = App.markerRec(b), mkName = mk ? esc(mk.name) : L('没有', 'none'), nc = App.chemiOf(b).length;
       return L(`${esc(App.blotName(b))}：Marker 图 <b>${mkName}</b>，${nc} 张曝光`, `${esc(App.blotName(b))}: marker picture <b>${mkName}</b>, ${pl(nc, 'exposure')}`);
@@ -467,23 +473,26 @@
     $('applyDefaultLanes').disabled=!n||!S().rows.length;
     $('defaultLanesHint').textContent=n?L(`自动生成与新加的框均按 ${n} 道定位；现有框不会被自动改动。`,`Detected and added boxes use ${n} lanes; existing boxes keep their adjustments.`):L('留空自动计数；填写后，新加的框按此数量定位。','Leave blank for automatic counting; set a count for newly added boxes.');
   }
+  $('dividerLane').onchange=done(e=>{const b=App.blot(App.viewBlot);if(b)b.dividerLane=e.target.value?Math.max(1,Math.min(60,Math.round(+e.target.value)||1)):null;});
   function renderPieces() {
     syncDefaultLanes();
+    $('dividerLane').value=App.blot(App.viewBlot)?.dividerLane||'';
     const st = S(), box = $('pieceList');
     box.innerHTML = st.blots.map(b => {
       const np = (b.pieces || []).length, ls = (b.pieces || []).map(p => p.letter).sort().join(' ');
-      return `<div class="pc-blot${b.id === App.viewBlot ? ' view' : ''}" data-blot="${b.id}">${st.blots.length > 1 ? `<b>${esc(App.blotName(b))}</b>` : ''}
+      return `<button type="button" class="pc-blot${b.id === App.viewBlot ? ' view' : ''}" data-blot="${b.id}" aria-pressed="${b.id === App.viewBlot}"><b>${esc(App.blotName(b))}</b>
       <span>${L(`${np} 条膜条（${ls}）`, `${pl(np, 'strip')} (${ls})`)}${b.userStrips ? `<span class="tag-hand">${L('手动调整过', 'adjusted by hand')}</span>` : ''}</span>
-      ${st.blots.length > 1 && b.id !== App.viewBlot ? `<button class="link" data-act="show">${L('看这张膜', 'Show this membrane')}</button>` : ''}</div>`;
+      <span class="pc-status">${b.id === App.viewBlot ? L('正在检查', 'Reviewing') : pcSeen.has(b.id) ? L('已查看 · 点击复查', 'Viewed · review again') : L('点击检查 →', 'Review →')}</span></button>`;
     }).join('');
-    box.querySelectorAll('[data-act="show"]').forEach(btn => btn.onclick = () => {
+    box.querySelectorAll('.pc-blot').forEach(btn => btn.onclick = () => {
+      if (btn.dataset.blot === App.viewBlot && App.curStep === 2) return;
       const to = App.blot(btn.closest('.pc-blot').dataset.blot), from = App.blot(App.viewBlot);
       // (the outlines edited on the membrane shown are applied first)
-      applyPieces(from, App.curStep === 2 ? G.View.piecesEnd(true) : null, false, () => startPieces(to));
+      applyPieces(from, App.curStep === 2 ? G.View.piecesEnd(true) : null, false, () => { App.curStep=2; openSteps.clear(); openSteps.add(2); startPieces(to); renderSteps(); updateCoach(); });
     });
     const nAll = st.blots.reduce((s, b) => s + (b.pieces || []).length, 0);
     $('stPieces').textContent = L(`${nAll} 条膜条`, pl(nAll, 'strip'));
-    $('next2').textContent = App.curStep === 2 && pcUnseen() ? L('这张膜对了，看下一张 →', 'This membrane is right. Next membrane →')
+    $('next2').textContent = App.curStep === 2 && pcUnseen() ? L('这组膜条对了，看下一组 →', 'This group is right. Next group →')
       : st.rows.length ? L('膜条对了，回到蛋白框 →', 'Strips are right. Back to the protein boxes →') : L('膜条对了，下一步：生成蛋白框 →', 'Strips are right. Next: protein boxes →');
     $('sum2').innerHTML = st.blots.map(b => {
       const np = (b.pieces || []).length;
@@ -655,7 +664,7 @@
       <div class="field inline"><label class="inline-label">${L('类型', 'Kind')}</label>
         <div class="seg"><button data-k="chemi" class="${rec.kind === 'chemi' ? 'on' : ''}">${L('曝光图', 'Exposure')}</button><button data-k="marker" class="${rec.kind === 'marker' ? 'on' : ''}">${L('Marker 白光', 'Marker / white light')}</button></div></div>
       ${rec.kind === 'chemi' ? `<div class="field inline"><label class="inline-label">${L('曝光时间', 'Exposure time')}</label><input type="number" id="pExpo" class="num" step="any" value="${rec.exposure != null ? rec.exposure : ''}" placeholder="${L('秒', 'seconds')}"> s</div>` : ''}
-      <div class="field inline"><label class="inline-label">${L('移到', 'Move to')}</label><select id="pMove" style="flex:1"><option value="">—</option>${others.map(o => `<option value="${o.id}">${esc(App.blotName(o))}</option>`).join('')}<option value="new">${L('新的一张膜', 'A new membrane')}</option></select></div>
+      <div class="field inline"><label class="inline-label">${L('移到', 'Move to')}</label><select id="pMove" style="flex:1"><option value="">—</option>${others.map(o => `<option value="${o.id}">${esc(App.blotName(o))}</option>`).join('')}<option value="new">${L('新图片组', 'A new image group')}</option></select></div>
       <div class="field inline align-row"><label class="inline-label">${L('位置', 'Position')}</label><span class="align-info">${esc(alignWords(rec, b))}</span></div>
       <div class="actions left"><button class="btn sm" id="pAlign" title="${L('在膜图上拖动这张图，让条带落进框里', 'Drag this picture on the membrane view so the bands sit in the boxes')}">${L('手动对齐…', 'Align by hand…')}</button>${al && al.how === 'manual' ? `<button class="btn sm" id="pAutoAlign">${L('恢复自动对齐', 'Back to auto-align')}</button>` : ''}</div>
       <div class="actions"><button class="btn sm danger" id="pDel">${L('移除这张图', 'Remove this picture')}</button><button class="btn sm primary" id="pOk">${L('完成', 'Done')}</button></div>`;
@@ -695,7 +704,7 @@
       // the tag: the row's colour on the membrane and the pieces it comes from; dragged = order in the figure
       el.innerHTML = `<span class="grip" style="--c:${App.rowColor(row)}" title="${L(`蛋白框 ${esc(modLabel(row))}。上下拖动调整这一行在成图里的位置（或选中后 Alt+↑↓）`, `Boxes ${esc(modLabel(row))}. Drag up or down to move this row in the figure (or select it and press Alt+↑↓)`)}">${esc(shortLabel(row))}</span>
         <button class="row-name-link link" title="${L('在成图上填写名称', 'Edit the name on the figure')}">${esc(row.name || L('未命名蛋白', 'Unnamed protein'))}</button>
-        <span class="kda">${kda ? '≈' + Math.round(kda) + ' kDa' : row.weak ? L('弱信号', 'Weak signal') : ''}</span>
+        <span class="kda">${row.partialBlock ? L('余道 · 请核对','Remaining lanes · review') : kda ? '≈' + Math.round(kda) + ' kDa' : row.weak ? L('弱信号', 'Weak signal') : ''}</span>
         <button class="expo-chip${isBest ? ' best' : ' other'}${App.expoVerdict(curE) === 'sat' ? ' sat' : ''}" data-act="expo" title="${cur ? esc(App.expoLabel(cur)) + L('：', ': ') : ''}${isBest ? L('正在用推荐的曝光', 'Using the recommended exposure') : L('正在用的不是推荐曝光', 'Not the recommended exposure')}${L('｜点开对比全部曝光', ' | click to compare all exposures')}">${isBest ? '★ ' : ''}${cur ? esc(App.expoLabel(cur)) : '—'}</button>
         <button class="x visibility" data-act="hide" title="${row.hidden ? L('显示这一行', 'Show this row') : L('隐藏这一行', 'Hide this row')}">${row.hidden ? L('显示', 'Show') : L('隐藏', 'Hide')}</button>
         <button class="x" data-act="del" title="${L('删除这一行', 'Delete this row')}">×</button>`;
@@ -1368,7 +1377,13 @@
     if (!S() || swallowClick) return;
     const img = e.target.closest('image[data-row]');
     if (img && App.mode === 'arrow') { placeArrow(img.dataset.row, e.clientY); return; }
-    if (img) { selectRow(img.dataset.row, true); $('previewBox').focus({preventScroll:true}); return; }
+    if (img) {
+      const id=img.dataset.row,show=()=>{if(App.mode)App.setMode(null);focusProtein();selectRow(id,true);$('previewBox').focus({preventScroll:true});};
+      // A result remains clickable while reviewing strips/markers. Apply pending outline
+      // edits before opening its protein controls, and leave the old editing mode cleanly.
+      if(App.mode==='pieces')applyPieces(App.blot(App.viewBlot),G.View.piecesEnd(true),false,show);else show();
+      return;
+    }
     const g = e.target.closest('[data-edit]');
     if (!g) { if (App.mode === 'arrow') toast(L('请点在成图里某一行的条带上', 'Click on the bands of a row in the figure')); return; }
     activateColumn(g.dataset.column || App.activeColumn);
@@ -1542,7 +1557,7 @@
    * The top bar says what to do in the open step, and a click on it does it. */
   const STEP_SEC = { 1: 'secImages', 2: 'secPieces', 3: 'secRows', 4: 'secMarker', 5: 'secNames' };
   const toolNav=document.createElement('nav');toolNav.id='toolNav';toolNav.className='tool-nav';toolNav.setAttribute('aria-label',L('编辑工具','Editing tools'));
-  const toolNames=()=>[L('图片','Pictures'),L('膜区','Strips'),L('蛋白框','Boxes'),'Marker',L('成图','Figure')];
+  const toolNames=()=>[L('分组','Groups'),L('膜区','Strips'),L('蛋白框','Boxes'),'Marker',L('成图','Figure')];
   toolNames().forEach((name,i)=>{const button=document.createElement('button');button.type='button';button.dataset.tool=String(i+1);button.textContent=name;button.onclick=()=>openStep(i+1);toolNav.appendChild(button);});
   $('sections').prepend(toolNav);
 
@@ -1558,6 +1573,12 @@
   const goTo = id => { const el = $(id); if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' }); };
   const flash = x => { const el = typeof x === 'string' ? $(x) : x; if (!el) return; el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1300); };
   const openSteps = new Set();
+  // Open the box controls without fitting/panning the image during a source-box gesture.
+  function focusProtein() {
+    if (!S() || S().step < 3) return;
+    App.curStep=3; openSteps.clear(); openSteps.add(3); shownSel=null;
+    renderSteps(); updateCoach();
+  }
   function openStep(n) {
     const st = S(); if (!st) return;
     n = Math.max(1, Math.min(n, st.step));
@@ -1591,6 +1612,7 @@
         `${none.map(App.blotName).join(', ')} ${none.length > 1 ? 'have' : 'has'} no marker picture: the strips can only be found from the exposures' signal, and no molecular weights can be marked. Continue?`))) return;
       st.step = Math.max(st.step, 2);
       try { await App.ensurePrepared(); } catch (e) { st.step = 1; toast(L('分析失败：', 'Analysis failed: ') + e.message); return; }
+      pcSeen.clear(); App.viewBlot=st.blots[0].id;
     }
     if (n === 4 && st.style.showMW) {
       const todo = unmarked();
@@ -1615,13 +1637,13 @@
           const had = st.rows.length;
           App.makeBoxes();
           App.busy(false);
-          st.step = Math.max(st.step, 3); App.curStep = 3;
+          st.step = Math.max(st.step, 3); focusProtein();
           App.selRow = null; App.viewImg = null;
           if (!had) App.viewBlot = st.blots[0].id;          // (the boxes from the first membrane on)
           App.commit(); G.View.fitFull(); goTo('secRows');
           const n3 = st.rows.filter(r => !r.hidden).length;
           toast(had ? L('膜条已更新，框都留在原处', 'Strips updated; the boxes stayed where they were')
-            : n3 ? L(`找到 ${n3} 个蛋白，右边就是成图。点框检查，好了点"下一步"`, `Found ${pl(n3, 'protein')}; the figure is on the right. Click a box to check it, then click "Next"`)
+            : n3 ? L(`找到 ${n3} 个蛋白区域，右边就是成图。点框检查，好了点"下一步"`, `Found ${pl(n3, 'protein region')}; the figure is on the right. Click a box to check it, then click "Next"`)
             : L('没找到蛋白条带：点"+ 添加一个蛋白框"自己框', 'No protein bands found: click "+ Add a protein box" and draw one yourself'), 4200);
         }, 20);
       });
@@ -1662,11 +1684,11 @@
       msg = L(`有 ${bound.length} 处<b>旧版绑定</b>：点这里解除后，分别选择曝光和亮度`, `${bound.length} <b>legacy combined rows</b>: click to detach and edit exposure and levels separately`);
       coachAct = () => { openStep(3); selectRow(bound[0].id, true); };
     } else if (n === 1) {
-      msg = L('第 1 步：确认每张膜的 <b>Marker 图</b>（相册中标 ★ 的那张），对了就点"确认分组"', 'Step 1: check the <b>marker picture</b> of each membrane (marked ★ in the gallery), then confirm the groups');
+      msg = L('第 1 步：同一拍摄布局的图放一组，再选各组的 <b>Marker 参考图</b>（★），完成后点"确认分组"', 'Step 1: group pictures of the same capture layout, choose each <b>marker reference</b> (★), then confirm');
       coachAct = () => flash('next1');
     } else if (n === 2) {
       const bn = st.blots.length > 1 && esc(App.blotName(App.blot(App.viewBlot)));
-      const many = bn ? L(`（${bn}${pcUnseen() ? '，看完再看下一张膜' : ''}）`, ` (${bn}${pcUnseen() ? ', then the next membrane' : ''})`) : '';
+      const many = bn ? L(`（${bn}${pcUnseen() ? '，看完再看下一组' : ''}）`, ` (${bn}${pcUnseen() ? ', then the next group' : ''})`) : '';
       msg = L(`第 2 步：看<b>蓝框</b>是不是刚好框住每条膜${many}，不对就在图上拖动修改；对了点"下一步"`,
         `Step 2: check that the <b>blue boxes</b> just enclose each strip${many}; drag on the picture to fix them, then click "Next"`);
       coachAct = () => flash('next2');
@@ -1878,7 +1900,7 @@
     toast(L('已导出定量 CSV（用于参考；正式定量请用 ≥3 次独立实验）', 'Exported the densitometry CSV (for reference; quantify from ≥3 independent experiments)'), 3600);
   }
 
-  G.UI = { finishImages: async () => { if(App.reviewReturnStep>=3 && S().blots.every(b=>b.boxesReady)) {await App.ensurePrepared(); S().step=Math.max(S().step,App.reviewReturnStep);App.commit();openStep(App.reviewReturnStep);}else await nextStep(1);}, addFiles, markerPopover, flushPending: async () => { if(edit)closeEd(false);closePop(true);if(App.mode==='pieces'){const b=App.blot(App.viewBlot),pcs=G.View.piecesEnd(true);await new Promise(resolve=>applyPieces(b,pcs,false,resolve));if(App.curStep===2)G.View.piecesStart();}if(S())App.commit();}, toast, editRowName, openEd, markPicker, openStep, nextStep, lastFig: () => lastFig, preflight,
+  G.UI = { focusProtein, finishImages: async () => { if(App.reviewReturnStep>=3 && S().blots.every(b=>b.boxesReady)) {await App.ensurePrepared(); S().step=Math.max(S().step,App.reviewReturnStep);App.commit();openStep(App.reviewReturnStep);}else await nextStep(1);}, addFiles, markerPopover, flushPending: async () => { if(edit)closeEd(false);closePop(true);if(App.mode==='pieces'){const b=App.blot(App.viewBlot),pcs=G.View.piecesEnd(true);await new Promise(resolve=>applyPieces(b,pcs,false,resolve));if(App.curStep===2)G.View.piecesStart();}if(S())App.commit();}, toast, editRowName, openEd, markPicker, openStep, nextStep, lastFig: () => lastFig, preflight,
     piecesChanged: () => { $('stPieces').textContent = L('已修改：切换步骤时保存', 'Changed: saved when switching tools'); } };
 
   const qs = new URLSearchParams(location.search);
@@ -1891,8 +1913,8 @@
     if (!d || S()) return;
     const s = d.summary || {};
     const ni = s.images || '?', nb = s.membranes || '?', names = s.names && s.names.length ? s.names : null;
-    $('draftName').textContent = L(`${ni} 张图 · ${nb} 张膜${s.rows ? ` · ${s.rows} 个蛋白` : ''}${names ? '（' + names.join('、') + '）' : ''}`,
-      `${pl(ni, 'picture')} · ${pl(nb, 'membrane')}${s.rows ? ` · ${pl(s.rows, 'protein')}` : ''}${names ? ' (' + names.join(', ') + ')' : ''}`);
+    $('draftName').textContent = L(`${ni} 张图 · ${nb} 个图片组${s.rows ? ` · ${s.rows} 个蛋白` : ''}${names ? '（' + names.join('、') + '）' : ''}`,
+      `${pl(ni, 'picture')} · ${pl(nb, 'image group')}${s.rows ? ` · ${pl(s.rows, 'protein')}` : ''}${names ? ' (' + names.join(', ') + ')' : ''}`);
     $('draftTime').textContent = L('保存于 ', 'Saved ') + new Date(d.savedAt).toLocaleString(G.I18N && G.I18N.lang === 'en' ? 'en' : 'zh-CN');
     $('draftBox').classList.remove('hidden');
   }

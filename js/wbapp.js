@@ -30,7 +30,7 @@
   }
 
   const App = { images: new Map(), analysis: {}, S: null, hist: [], future: [], listeners: [], selRow: null, selSeg: null, selLane: null, viewBlot: null, viewImg: null, mode: null };
-  App.VERSION = '0.11.0';
+  App.VERSION = '0.12.0';
   App.activeColumn = 'main';
   const columnFields = new Set(['lanes', 'range', 'hiCol', 'groups', 'conditions']);
   App.layoutColumns = () => App.S.layoutColumns || (App.S.layoutColumns = [{ id: 'main', title: '', titleSide: 'top' }]);
@@ -141,7 +141,7 @@
   /* the figure's layout. Text sizes per kind (lane names, marker labels, protein names; null = fontPt); a group
    * label wider than its line wraps ('wrap'), shrinks down to minFontPt ('shrink') or stays ('none') */
   const defaultStyle = () => ({ mmPerLane: 5, fontPt: 7, lineWidthPt: 0.5, labelAngle: 'auto', rowGapPt: 2, blotGapPt: 5,
-    tickLenPt: 2.5, labelGapPt: 2.5, unitHeader: true, showMW: true, panelLetter: '', dpi: 600, invert: true, border: false, mwSide: 'left', nameSide: 'right',
+    tickLenPt: 2.5, labelGapPt: 2.5, unitHeader: true, showMW: true, panelLetter: '', dpi: 600, invert: true, border: true, mwSide: 'left', nameSide: 'right',
     laneNumbers: false, lanePt: null, markerPt: null, namePt: null, groupFit: 'wrap', minFontPt: 5, groupTicks: false,
     columnGapMm: 6, alignColumnRows: false });
   App.defaultStyle = defaultStyle;
@@ -225,9 +225,9 @@
     }
     return s.length > 14 ? s.slice(0, 13) + '…' : s;
   };
-  App.blotName = b => b.name || `${L('膜', 'Membrane')} ${App.S.blots.indexOf(b) + 1}`;
+  App.blotName = b => b.name || `${L('图片组', 'Image group')} ${App.S.blots.indexOf(b) + 1}`;
   // in what leaves the app (uncropped images, CSV, the processing log): English unless the user named it
-  App.blotNameEn = b => b.name || `Membrane ${App.S.blots.indexOf(b) + 1}`;
+  App.blotNameEn = b => b.name || `Image group ${App.S.blots.indexOf(b) + 1}`;
   App.pieceName = (b, pc) => (App.S.blots.length > 1 ? App.blotName(b) + ' · ' : '') + L('膜条 ', 'strip ') + (pc.letter || '?');
   App.rowLabel = row => { const k = App.rowKda(row); return row.name || (k ? L(`≈${Math.round(k)} kDa 行`, `≈${Math.round(k)} kDa row`) : L('未命名行', 'Unnamed row')); };
 
@@ -712,7 +712,7 @@
     // the white-light photo as taken, with where it lies on the grid (strips and ladder are read from it unresampled)
     const al = mk && App.alignOf(mk.id), mPcs = al && al.pieces ? (blot.pieces || []).filter(p => al.pieces[p.id]).map(p => ({ cx: p.cx, cy: p.cy, angle: p.angle, w: p.w, h: p.h, T: al.pieces[p.id] })) : [];
     const A = WB.analyzeSession(ch.map(r => ({ id: r.id, img: r.img, exposure: r.exposure, cs: r.cs })), mk && { id: mk.id, img: (mk.raw || mk).img, T: al ? { a: al.a, tx: al.tx, ty: al.ty } : null, pieces: mPcs },
-      { noCalib: true, autoMarkerLanes: false, laneCount: (blot.boxesReady ? blot.laneCountAtDetection : App.S.defaultLaneCount) || null, outlinesOnly: App.S.step < 3 && !App.S.rows.some(r => r.blot === blot.id), noChemiCheck: !!App.devNoChemi, strips: blot.userStrips || null });
+      { noCalib: true, autoMarkerLanes: false, dividerLane:blot.dividerLane||null, laneCount: (blot.boxesReady ? blot.laneCountAtDetection : App.S.defaultLaneCount) || null, outlinesOnly: App.S.step < 3 && !App.S.rows.some(r => r.blot === blot.id), noChemiCheck: !!App.devNoChemi, strips: blot.userStrips || null });
     blot.laneCountAtDetection=(blot.boxesReady ? blot.laneCountAtDetection : App.S.defaultLaneCount)||null;
     A.chemiIds = ch.map(r => r.id);
     A.H = (ch[0] || mk).img.h;
@@ -758,12 +758,12 @@
     const weak = r => { const best = r.expo[r.choice]; return !best || best.snr < 6; };
     return A.rows.map(r => {
       const isWeak = weak(r);
-      const row = { id: uid('r'), blot: blot.id, name: '', img: A.chemiIds[r.choice], auto: true, hidden: false, weak: isWeak, segs: [], above: r.above, below: r.below };
+      const row = { id: uid('r'), blot: blot.id, name: '', img: A.chemiIds[r.choice], auto: true, hidden: false, weak: isWeak, partialBlock:!!r.partialBlock, segs: [], above: r.above, below: r.below };
       r.segs.forEach(s => {
         const pc = pcs[s.region], lat = latticeLanes(pc, -Infinity, Infinity);
-        const sg = { piece: pc.id, vc: s.vc, b0: s.b0, b1: s.b1, lanes: lat.lanes, c0: lat.c0, p: lat.p, x0: -pc.w / 2, x1: pc.w / 2 };
+        const sg = { piece: pc.id, vc: s.vc, b0: s.b0, b1: s.b1, lanes: lat.lanes, c0: lat.c0, p: lat.p, x0: s.x0 ?? -pc.w / 2, x1: s.x1 ?? pc.w / 2 };
         // a piece without lanes of its own in the analysis: read them from the row's box
-        if(App.S.defaultLaneCount){sg.lanes=[];sg.c0=1;sg.laneCount=App.S.defaultLaneCount;App.redetectBox(row,sg);}
+        if(App.S.defaultLaneCount){sg.lanes=[];sg.c0=1;sg.laneCount=s.laneCount||App.S.defaultLaneCount;App.redetectBox(row,sg);}
         else if (!sg.lanes.length) App.redetectBox(row, sg);
         App.snapBox(sg);
         row.segs.push(sg);
@@ -1781,8 +1781,8 @@
       legend.push('Bands shown in separate rows were detected on different membranes processed in parallel; each row is an individual crop.');
       const loadBlots = new Set(vis.filter(App.isLoading).map(r => r.blot));
       if (loadBlots.size) blotsUsed.forEach(bid => {
-        if (!loadBlots.has(bid) && vis.some(r => r.blot === bid)) warn.push(L(`${App.blotName(App.blot(bid))} 上的蛋白没有同膜内参（期刊要求内参与目标蛋白在同一张膜上）`,
-          `Proteins on ${App.blotName(App.blot(bid))} have no loading control on the same membrane (journals expect the loading control on the same membrane as the target protein)`));
+        if (!loadBlots.has(bid) && vis.some(r => r.blot === bid)) warn.push(L(`${App.blotName(App.blot(bid))} 未标记内参；请核对目标蛋白与内参是否来自同一张物理膜（图片分组不能证明这一点）`,
+          `Proteins on ${App.blotName(App.blot(bid))} have no marked loading control; verify that target and control came from the same physical membrane (image grouping does not establish this)`));
       });
     }
     // membranes whose figure rows show sizes
@@ -1907,7 +1907,7 @@
           levels: S.levels[r.id] ? { black: S.levels[r.id].black, white: S.levels[r.id].white, manual: !!S.levels[r.id].manual, note: 'linear whole-image stretch; fractions of full scale' } : undefined };
       }),
       membranes: S.blots.map(b => ({ name: App.blotNameEn(b), markerPicture: (App.markerRec(b) || {}).name || null, ladder: (G.ProteinLadders.get(b.ladderId) || {}).name || null,
-        piecesSetByHand: !!b.userStrips, laneCountAtDetection: b.laneCountAtDetection || null,
+        piecesSetByHand: !!b.userStrips, manuallyExcludedDividerLane:b.dividerLane||null, laneCountAtDetection: b.laneCountAtDetection || null,
         pieces: (b.pieces || []).map(pc => ({ letter: pc.letter, centrePx: [r1(pc.cx), r1(pc.cy)], angleDeg: pc.angle, sizePx: [r1(pc.w), r1(pc.h)],
           markerMarks: (pc.marks || []).filter(m => m.kda > 0).map(m => ({ id: App.markerId(m), kDa: m.kda, vPx: r1(m.v) })) })) })),
       rows: S.rows.map(r => {

@@ -597,3 +597,14 @@ html[lang=en] .sec.step.reach .sec-head::after { content: "Continue →"; }
 .lane-default > label { display:block; font-size:12px; font-weight:600; }
 .lane-default .field { margin:6px 0; }
 .lane-default.compact { margin-top:8px; }
+
+/* The whole image-group card is a keyboard-accessible review target. */
+button.pc-blot { width:100%; text-align:left; font:inherit; cursor:pointer; color:inherit; }
+button.pc-blot:hover { border-color:var(--accent,#2f6feb); background:#f3f7ff; }
+button.pc-blot:focus-visible { outline:2px solid #2f6feb; outline-offset:2px; }
+.pc-status { color:#61728b; font-size:11px; margin-left:auto; }
+
+.group-guide { border:1px solid #d8e5f4; background:#f4f8fe; border-radius:10px; padding:12px 14px; margin:12px 0; line-height:1.55; font-size:12px; color:#3b5069; }
+.group-guide b { color:#24466f; font-size:13px; }
+.group-guide p { margin:6px 0; }
+.group-guide span { display:block; color:#5b6d83; }

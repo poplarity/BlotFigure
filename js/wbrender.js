@@ -50,7 +50,12 @@
   // ---- multi-line labels (as GelFigure) ----
   const LEAD = 1.18;   // line spacing, × font size
   // lines whose last baseline is y (they stack upwards from the line they label)
-  const textLines = (lines, x, y, pt, anchor, extra) => lines.map((t, i) => text(t, x, y - (lines.length - 1 - i) * pt * LEAD, pt, anchor, extra)).join('');
+  const textLines = (lines, x, y, pt, anchor, extra) => '<g data-pptx-lines="1">' + lines.map((t, i) => text(t, x, y - (lines.length - 1 - i) * pt * LEAD, pt, anchor, extra)).join('') + '</g>';
+  function vertical(t, pt) {
+    mctx.font = `${pt * 4}px Arial`;
+    const m=mctx.measureText(t);
+    return {ascent:(m.fontBoundingBoxAscent || m.actualBoundingBoxAscent || pt*3.8)/4, descent:(m.fontBoundingBoxDescent || m.actualBoundingBoxDescent || pt*.8)/4};
+  }
   /* a label broken into lines no wider than maxW; typed breaks (\n) kept. Chinese / Japanese characters break
    * anywhere, other words after a space, "-" or "/"; *italic* runs closed at a line end and reopened */
   const CJK = '\\u2E80-\\u9FFF\\uF900-\\uFAFF\\uFF00-\\uFFEF\\u3000-\\u303F';
@@ -80,7 +85,7 @@
     return best;
   }
 
-  function buildSingle(preview, column, slots) {
+  function buildSingle(preview, column, slots, forPPT) {
     usedMin = Infinity;
     const S = App.columnState(column.id), st = S.style, pt = st.fontPt, lw = st.lineWidthPt, P = !!preview;
     // per-kind sizes (null = the figure font)
@@ -104,7 +109,7 @@
     const mwRight = st.mwSide === 'right', nameLeft = st.nameSide === 'left';
     const rows = C.rows, rowNames = [], ticksOut = [], arrowsOut = [];
     let y = 0, prevBlot = null, maxLeft = 0, maxRight = 0, tickLabW = 0;
-    const rowBoxes = [];   // the kDa header sits just above the first row
+    const rowBoxes = [], exportSlices = [];   // the kDa header sits just above the first row
     rows.forEach((row, ri) => {
       if (slots) y = slots[ri];
       else if (prevBlot !== null) y += row.blot === prevBlot ? st.rowGapPt : st.blotGapPt;
@@ -118,14 +123,16 @@
         let cur = null;
         const flush = () => {
           if (!cur) return;
-          const ras = App.runRaster(row, cur.sg, cur.pc, cur.i0, cur.i1, step);
+          const ras = forPPT ? {href:""} : App.runRaster(row, cur.sg, cur.pc, cur.i0, cur.i1, step);
+          const imageId = row.id+"_"+App.boxId(cur.sg)+"_"+cur.i0+"_"+cur.i1;
+          if(forPPT)exportSlices.push({id:imageId,row,sg:cur.sg,pc:cur.pc,i0:cur.i0,i1:cur.i1});
           const left = srcOf.get(cur.j0 - 1), right = srcOf.get(cur.j0 + cur.i1 - cur.i0 + 1);
           const gL = left && (left.sg !== cur.sg || left.i !== cur.i0 - 1) ? gap / 2 : 0;
           const gR = right && (right.sg !== cur.sg || right.i !== cur.i1 + 1) ? gap / 2 : 0;
           const x0 = X.get(cur.j0) - laneW / 2 + gL, w = (cur.i1 - cur.i0 + 1) * laneW - gL - gR;
           const iy = y + (row.above - App.boxAbove(row, cur.sg)) * sc, ih = (App.boxAbove(row, cur.sg) + App.boxBelow(row, cur.sg)) * sc;
           const tag = P ? `data-column="${column.id}" data-row="${row.id}" data-piece="${cur.sg.piece}" data-box="${App.boxId(cur.sg)}" ` : '';
-          els.push(`<image ${tag}x="${f(x0)}" y="${f(iy)}" width="${f(w)}" height="${f(ih)}" preserveAspectRatio="none" href="${ras.href}" xlink:href="${ras.href}"/>`);
+          els.push(`<image ${forPPT?`data-pptx-image="${imageId}" `:""}${tag}x="${f(x0)}" y="${f(iy)}" width="${f(w)}" height="${f(ih)}" preserveAspectRatio="none" href="${ras.href}" xlink:href="${ras.href}"/>`);
           if (st.border) els.push(`<rect ${tag}x="${f(x0)}" y="${f(iy)}" width="${f(w)}" height="${f(ih)}" fill="none" stroke="#000" stroke-width="${f(lw)}" pointer-events="none"/>`);
           cur = null;
         };
@@ -183,7 +190,9 @@
       grow(mwRight ? W : tx - tickLabW, t.y - height / 2, mwRight ? tx + tickLabW : 0, t.y + height / 2);
       previous = { y: t.y, height };
     });
-    const scaleW = ticksOut.length ? st.tickLenPt + 2.5 + tickLabW : 0;
+    const hasUnit = st.showMW && st.unitHeader && ticksOut.length > 0;
+    const unitText = '(kDa)', unitY = Math.min((rowBoxes[0]?.y || 0) + mp + 1, ...ticksOut.map(t=>t.y-mp*1.2));
+    const scaleW = ticksOut.length ? st.tickLenPt + 2.5 + Math.max(tickLabW,hasUnit?measure(unitText,mp):0) : 0;
     if (mwRight) maxRight = scaleW; else maxLeft = scaleW;
     const scaleOn = right => (right === mwRight && scaleW ? scaleW + 2 : 0), arrowW = { left: 0, right: 0 };
     arrowsOut.forEach(t => {
@@ -272,6 +281,15 @@
       yTop -= lp * 1.25;
     }
     const conds = S.conditions.map((c, r) => Object.assign({ r }, c)).filter(c => P || c.name || c.values.some(v => v));
+    // Same compact placement as GelFigure: units sit beside the bands, independently
+    // of lane names. Only a real collision with the condition names lifts that table.
+    if(hasUnit && !mwRight && conds.length) {
+      const headerTop=unitY-vertical(unitText,mp).ascent;
+      let cy=yTop,shift=0;
+      for(let k=conds.length-1;k>=0;k--){const c=conds[k],cp=c.pt||pt,nm=c.name||(P?L('条件','Condition'):'');
+        if(nm)shift=Math.max(shift,cy+vertical(nm,cp).descent+.5+Math.max(mp,cp)/8-headerTop);cy-=cp*1.3;}
+      yTop-=shift;
+    }
     for (let k = conds.length - 1; k >= 0; k--) {
       const c = conds[k], cp = c.pt || pt;
       lanes.forEach(j => {
@@ -285,7 +303,6 @@
     // placeholders count the lanes shown (hidden ladder lanes skipped), the order bulk paste fills them in (with the
     // lane numbers printed: a dot, not the number twice)
     const names = lanes.map((j, i) => S.lanes[j - 1].name || (P ? (st.laneNumbers ? '·' : String(i + 1)) : ''));
-    const unitY = yTop;
     let angle = 0;
     if (names.some(t => t)) {
       const maxW = Math.max(...names.map(t => measure(t, lp)));
@@ -308,10 +325,10 @@
       if (angle === 0 && st.labelAngle !== 'auto' && named.length && Math.max(...named) > laneW * 1.02) overlap(L('水平的泳道名互相重叠：改用"自动"或倾斜角度，或减小字号', 'Horizontal lane names overlap: use "Auto" or a tilted angle, or a smaller font size'));
       yTop -= angle === 0 ? lp * 1.3 : hMax + lp * 0.35;
     }
-    // kDa header aligned with the lane-label row
-    if (st.showMW && st.unitHeader && scaleW > 0) {
-      if (mwRight) { els.push(text('kDa', W + st.tickLenPt + 2.5, unitY, mp, 'start')); grow(W, unitY - mp, W + st.tickLenPt + 2.5 + measure('kDa', mp), unitY); }
-      else { els.push(text('kDa', -st.tickLenPt - 2.5, unitY, mp, 'end')); grow(-st.tickLenPt - 2.5 - measure('kDa', mp), unitY - mp, 0, unitY); }
+    if (hasUnit) {
+      const ux=mwRight?W+st.tickLenPt+2.5:-st.tickLenPt-2.5;
+      els.push(`<g data-unit-header="1">${text(unitText,ux,unitY,mp,mwRight?'start':'end')}</g>`);
+      grow(mwRight?W:ux-measure(unitText,mp),unitY-mp*1.2,mwRight?ux+measure(unitText,mp):0,unitY+mp*.3);
     }
     /* groups: a line over the lanes (one piece per run of neighbouring columns: a group line never bridges a white
      * gap) and its text above; a text wider than its line is wrapped (default), shrunk (not below minFontPt) or
@@ -367,11 +384,11 @@
     const m = 2, vx = box.x0 - m, vy = box.y0 - m, vw = box.x1 - box.x0 + 2 * m, vh = box.y1 - box.y0 + 2 * m;
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${f(vw / MM)}mm" height="${f(vh / MM)}mm" viewBox="${f(vx)} ${f(vy)} ${f(vw)} ${f(vh)}" font-family="Arial, Helvetica, sans-serif" fill="#000">` +
       `<rect x="${f(vx)}" y="${f(vy)}" width="${f(vw)}" height="${f(vh)}" fill="#fff"/>` + els.join('') + '</svg>';
-    return { svg, content: els.join(''), markerFit, vx, vy, w: vw, h: vh, warnings, overlaps, angle, rowBoxes, laneX: X, laneW, figW: W, minPt: usedMin === Infinity ? pt : usedMin };
+    return { exportSlices, svg, content: els.join(''), markerFit, vx, vy, w: vw, h: vh, warnings, overlaps, angle, rowBoxes, laneX: X, laneW, figW: W, minPt: usedMin === Infinity ? pt : usedMin };
   }
 
   // A column is an independent lane grid. Composition changes position only, never image data.
-  function build(preview) {
+  function build(preview, forPPT) {
     const cs = App.layoutColumns().filter(c => preview || App.rowsInColumn(c.id).some(r => !r.hidden));
     let slots = null;
     if (App.S.style.alignColumnRows && cs.length > 1) {
@@ -383,7 +400,7 @@
       let y = 0; slots = heights.map((h, i) => { y += gaps[i]; const top = y; y += h; return top; });
     }
     const parts = cs.map(c => {
-      let p = buildSingle(preview, c, slots);
+      let p = buildSingle(preview, c, slots, forPPT);
       if (!p.rowBoxes?.length && preview) {
         const w = 75, h = 40;
         p = { ...p, vx: 0, vy: -12, w, h: h + 12, figW: w, rowBoxes: [], laneX: new Map(), laneW: App.S.style.mmPerLane * MM,
@@ -408,7 +425,7 @@
     });
     const w = x - gap, h = bottom - top;
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${f(w / MM)}mm" height="${f(h / MM)}mm" viewBox="0 ${f(top)} ${f(w)} ${f(h)}" font-family="Arial, Helvetica, sans-serif" fill="#000"><rect x="0" y="${f(top)}" width="${f(w)}" height="${f(h)}" fill="#fff"/>${content.join('')}</svg>`;
-    return { svg, w, h, rowBoxes, columnBoxes, laneX: columnBoxes.find(c => c.id === App.activeColumn)?.laneX || new Map(), laneW: App.S.style.mmPerLane * MM, figW: w,
+    return { exportSlices:parts.flatMap(o=>o.p.exportSlices||[]), svg, w, h, rowBoxes, columnBoxes, laneX: columnBoxes.find(c => c.id === App.activeColumn)?.laneX || new Map(), laneW: App.S.style.mmPerLane * MM, figW: w,
       markerFit: Math.min(...parts.map(o => o.p.markerFit ?? Infinity)), warnings: parts.flatMap(o => o.p.warnings), overlaps: parts.flatMap(o => o.p.overlaps), minPt: Math.min(...parts.map(o => o.p.minPt)), angle: parts[0].p.angle };
   }
 

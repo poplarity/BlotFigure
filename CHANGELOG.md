@@ -4,6 +4,24 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-23
+
+Clear image groups, reliable step navigation, independent lane blocks and editable PowerPoint export.
+
+**中文摘要**
+- 第一步改为「分组与 Marker 参考图」，默认「图片组 1、2」。相册直接说明分组用途、判断原则和例子：同一拍摄布局的曝光与参考图放一组；不按蛋白名或曝光强弱分组，一组可包含多条膜。
+- 确认图片后从第一组检查膜条；整张分组卡片支持鼠标和键盘点击。生成或点击蛋白框会展开第 3 栏并显示对应设置，收起上一步；已有框和几何保留。
+- 新项目默认添加条带边框，旧项目的手动选择保留。kDa 标题参考 GelFigure，固定在条带旁，按字体占用避开条件表。
+- 预设泳道数不再将整条宽膜压成一个框：识别多个独立区域，分别选曝光与亮度，上下排列。中间 Marker 可手动指定序号，例如每框 4 道、分隔第 5 道 → 左右各一框。未指定时保留余道候选，不把弱信号自动当作 Marker 删除。
+- 新增完全离线的可编辑 PPTX：文字、刻度、线条、边框为原生对象，各蛋白图片独立保留完整的旋转和色阶处理后图像，PowerPoint「图片格式 → 裁剪」可恢复裁切。不是原始 TIFF；裁切改变后标注不会自动跟随。
+
+### Added / fixed
+- Capture-based image groups with visible rationale/examples, full-card strip review, first-group entry, and automatic protein-control expansion.
+- Default borders for new projects and compact marker-unit headings with measured clearance from condition names.
+- Multiple count-constrained regions per wide strip; an optional explicitly identified divider, with uncertain remaining lanes retained. Each region selects exposure independently.
+- Dependency-free PPTX adapted from GelFigure: native editable annotations, multiple full-source pictures with native crops, source deduplication and offline single-HTML support.
+- Real-click workflow, known-coordinate 9-lane split, typography, ZIP/XML and offline PPT tests; Windows PowerPoint open/edit/recrop/save validation. macOS PowerPoint, Keynote and WPS need separate validation.
+
 ## [0.11.0] - 2026-10-23
 
 Count-constrained lane positioning and source-crop fixes.
