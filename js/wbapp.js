@@ -30,7 +30,7 @@
   }
 
   const App = { images: new Map(), analysis: {}, S: null, hist: [], future: [], listeners: [], selRow: null, selSeg: null, selLane: null, viewBlot: null, viewImg: null, mode: null };
-  App.VERSION = '0.12.0';
+  App.VERSION = '0.12.1';
   App.activeColumn = 'main';
   const columnFields = new Set(['lanes', 'range', 'hiCol', 'groups', 'conditions']);
   App.layoutColumns = () => App.S.layoutColumns || (App.S.layoutColumns = [{ id: 'main', title: '', titleSide: 'top' }]);
@@ -755,7 +755,7 @@
     if (!A) return [];
     const pcs = blot.pieces;
     // Source lanes are local to each membrane; the figure's display range never trims them.
-    const weak = r => { const best = r.expo[r.choice]; return !best || best.snr < 6; };
+    const weak = r => { const best = r.expo[r.choice]; return r.weakCandidate || !best || best.snr < 6; };
     return A.rows.map(r => {
       const isWeak = weak(r);
       const row = { id: uid('r'), blot: blot.id, name: '', img: A.chemiIds[r.choice], auto: true, hidden: false, weak: isWeak, partialBlock:!!r.partialBlock, segs: [], above: r.above, below: r.below };
@@ -763,7 +763,8 @@
         const pc = pcs[s.region], lat = latticeLanes(pc, -Infinity, Infinity);
         const sg = { piece: pc.id, vc: s.vc, b0: s.b0, b1: s.b1, lanes: lat.lanes, c0: lat.c0, p: lat.p, x0: s.x0 ?? -pc.w / 2, x1: s.x1 ?? pc.w / 2 };
         // a piece without lanes of its own in the analysis: read them from the row's box
-        if(App.S.defaultLaneCount){sg.lanes=[];sg.c0=1;sg.laneCount=s.laneCount||App.S.defaultLaneCount;App.redetectBox(row,sg);}
+        if(s.signalLanes){sg.lanes=s.signalLanes.map(u=>({u,r:'s'}));sg.c0=1;sg.laneCount=s.laneCount;sg.p=s.signalPitch;}
+        else if(App.S.defaultLaneCount){sg.lanes=[];sg.c0=1;sg.laneCount=s.laneCount||App.S.defaultLaneCount;App.redetectBox(row,sg);}
         else if (!sg.lanes.length) App.redetectBox(row, sg);
         App.snapBox(sg);
         row.segs.push(sg);
@@ -1674,6 +1675,24 @@
       b.boxesReady = true;
       App.S.rows.filter(r => r.blot === b.id && !old.has(r.id)).forEach(r => r.segs.forEach(sg => App.levelBox(r, sg)));
     });
+  };
+  // Explicit repeatable detection. Ordinary navigation still preserves edited boxes.
+  // One commit by the caller makes replacement undoable; a failed analysis is atomic.
+  App.rebuildBoxes = function (ids, outlines) {
+    const targets=new Set(ids || App.S.blots.map(b=>b.id)), before=JSON.stringify(App.S), analyses={...App.analysis};
+    const factors=new Map([...App.images].map(([id,r])=>[id,r.factor]));
+    try {
+      App.S.step=Math.max(App.S.step,3);
+      const columns=App.layoutColumns().filter(c=>App.rowsInColumn(c.id).every(r=>targets.has(r.blot))).map(c=>c.id);
+      for(const b of App.S.blots.filter(b=>targets.has(b.id))){
+        if(outlines && Object.hasOwn(outlines,b.id))App.setPieces(b,outlines[b.id]);
+        App.reanalyze(b,{fresh:true});
+        App.S.rows.filter(r=>r.blot===b.id).forEach(r=>r.segs.forEach(s=>App.levelBox(r,s)));
+      }
+      columns.forEach(id=>App.fitLanes(true,id));
+      if(App.selRow&&!App.row(App.selRow)){App.selRow=null;App.selSeg=null;App.selLane=null;}
+      return App.S.rows.filter(r=>targets.has(r.blot)).length;
+    }catch(e){App.S=JSON.parse(before);App.analysis=analyses;App.images.forEach((r,id)=>{r.factor=factors.get(id);});App.syncAlign();throw e;}
   };
   // the box a click on the membrane adds (step 3), in the frame of piece pc: as wide and high as the other boxes on
   // that piece (else about six lanes and a band with room around it), centred at (u, v)

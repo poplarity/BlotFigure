@@ -4,6 +4,22 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-10-23
+
+Fix over-segmentation with small lane counts and make strip-stage detection repeatable.
+
+**中文摘要**
+- 修复「每框 2 道」把全膜网格按每个候选高度机械铺满的问题。宽膜先按局部水平信号形成区域，再约束泳道数；不再给空白网格生成框，不把同一条带的主峰、双带和拖尾重复框选。
+- 新区域直接保留支持它的泳道中心，避免随后再次拟合跳到半条宽带或其他区域。各区域仍独立选曝光，弱候选显示供人工核对；自动检测不推断蛋白身份，也不修改源图片。
+- 检查膜条可反复修改膜框、泳道数与分隔参数，点击「按当前设置重新识别本组蛋白框」。上方操作栏也提供同一入口；「保留已有框，返回编辑」是单独动作。
+- 修复完成步骤后按钮被样式隐藏的问题。重新识别只替换本组，Ctrl+Z 恢复原框；删光后仍可生成；识别失败保留原状态。
+- 用用户提供的三张 TIFF 在本地复现 36 框问题，并验证修正后主要区域与条带对应。真实图片不进入仓库。新增含空白、窄边伪影、不同高度蛋白的合成测试与重复识别点击测试。
+
+### Fixed
+- Count-constrained regions require local signal support instead of tiling a membrane-wide lattice at every detected height.
+- Preserve supported lane centres, refine each region's own band height and reconcile nearby duplicate detections while retaining vertically separate proteins.
+- Explicit per-group redetection in the strip-review step, completed-step button visibility, keep-vs-regenerate actions, undo, empty-group recovery and atomic failure handling.
+
 ## [0.12.0] - 2026-10-23
 
 Clear image groups, reliable step navigation, independent lane blocks and editable PowerPoint export.

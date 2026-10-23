@@ -1,6 +1,6 @@
 {
   "name": "blotfigure",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "private": true,
   "description": "Turn the raw pictures of a Western blot experiment into a publication-ready figure in the browser. The app itself has no dependencies; this file only installs the test runner.",
   "license": "MIT",

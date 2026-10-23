@@ -74,7 +74,8 @@
       $('vmNone').onclick = () => { G.View.alignEnd(); App.setAlign(id, null); App.commit(); G.View.alignStart(id); toast(L('这张图按原样使用（不移动）', 'This picture is used as taken (not moved)')); };
     }
     if (m === 'pieces') {
-      $('vmPcNext').onclick = () => S().step>2 ? openStep(S().step) : nextStep(2);
+      $('vmPcNext').onclick = () => vb?.boxesReady ? rebuildGroup() : nextStep(2);
+      if(vb?.boxesReady)$('vmPcNext').textContent=L('重新识别本组 →','Detect this group again →');
       if(S().step>2)$('vmPcNext').textContent=L('完成，返回成图','Done, return to figure');
       if ($('vmPcAuto')) $('vmPcAuto').onclick = () => { G.View.piecesEnd(false); applyPieces(vb, null, true); };
     }
@@ -491,8 +492,11 @@
       applyPieces(from, App.curStep === 2 ? G.View.piecesEnd(true) : null, false, () => { App.curStep=2; openSteps.clear(); openSteps.add(2); startPieces(to); renderSteps(); updateCoach(); });
     });
     const nAll = st.blots.reduce((s, b) => s + (b.pieces || []).length, 0);
+    const ready=!!App.blot(App.viewBlot)?.boxesReady;
+    $('rebuildGroupTools').classList.toggle('hidden',!ready);
+    $('next2').classList.toggle('primary',!ready);
     $('stPieces').textContent = L(`${nAll} 条膜条`, pl(nAll, 'strip'));
-    $('next2').textContent = App.curStep === 2 && pcUnseen() ? L('这组膜条对了，看下一组 →', 'This group is right. Next group →')
+    $('next2').textContent = ready ? L('保留已有框，返回编辑 →','Keep existing boxes, return to editing →') : App.curStep === 2 && pcUnseen() ? L('这组膜条对了，看下一组 →', 'This group is right. Next group →')
       : st.rows.length ? L('膜条对了，回到蛋白框 →', 'Strips are right. Back to the protein boxes →') : L('膜条对了，下一步：生成蛋白框 →', 'Strips are right. Next: protein boxes →');
     $('sum2').innerHTML = st.blots.map(b => {
       const np = (b.pieces || []).length;
@@ -842,14 +846,27 @@
     $('protList').innerHTML = [...new Set(sug.concat(used, base))].map(n => `<option value="${esc(n)}">`).join('');
   }
   $('btnAddRow').onclick = () => { if (!S()) return; App.setMode(App.mode === 'addrow' ? null : 'addrow'); };
+  function rebuildGroup() {
+    const b=App.blot(App.viewBlot);if(!b)return;
+    const pieces=App.mode==='pieces'?G.View.piecesEnd(true):null;
+    if(App.mode)App.setMode(null);
+    runDetection([b.id],pieces?{[b.id]:pieces}:null);
+  }
+  $('btnRebuildGroup').onclick=rebuildGroup;
+  function runDetection(ids,outlines) {
+    App.busy(true,L('按当前设置重新识别…','Detecting with the current settings…'));
+    setTimeout(()=>{
+      try{
+        const n=App.rebuildBoxes(ids,outlines);focusProtein();App.viewImg=null;App.commit();G.View.fitFull();goTo('secRows');
+        toast(L(`已重新识别 ${n} 个蛋白区域（Ctrl+Z 恢复原来的框）`,`Detected ${n} protein regions again (Ctrl+Z restores the previous boxes)`),4500);
+      }catch(e){App.emit('change');if(App.curStep===2)startPieces(App.blot(App.viewBlot));toast(L('重新识别失败，原来的框已保留：','Detection failed; previous boxes retained: ')+e.message,5500);}
+      finally{App.busy(false);}
+    },20);
+  }
   $('btnRedetect').onclick = () => {
     if (!S() || !confirm(L('按膜条重新识别所有蛋白框？\n现在调过的框、行的顺序和名字都会丢掉（Ctrl+Z 可撤销）。',
       'Detect every protein box again from the strips?\nThe boxes as adjusted, the row order and the names are lost (Ctrl+Z to undo).'))) return;
-    App.busy(true, L('重新识别…', 'Detecting…'));
-    setTimeout(() => {
-      S().blots.forEach(b => { App.reanalyze(b, { fresh: true }); S().rows.filter(r => r.blot === b.id).forEach(r => r.segs.forEach(sg => App.levelBox(r, sg))); });
-      App.busy(false); App.commit(); toast(L('已重新识别所有蛋白框（Ctrl+Z 可撤销）', 'Detected every protein box again (Ctrl+Z to undo)'));
-    }, 20);
+    runDetection(S().blots.map(b=>b.id));
   };
 
   /* ---------- 3 lanes ---------- */
@@ -1621,6 +1638,11 @@
     }
     if (n === 2) {
       const b = App.blot(App.viewBlot) || st.blots[0], pcs = App.mode === 'pieces' ? G.View.piecesEnd(true) : null;
+      if(b.boxesReady){
+        if(App.mode==='pieces')App.setMode(null);
+        applyPieces(b,pcs,false,()=>{focusProtein();App.viewImg=null;App.commit();G.View.fitFull();goTo('secRows');});
+        return;
+      }
       // a membrane whose pieces were not looked at yet: that one first
       const more = pcUnseen();
       if (more) {

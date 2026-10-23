@@ -4,7 +4,7 @@
 
 **把一次 Western blot 实验的原始图片做成可投稿的成图 —— 在浏览器里完成，离线可用。**
 
-[**下载单文件 HTML**](https://github.com/poplarity/BlotFigure/releases/download/v0.12.0/BlotFigure-v0.12.0.html) · [在线使用](https://poplarity.github.io/BlotFigure/) · [English](README.md)
+[**下载单文件 HTML**](https://github.com/poplarity/BlotFigure/releases/download/v0.12.1/BlotFigure-v0.12.1.html) · [在线使用](https://poplarity.github.io/BlotFigure/) · [English](README.md)
 
 [![CI](https://github.com/poplarity/BlotFigure/actions/workflows/ci.yml/badge.svg)](https://github.com/poplarity/BlotFigure/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -17,13 +17,13 @@
 
 **只需下载一个文件，用浏览器打开就能做图。不用安装、不用解压，也不用注册 GitHub。**
 
-1. **[点击下载 BlotFigure-v0.12.0.html](https://github.com/poplarity/BlotFigure/releases/download/v0.12.0/BlotFigure-v0.12.0.html)**，约 800 KB，保存到桌面或"下载"文件夹。
+1. **[点击下载 BlotFigure-v0.12.1.html](https://github.com/poplarity/BlotFigure/releases/download/v0.12.1/BlotFigure-v0.12.1.html)**，约 800 KB，保存到桌面或"下载"文件夹。
 2. **双击刚下载的文件。** 它会在浏览器中打开；如果打开的是记事本等软件，右键文件 → **打开方式** → 选择 Firefox、Chrome、Edge 或 Safari。
 3. **把一次实验的全部图片拖进去**：每张膜的各次曝光，加上一张看得见 Marker 的图（白光图，或白光 + 化学发光的复合图）。然后按左边的 5 步走，最后点 **导出 PNG**。
 
 这一个 HTML 文件已经包含完整界面和处理功能。保存后可以断网使用，也可以把同一个文件直接发给同事。
 
-**认准文件名：** 下载的是 **BlotFigure-v0.12.0.html**，不是仓库里的 **index.html**，也不是 **Source code (zip)** 或 **Source code (tar.gz)**。如果进入了[版本下载页](https://github.com/poplarity/BlotFigure/releases/latest)，展开 **Assets（附件）**，只点结尾为 **.html** 的文件即可。
+**认准文件名：** 下载的是 **BlotFigure-v0.12.1.html**，不是仓库里的 **index.html**，也不是 **Source code (zip)** 或 **Source code (tar.gz)**。如果进入了[版本下载页](https://github.com/poplarity/BlotFigure/releases/latest)，展开 **Assets（附件）**，只点结尾为 **.html** 的文件即可。
 
 **下次接着做：** 关闭前点 **文件 → 保存项目**（Ctrl+S）。得到的 **.blotfig** 项目文件包含全部图片和所有调整，下次用 BlotFigure 打开即可继续，换电脑也行。
 
@@ -85,13 +85,17 @@
 
 ## 先指定泳道数
 
-第 2 步生成蛋白框之前，填写「每个蛋白框的泳道数」。填写每个成图区域的道数，框内空道也计数；较宽的膜会生成多个独立区域。中间是 Marker 时，可在「中间有分隔用的 Marker？」填写其序号，例如每框 4 道、分隔第 5 道生成左右两个框。未指定时余道保留为候选，不会自动删除。留空则自动计数。
+第 2 步生成蛋白框之前，填写「每个蛋白框的泳道数」。填写每个成图区域的道数，框内空道也计数；较宽的膜会生成多个独立区域。中间是 Marker 时，可在「中间有分隔用的 Marker？」填写其序号，例如每框 4 道、分隔第 5 道生成左右两个框。未指定时按局部条带分区，不会把全膜网格按指定条数机械拆开。留空则自动计数。
 
 第 3 步新增框沿用默认数量；不同的框可单独修改。修改默认数量不会改动已有框，需要时点「统一已有框的条数」。清空全部框再添加，会自动恢复新框所需的完整预览范围。
 
 <img src="docs/lane-count.png" alt="生成蛋白框前指定泳道数" width="900">
 
 ## 五个步骤
+
+需要重做自动识别时，展开「检查膜条」，调整蓝框和泳道数，再点「按当前设置重新识别本组蛋白框」。这会替换本组框及编辑，可 Ctrl+Z 恢复；只想回去看看或改膜框而保留蛋白框，用「保留已有框，返回编辑」。
+
+<img src="docs/redetect.png" alt="返回检查膜条后重新识别本组" width="900">
 
 新实验先按顺序确认；之后用各栏的「展开／收起」直接切换工具，修改会保留，无需重新走流程。「添加蛋白框」在第 3 栏顶部；选中蛋白框后按退格只删这个框，编辑文字时正常删字。
 
@@ -130,7 +134,7 @@
 
 ## 版本
 
-当前版本 **0.12.0**：明确图片分组原则，修复步骤展开和选框联动；条带默认加边框，kDa 避开条件表。支持宽膜内生成多个独立的指定泳道数区域，以及 [可编辑、可恢复裁切的 PowerPoint 导出](docs/pptx.md)。详见[更新记录](CHANGELOG.md)。
+当前版本 **0.12.1**：修复小泳道数造成大量空白、重叠候选框的问题。检查膜条可修改参数后直接「重新识别本组」，也可选择保留原框返回；重跑可撤销，其他组不变。保留 [可编辑 PPT 导出](docs/pptx.md) 等已有功能。详见[更新记录](CHANGELOG.md)。
 
 ## 隐私
 

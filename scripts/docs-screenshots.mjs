@@ -80,5 +80,9 @@ try {
   await page.fill('#defaultLanesBefore','9');await page.locator('#defaultLanesBefore').press('Tab');
   await page.waitForTimeout(3400);await page.mouse.move(1590,990);
   await page.screenshot({path:path.join(root,'docs/lane-count.png')});
+  await page.evaluate(()=>{BApp.makeBoxes();BApp.commit();UI.openStep(2);});
+  await page.locator('#btnRebuildGroup').scrollIntoViewIfNeeded();
+  await page.waitForTimeout(400);
+  await page.screenshot({path:path.join(root,'docs/redetect.png')});
   console.log('Documentation screenshots (synthetic demo only):', info);
 } finally { await browser.close(); }

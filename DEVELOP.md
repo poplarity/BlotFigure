@@ -198,3 +198,9 @@ msedge --headless=new --disable-gpu --user-data-dir=$env:TEMP\wb_dbg --allow-fil
 - `laneCount` 约束每个区域，不压缩宽膜的完整泳道网格；宽膜可生成多个独立行。`blot.dividerLane` 是用户明确的分隔泳道，不能用缺带推测代替。未指定的余道保留为 `partialBlock` 候选。
 - `BRender.build(false,true)` 返回 `exportSlices` 与带来源 ID 的 SVG；PPT 复用其排版。`pptx.js` 根据每个来源的完整图像、总角度和独立色阶生成全图 PNG，以原生 `a:srcRect` 表达裁切；不能换成截取后的小图或整张截图。相同来源去重。任何未知 SVG 元素直接报错，防止静默丢标注。
 - `tests/iteration012.mjs` 以真实点击检验步骤和选框，同时测试 9 道分隔、kDa/条件相交、PPT 原生对象、多图片来源和离线导出。`scripts/check-pptx.ps1` 可用本机 PowerPoint 做额外验证；仅用合成图，勿提交 Office 另存文件。
+
+## 0.12.1：局部信号候选与重复识别
+
+- 宽膜小条数：不能用 `pieceLattice` 的所有格子乘所有条带高度生成区域。`signalBlocks` 读取局部水平条带，需至少两个位置有支持才生成多道候选；明确分隔可保留弱/空道。`signalLanes` 传到应用层，不能重新在大框内拟合后丢失定位。垂直细化仅用原候选附近，不能全膜只取最高峰，否则会吞掉同一道上的其他蛋白。
+- `App.rebuildBoxes(ids)` 显式替换指定图片组，出错还原状态，调用方统一 commit 保留一次撤销。普通 `makeBoxes`/步骤切换继续保留人工编辑。`#secPieces.open .step-next` 必须可见；完成过的步骤也允许重复识别。
+- `tests/redetect.mjs` 测空白/窄伪影、同一膜多个蛋白高度、返回修改再识别、只影响本组、撤销、保留动作、清空再生和失败原子性。真实 TIFF 仅在仓库外回归。

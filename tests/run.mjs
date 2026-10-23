@@ -18,6 +18,7 @@ import { usabilityChecks } from './usability.mjs';
 import { layoutChecks } from './layout.mjs';
 import { laneCountChecks } from './lanecount.mjs';
 import { workflowChecks } from './workflow.mjs';
+import { redetectChecks } from './redetect.mjs';
 import { iterationChecks } from './iteration012.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -52,6 +53,7 @@ async function runIn(name, base) {
   const add = list => { out.results.push(...list); if (list.some(r => r[0] === 'FAIL')) out.ok = false; };
   const browser = await ENGINES[name].launch(channel && name === 'chromium' ? { channel } : {});
   try {
+    if (arg('suite') === 'redetect') { add(await redetectChecks(browser, base)); return out; }
     if (arg('suite') === 'iteration012') { add(await iterationChecks(browser, base, ROOT, name)); return out; }
     if (arg('suite') === 'lanecount') { add(await laneCountChecks(browser, base)); return out; }
     if (arg('suite') === 'ui') { add(await uiChecks(browser, base)); return out; }
@@ -86,6 +88,7 @@ async function runIn(name, base) {
     add(await layoutChecks(browser, base));
     add(await usabilityChecks(browser, base));
     add(await laneCountChecks(browser, base));
+    add(await redetectChecks(browser, base));
     add(await iterationChecks(browser, base, ROOT, name));
     // privacy: the Content Security Policy must stop every request to another origin
     {

@@ -1013,27 +1013,44 @@
         u0: L ? L.u0 * f : 0, pitch: L ? L.pitch * f : pitch, roles: L ? L.roles.slice() : [], col0: 1, ladderUs: ladderU[ri].map(u => u * f) };
     });
     assignColumns(pieces, out);
-    if(fixedCount)out=out.flatMap(r=>{
-      const sg=r.segs[0],pc=pieces[sg.region],n=pc.roles.length;
-      if(n<2*fixedCount)return [r];
-      const divider=Number.isInteger(opt.dividerLane)&&opt.dividerLane>0&&opt.dividerLane<=n?opt.dividerLane-1:null;
-      const blocks=[];
-      const add=(a,z)=>{if(z>=a)blocks.push([a,z]);};
-      const chunk=(a,z)=>{for(let k=a;k<=z;k+=fixedCount)add(k,Math.min(z,k+fixedCount-1));};
-      if(divider!=null){chunk(0,divider-1);chunk(divider+1,n-1);}
-      else {
-        // Full blocks from both edges. Keep any middle remainder as an explicit candidate:
-        // a missing or weak band is not evidence that a lane is a marker.
-        let a=0,z=n-1;
-        while(z-a+1>=2*fixedCount){add(a,a+fixedCount-1);add(z-fixedCount+1,z);a+=fixedCount;z-=fixedCount;}
-        chunk(a,z);
-      }
-      return blocks.sort((a,b)=>a[0]-b[0]).map(([a,z])=>{
-        const x0=a===0?-pc.w/2:pc.u0+(a-.5)*pc.pitch,x1=z===n-1?pc.w/2:pc.u0+(z+.5)*pc.pitch;
-        const part={...sg,ms:Array.from({length:z-a+1},(_,i)=>a+i),x0,x1,laneCount:z-a+1};
-        return {...r,segs:[part],partialBlock:z-a+1<fixedCount,dividerLane:divider==null?null:divider+1};
+    if(fixedCount) {
+      const strengths=regions.map((_,ri)=>Math.max(0,...out.filter(r=>r.region===ri).map(r=>r.strength)));
+      out=out.flatMap(r=>{
+        const sg=r.segs[0],pc=pieces[sg.region];
+        if(pc.roles.length<2*fixedCount)return [r];
+        if(r.strength<strengths[r.region]*.1)return [];
+        const blocks=signalBlocks(compImg,regions[sg.region],sg,f,fixedCount,pc,opt.dividerLane);
+        return blocks.map(block=>{
+          const rg=regions[sg.region],F=frame(rg.cx,rg.cy,rg.angle),pitch=block.pitch;
+          const band=bandInBox(compImg,F,block.lanes,pitch*.3,Math.max(-rg.h/2,(sg.vc-r.above)/f),Math.min(rg.h/2,(sg.vc+r.below)/f),null);
+          if(!band)return null;
+          const vc=band.v*f,b0=(band.v0-band.v)*f,b1=(band.v1-band.v)*f,h=(band.v1-band.v)*f,margin=clamp(h*2.5,16,100);
+          const above=Math.min(-b0+margin,vc+pc.h/2-2),below=Math.min(b1+margin,pc.h/2-vc-2);
+          const [ox,oy]=toImg(frame(pc.cx,pc.cy,pc.angle),(block.x0+block.x1)*f/2,vc);
+          return {...r,ox,oy,above,below,bandH:h,localRel:band.rel,partialBlock:block.count<fixedCount,segs:[{...sg,vc,b0,b1,
+            ms:Array.from({length:block.count},(_,i)=>i),x0:block.x0*f,x1:block.x1*f,laneCount:block.count,
+            signalLanes:block.lanes.map(u=>u*f),signalPitch:pitch*f}]};
+        }).filter(Boolean);
       });
-    });
+      // The same pair can be seen in a main band, doublet or nearby smear. One box may
+      // include those bands; don't stack duplicate, heavily overlapping crops on that pair.
+      const localMax=regions.map((_,ri)=>Math.max(0,...out.filter(r=>r.region===ri).map(r=>r.localRel||0)));
+      out=out.filter(r=>r.localRel==null||r.localRel>=localMax[r.region]*.15);
+      out.forEach(r=>{r.weakCandidate=r.localRel!=null && r.localRel<localMax[r.region]*.3;});
+      const kept=[];
+      for(const r of out.sort((a,b)=>b.strength-a.strength)){
+        const s=r.segs[0],hit=kept.find(k=>{
+          const t=k.segs[0];if(t.region!==s.region||s.x0==null||t.x0==null)return false;
+          const overlap=Math.max(0,Math.min(s.x1,t.x1)-Math.max(s.x0,t.x0));
+          return overlap/Math.max(s.x1-s.x0,t.x1-t.x0)>.65 && Math.abs(s.vc-t.vc)<2*Math.max(r.bandH,k.bandH);
+        });
+        if(!hit){kept.push(r);continue;}
+        const t=hit.segs[0],top=Math.min(t.vc-hit.above,s.vc-r.above),bottom=Math.max(t.vc+hit.below,s.vc+r.below);
+        hit.above=t.vc-top;hit.below=bottom-t.vc;
+        t.b0=Math.min(t.b0,s.vc+s.b0-t.vc);t.b1=Math.max(t.b1,s.vc+s.b1-t.vc);
+      }
+      out=kept;
+    }
     const colOf = (pc, m) => { if (pc.roles[m] !== 'sample') return null; let c = pc.col0; for (let k = 0; k < m; k++) if (pc.roles[k] === 'sample') c++; return c; };
     // --- exposure choice per row (over all the lanes of its pieces)
     out.forEach(r => {
@@ -1047,9 +1064,72 @@
       // figure columns the row has bands in (tests and default lane range)
       r.ks = [...new Set(r.segs.flatMap(sg => sg.ms.map(m => colOf(pieces[sg.region], m)).filter(c => c != null)))].sort((a, b) => a - b);
     });
-    out.sort((a, b) => a.oy - b.oy);
+    out.sort((a,b)=>Math.round(a.oy/2)-Math.round(b.oy/2)||a.ox-b.ox);
     const autoLadderId = ladderRank[0] && ladderRank[0].cal.pinned ? ladderRank[0].id : null;     // (what the bands alone suggest)
     return { strips, regions, pieces, rows: out, pitch, factors, calib, ladderId, autoLadderId, ladderRank: ladderRank.map(x => ({ id: x.id, q: x.q, rms: x.cal.rmsLn, miss: x.miss })), ladderStrips, notes, f };
+  }
+
+  // Count-constrained regions start at real horizontal signal islands, never at every
+  // slot of the membrane-wide lattice. A lone marker, dust or a blank interval is not
+  // enough evidence to invent another two-lane protein box.
+  function signalBlocks(img,rg,sg,f,count,pc,dividerLane) {
+    const win=sampleWindow(img,frame(rg.cx,rg.cy,rg.angle),-rg.w/2,rg.w/2,(sg.vc+sg.b0)/f,(sg.vc+sg.b1)/f,1);
+    const profile=new Float32Array(win.w);
+    for(let x=0;x<win.w;x++){for(let y=0;y<win.h;y++)profile[x]+=win.data[y*win.w+x];profile[x]/=win.h;}
+    const sm=gaussSmooth(profile,1.4),bg=percentiles(sm,[20])[0],mx=Math.max(...sm)-bg;
+    if(!(mx>0))return [];
+    const threshold=bg+mx*.12,bands=[];
+    for(let x=0;x<sm.length;x++){
+      if(sm[x]<=threshold)continue;
+      const a=x;let mass=0,sum=0,peak=0;
+      while(x<sm.length&&sm[x]>threshold){const v=sm[x]-bg;mass+=v;sum+=v*(win.u0+x+.5);peak=Math.max(peak,v);x++;}
+      const width=x-a;
+      if(width>=Math.max(3,win.h*.65))bands.push({u:sum/mass,width,mass,peak});
+    }
+    const strongest=bands.slice().sort((a,b)=>b.mass-a.mass)[0];
+    if(!strongest)return [];
+    let use=bands.filter(b=>b.width>=strongest.width*.35 && b.width<=strongest.width*3 && b.mass>=strongest.mass*.08);
+    if(Number.isInteger(dividerLane)&&dividerLane>0&&dividerLane<=pc.roles.length){
+      const d=dividerLane-1,p=pc.pitch/f,u=(pc.u0+d*pc.pitch)/f;use=use.filter(b=>Math.abs(b.u-u)>p*.4);
+      const blocks=[];
+      for(const [a,z] of [[0,d-1],[d+1,pc.roles.length-1]])for(let k=a;k<=z;k+=count){
+        const n=Math.min(count,z-k+1),lanes=Array.from({length:n},(_,i)=>(pc.u0+(k+i)*pc.pitch)/f);
+        const supports=lanes.filter(x=>use.some(b=>Math.abs(b.u-x)<Math.max(p*.35,b.width*.5-p*.05)));
+        // Explicit boundaries can retain a weak/empty lane, but still require local
+        // signal at two distinct lane positions before creating a multi-lane box.
+        if(supports.length<Math.min(2,n))continue;
+        blocks.push({x0:Math.max(-rg.w/2,lanes[0]-p/2),x1:Math.min(rg.w/2,lanes[n-1]+p/2),count:n,pitch:p,lanes});
+      }
+      return blocks;
+    }
+    const runs=[];
+    for(const b of use){const run=runs[runs.length-1],last=run&&run[run.length-1];
+      if(last && b.u-last.u<2.6*(last.width+b.width)/2 && Math.max(last.width,b.width)<3*Math.min(last.width,b.width))run.push(b);else runs.push([b]);}
+    const blocks=[];
+    for(const run of runs){
+      if(run.length<Math.min(count,2))continue;
+      const emit=(a,z)=>{
+        const bs=run.slice(a,z+1),n=bs.length;
+        const pitch=n>1?(bs[n-1].u-bs[0].u)/(n-1):strongest.width*1.4;
+        const x0=Math.max(-rg.w/2,bs[0].u-pitch*.5),x1=Math.min(rg.w/2,bs[n-1].u+pitch*.5);
+        blocks.push({x0,x1,count:n,pitch,lanes:bs.map(b=>b.u)});
+      };
+      let a=0,z=run.length-1;
+      if(run.length>=2*count){
+        while(z-a+1>=2*count){emit(a,a+count-1);emit(z-count+1,z);a+=count;z-=count;}
+        const mass=run.map(b=>b.mass).sort((a,b)=>a-b),typical=mass[mass.length>>1];
+        if(z>=a&&run.slice(a,z+1).every(b=>b.mass>=typical*.35))emit(a,z);
+      }else{
+        const windows=[];
+        for(let k=0;k+count<=run.length;k++){
+          const bs=run.slice(k,k+count),lo=Math.min(...bs.map(b=>b.mass)),hi=Math.max(...bs.map(b=>b.mass));
+          if(lo>=hi*.18)windows.push({k,score:bs.reduce((n,b)=>n+b.mass,0)});
+        }
+        windows.sort((a,b)=>b.score-a.score);
+        if(windows.length)emit(windows[0].k,windows[0].k+count-1);
+      }
+    }
+    return blocks.sort((a,b)=>a.x0-b.x0);
   }
 
   /* rows (one per protein) in a straightened region window, plus lane peaks along each row.

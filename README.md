@@ -4,7 +4,7 @@
 
 **Turn the raw pictures of a Western blot experiment into a publication-ready figure — in your browser, offline.**
 
-[**Download the single HTML file**](https://github.com/poplarity/BlotFigure/releases/download/v0.12.0/BlotFigure-v0.12.0.html) · [Use online](https://poplarity.github.io/BlotFigure/) · [中文说明](README.zh-CN.md)
+[**Download the single HTML file**](https://github.com/poplarity/BlotFigure/releases/download/v0.12.1/BlotFigure-v0.12.1.html) · [Use online](https://poplarity.github.io/BlotFigure/) · [中文说明](README.zh-CN.md)
 
 [![CI](https://github.com/poplarity/BlotFigure/actions/workflows/ci.yml/badge.svg)](https://github.com/poplarity/BlotFigure/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -17,13 +17,13 @@
 
 **Download one file, open it in your browser, and start making your figure. No installation, ZIP extraction or GitHub account is needed.**
 
-1. **[Download BlotFigure-v0.12.0.html](https://github.com/poplarity/BlotFigure/releases/download/v0.12.0/BlotFigure-v0.12.0.html)** (about 800 KB). Save it to your Desktop or Downloads folder.
+1. **[Download BlotFigure-v0.12.1.html](https://github.com/poplarity/BlotFigure/releases/download/v0.12.1/BlotFigure-v0.12.1.html)** (about 800 KB). Save it to your Desktop or Downloads folder.
 2. **Double-click the downloaded file.** It opens in your browser. If a text editor opens instead, right-click → **Open with** → Firefox, Chrome, Edge or Safari.
 3. **Drop in all pictures of one experiment**: every exposure of each membrane plus a picture that shows the marker (the white-light picture, or white light merged with chemiluminescence). Then follow the 5 steps on the left and choose **Export PNG**.
 
 That one HTML file is the complete tool. Keep it on your computer or send the same file to a colleague. Once downloaded, it works without an internet connection.
 
-**Get the right file:** choose the release attachment named **BlotFigure-v0.12.0.html**, not the repository's **index.html**, **Source code (zip)** or **Source code (tar.gz)**. If you reach the [release page](https://github.com/poplarity/BlotFigure/releases/latest), expand **Assets** and click the file ending in **.html**.
+**Get the right file:** choose the release attachment named **BlotFigure-v0.12.1.html**, not the repository's **index.html**, **Source code (zip)** or **Source code (tar.gz)**. If you reach the [release page](https://github.com/poplarity/BlotFigure/releases/latest), expand **Assets** and click the file ending in **.html**.
 
 **Keep your work:** use **File → Save project** (Ctrl+S) before closing. Your **.blotfig** file contains all the pictures and every adjustment; reopen it in BlotFigure to continue, on any computer.
 
@@ -80,6 +80,10 @@ Drop in everything the imager saved for one experiment. BlotFigure tells exposur
 
 ## The five steps
 
+To rerun detection, open **Strips**, edit outlines/counts and click **Detect this group again**. This replaces the group’s boxes and edits; Ctrl+Z restores them. **Keep existing boxes, return to editing** is a separate action.
+
+<img src="docs/redetect.png" alt="Repeat detection from strip review" width="900">
+
 Follow the sequence once for a new experiment. Afterwards use each tool’s **Expand / Collapse** button directly; switching tools applies pending strip edits and preserves existing regions, including your deletions. In the protein tool, **Add a protein box** is at the top. Click a box and press **Backspace** to remove just that box; text editing keeps normal keyboard behavior.
 
 1. **Groups & marker reference** — put exposures of the same strips in the same capture layout with their white-light / merged reference. One group can contain multiple strips. Exposure comparison and strip positioning happen within the group. Use separate groups for unrelated strips/layouts, not different proteins, brightness levels or figure order. Drag to correct a group, then select its ★ reference.
@@ -98,7 +102,7 @@ In step 5 choose **Add a layout column**, then drag regions into it or use **⋯
 
 ## Versions
 
-The current version is **0.12.0**: clearer capture groups, reliable step/box selection, default borders, compact kDa headings, multiple independent count-constrained regions per strip, and [editable, recroppable PowerPoint export](docs/pptx.md). See the [changelog](CHANGELOG.md).
+The current version is **0.12.1**: local-signal region detection fixes excessive blank/overlapping boxes at small lane counts. Return to strip review, adjust settings and explicitly detect that group again, or keep existing boxes. Reruns are undoable and leave other groups unchanged. See the [changelog](CHANGELOG.md).
 
 ## Privacy
 
