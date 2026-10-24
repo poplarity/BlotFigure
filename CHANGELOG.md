@@ -4,6 +4,18 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-10-25
+
+Uniform row spacing regardless of source image group.
+
+**中文摘要**
+- 修复同组间距默认 2 pt、跨图片组间距默认 5 pt 的不一致。所有蛋白区域统一使用「统一行距」，默认 2 pt，已有自定义行距保留。
+- 单列、多列及按行对齐布局使用同一规则；预览、PNG/TIFF/SVG 和 PPT 导出保持一致。旧项目和样式文件中的隐藏组间距不再影响排版，无需重新识别。
+
+### Fixed
+- Remove the hidden source-group gap from regular and aligned-column layout. All row transitions use the configured row gap, including legacy projects and reordered rows.
+- Regression coverage measures actual preview/export row bounds at 0, 2 and 4.5 pt, with legacy group-gap settings and aligned columns.
+
 ## [0.13.0] - 2026-10-25
 
 Independent lane counts, file-manager-style box selection, compact controls and persistent custom markers.

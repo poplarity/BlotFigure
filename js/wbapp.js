@@ -30,7 +30,7 @@
   }
 
   const App = { images: new Map(), analysis: {}, S: null, hist: [], future: [], listeners: [], selRow: null, selSeg: null, selLane: null, viewBlot: null, viewImg: null, mode: null };
-  App.VERSION = '0.13.0';
+  App.VERSION = '0.13.1';
   App.activeColumn = 'main';
   const columnFields = new Set(['lanes', 'range', 'hiCol', 'groups', 'conditions']);
   App.layoutColumns = () => App.S.layoutColumns || (App.S.layoutColumns = [{ id: 'main', title: '', titleSide: 'top' }]);
@@ -140,7 +140,7 @@
 
   /* the figure's layout. Text sizes per kind (lane names, marker labels, protein names; null = fontPt); a group
    * label wider than its line wraps ('wrap'), shrinks down to minFontPt ('shrink') or stays ('none') */
-  const defaultStyle = () => ({ mmPerLane: 5, fontPt: 7, lineWidthPt: 0.5, labelAngle: 'auto', rowGapPt: 2, blotGapPt: 5,
+  const defaultStyle = () => ({ mmPerLane: 5, fontPt: 7, lineWidthPt: 0.5, labelAngle: 'auto', rowGapPt: 2,
     tickLenPt: 2.5, labelGapPt: 2.5, unitHeader: true, showMW: true, panelLetter: '', dpi: 600, invert: true, border: true, mwSide: 'left', nameSide: 'right',
     laneNumbers: false, lanePt: null, markerPt: null, namePt: null, groupFit: 'wrap', minFontPt: 5, groupTicks: false,
     columnGapMm: 6, alignColumnRows: false });

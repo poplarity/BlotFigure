@@ -10,6 +10,24 @@ export async function layoutChecks(browser, base) {
     await page.goto(`${base}/index.html?demo=1&lang=en`);
     await page.waitForFunction(() => document.title.startsWith('READY '), null, { timeout:180000 });
     await page.evaluate(() => { UI.openStep(5); window.layoutInitial = JSON.stringify(BApp.S); });
+    await check('row gaps are uniform across source groups, reordering and legacy styles in preview and export', async () => {
+      const cases = await page.evaluate(() => {
+        const saved=JSON.stringify(BApp.S), results=[];
+        const collect=()=>[true,false].flatMap(preview=>[false,true].map(ppt=>{
+          const rows=BRender.build(preview,ppt).rowBoxes;
+          return rows.slice(1).map((r,i)=>r.y-rows[i].y-rows[i].h);
+        }));
+        for(const gap of [0,2,4.5]){
+          BApp.S.style.rowGapPt=gap;
+          BApp.S.style.blotGapPt=19; // old project/template value must no longer affect layout
+          const rows=BApp.S.rows;
+          BApp.S.rows=[rows[0],rows[3],rows[1],rows[4],rows[2]];
+          results.push({gap,gaps:collect()});
+        }
+        BApp.S=JSON.parse(saved);BApp.commit();return results;
+      });
+      for(const c of cases)assert(c.gaps.flat().every(g=>Math.abs(g-c.gap)<1e-8),JSON.stringify(c));
+    });
     await check('add an empty optional column through the UI', async () => {
       await page.click('#addLayoutColumn');
       assert.equal(await page.evaluate(() => BApp.layoutColumns().length), 2);
@@ -79,6 +97,19 @@ export async function layoutChecks(browser, base) {
         BApp.S.style.alignColumnRows=true; BApp.commit(); const g=BRender.build(true), aa=g.rowBoxes.filter(r=>r.columnId==='main'),bb=g.rowBoxes.filter(r=>r.columnId===layoutColumn);
         return a[0].y===b[0].y && aa[1].y===bb[1].y && g.rowBoxes.every(r=>r.h===before.get(r.id));
       }));
+    });
+    await check('aligned columns use the uniform row gap at group boundaries', async () => {
+      const result=await page.evaluate(()=>{
+        const saved=JSON.stringify(BApp.S),rows=BApp.S.rows,st=BApp.S.style;
+        st.rowGapPt=3.5;st.blotGapPt=22;st.alignColumnRows=true;
+        rows.forEach(r=>{const scale=st.mmPerLane*BApp.MM/BApp.rowPitch(r);r.above=10/scale;r.below=10/scale;r.segs.forEach(s=>{delete s.above;delete s.below;});});
+        const rendered=BRender.build(false),gaps=BApp.layoutColumns().flatMap(c=>{
+          const rs=rendered.rowBoxes.filter(r=>r.columnId===c.id);
+          return rs.slice(1).map((r,i)=>r.y-rs[i].y-rs[i].h);
+        });
+        BApp.S=JSON.parse(saved);BApp.commit();return gaps;
+      });
+      assert(result.length>0&&result.every(g=>Math.abs(g-3.5)<1e-8),JSON.stringify(result));
     });
     await check('marker size and hiding labels retain calibration and can be restored', async () => {
       await page.evaluate(() => {

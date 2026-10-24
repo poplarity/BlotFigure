@@ -108,12 +108,11 @@
     // (protein names and the kDa scale each on the left or the right; on the same side the names go outside)
     const mwRight = st.mwSide === 'right', nameLeft = st.nameSide === 'left';
     const rows = C.rows, rowNames = [], ticksOut = [], arrowsOut = [];
-    let y = 0, prevBlot = null, maxLeft = 0, maxRight = 0, tickLabW = 0;
+    let y = 0, maxLeft = 0, maxRight = 0, tickLabW = 0;
     const rowBoxes = [], exportSlices = [];   // the kDa header sits just above the first row
     rows.forEach((row, ri) => {
       if (slots) y = slots[ri];
-      else if (prevBlot !== null) y += row.blot === prevBlot ? st.rowGapPt : st.blotGapPt;
-      prevBlot = row.blot;
+      else if (ri) y += st.rowGapPt;
       const pitch = App.rowPitch(row), sc = laneW / pitch;       // pt per image px
       const h = (row.above + row.below) * sc;
       const step = Math.max(0.35, Math.min(2, pitch / 60));      // ~60 px per lane in the raster
@@ -394,9 +393,9 @@
     let slots = null;
     if (App.S.style.alignColumnRows && cs.length > 1) {
       const heights = [], gaps = [], st = App.S.style;
-      cs.forEach(c => App.columns(c.id).rows.forEach((r, i, rows) => {
+      cs.forEach(c => App.columns(c.id).rows.forEach((r, i) => {
         heights[i] = Math.max(heights[i] || 0, (r.above + r.below) * st.mmPerLane * MM / App.rowPitch(r));
-        gaps[i] = Math.max(gaps[i] || 0, i ? (rows[i - 1].blot === r.blot ? st.rowGapPt : st.blotGapPt) : 0);
+        gaps[i] = Math.max(gaps[i] || 0, i ? st.rowGapPt : 0);
       }));
       let y = 0; slots = heights.map((h, i) => { y += gaps[i]; const top = y; y += h; return top; });
     }
