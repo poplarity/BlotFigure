@@ -41,6 +41,7 @@
     if (App.mode === 'align' && m !== 'align') G.View.alignEnd();
     if (App.mode === 'pieces' && m !== 'pieces') G.View.piecesEnd(false);
     App.mode = m;
+    if(m)App.selectedBoxes.clear();
     // the figure's banner for figure modes, the membrane view's banner for clicks on the membrane
     const onView = m === 'addrow' || m === 'marks' || m === 'align' || m === 'pieces';
     $('modeBanner').classList.toggle('hidden', !m || onView);
@@ -56,8 +57,8 @@
         'Step 4: click a marker band and pick its size · drag to line it up (snaps; Alt: no snapping) · click a number to change it')
       : m === 'align' ? L('拖动图片让条带落进框里 · Shift+拖动或 [ ] 旋转 · 方向键微调',
         'Drag the picture so the bands sit in the boxes · Shift+drag or [ ] to rotate · arrow keys to nudge')
-      : m === 'pieces' ? L('第 2 步：拖动蓝框移动 · 拖边角改大小 · 拖 ↻ 旋转 · 空白处拖出新膜条 · Delete 删除',
-        'Step 2: drag a blue box to move it · drag its edges to resize · drag ↻ to rotate · drag on empty space for a new strip · Delete removes') : '';
+      : m === 'pieces' ? L('确认前先填预计泳道数（可选），每框仍独立识别。拖蓝框检查膜区；拖边角改大小。',
+        'Before confirming, set expected lanes (optional); each box is still detected independently. Drag blue boxes or their corners to check strips.') : '';
     const vb = App.S && App.blot(App.viewBlot);
     // (the modes of steps 2 and 4 end with the step: their banners lead on to the next one)
     $('viewModeExtra').innerHTML = m === 'align' ? `<button id="vmAuto" title="${L('按白光图和条带自动对齐（整张膜的图都重新对齐）', 'Align automatically by the white-light picture and the bands (every picture of this membrane is aligned again)')}">${L('自动对齐', 'Auto-align')}</button>`
@@ -262,9 +263,10 @@
   window.addEventListener('keydown', e => {
     const tag = (e.target.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable || composing(e) || e.defaultPrevented || e.repeat) return;
-    if ((e.key === 'Backspace' || e.key === 'Delete') && S() && App.selRow && !App.mode && (e.target === $('previewBox') || e.target === document.body)) { e.preventDefault(); if(App.deleteBox(App.row(App.selRow)))toast(L('已删除选中的蛋白框（Ctrl+Z 可撤销）','Selected box deleted (Ctrl+Z to undo)')); return; }
+    if ((e.key === 'Backspace' || e.key === 'Delete') && S() && App.boxSelection().length && !App.mode && (e.target === $('previewBox') || e.target === document.body)) { e.preventDefault(); deleteSelectedBoxes(); return; }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? App.redo() : App.undo(); }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); App.redo(); }
+    if(e.key==='Escape' && App.selectedBoxes.size){App.selectBoxes([]);App.emit('select');e.preventDefault();return;}
     if (e.key === 'Escape') {
       if (!$('helpDlg').classList.contains('hidden')) { $('helpDlg').classList.add('hidden'); return; }
       if (popOpen) { closePop(); return; }            // (one thing at a time: the popover, then the mode)
@@ -472,7 +474,7 @@
   function syncDefaultLanes(){
     const n=S().defaultLaneCount||'';['defaultLanesBefore','defaultLanesNew'].forEach(id=>$(id).value=n);
     $('applyDefaultLanes').disabled=!n||!S().rows.length;
-    $('defaultLanesHint').textContent=n?L(`自动生成与新加的框均按 ${n} 道定位；现有框不会被自动改动。`,`Detected and added boxes use ${n} lanes; existing boxes keep their adjustments.`):L('留空自动计数；填写后，新加的框按此数量定位。','Leave blank for automatic counting; set a count for newly added boxes.');
+    $('defaultLanesHint').textContent=n?L(`自动识别参考 ${n} 道，清晰区域保留各自数量；新手动框以此起步。仅点击「统一已有框」才强制统一。`,`Detection uses ${n} as a reference; clear regions keep their own counts. New manual boxes start with it. Only Apply count forces existing boxes to match.`):L('留空自动计数；填写后，新加的框按此数量定位。','Leave blank for automatic counting; set a count for newly added boxes.');
   }
   $('dividerLane').onchange=done(e=>{const b=App.blot(App.viewBlot);if(b)b.dividerLane=e.target.value?Math.max(1,Math.min(60,Math.round(+e.target.value)||1)):null;});
   function renderPieces() {
@@ -521,15 +523,16 @@
     pop.classList.remove('hidden'); popOpen = true;
     const pw = pop.offsetWidth || 260, ph = pop.offsetHeight;
     pop.style.left = clamp(r.right + 10 + pw > innerWidth - 6 ? r.left - pw - 10 : r.right + 10, 6, innerWidth - pw - 6) + 'px';
-    pop.style.top = clamp(r.top - 10, 58, innerHeight - ph - 8) + 'px';
+    pop.style.top = clamp(r.top - 10, 8, Math.max(8,innerHeight - ph - 8)) + 'px';
   }
   function placePopAt(x, y) {
     pop.classList.remove('hidden'); popOpen = true;
     const pw = pop.offsetWidth || 260, ph = pop.offsetHeight;
     pop.style.left = clamp(x, 6, innerWidth - pw - 6) + 'px';
-    pop.style.top = clamp(y, 58, innerHeight - ph - 8) + 'px';
+    pop.style.top = clamp(y, 8, Math.max(8,innerHeight - ph - 8)) + 'px';
   }
   // the popover dropped without its pending actions (the state it belongs to is being replaced)
+  window.addEventListener('resize',()=>{if(popOpen)placePopAt(pop.offsetLeft,pop.offsetTop);});
   function dropPop() { popOpen = false; popCancel = popAccept = null; pop.classList.add('hidden'); }
   document.addEventListener('mousedown', e => { if (popOpen && !pop.contains(e.target) && !e.target.classList.contains('more') && e.target !== $('editor')) closePop(); });
   const shortName = name => name.replace(/\s*\(.*?\)/g, '').replace(/\*$/, '');
@@ -769,6 +772,7 @@
           <button class="pnav" data-shift="-1" title="${L('这个框的泳道在成图里往左挪一列（最左到第 1 列，不会推动其他行）', "Move this box's lanes one column left in the figure (down to column 1; other rows are not pushed)")}"${sg.c0 <= 1 ? ' disabled' : ''}>‹</button><button class="pnav" data-shift="1" title="${L('往右挪一列', 'One column right')}">›</button></div>
         <div class="bt-line"><span class="bt-even">${L('泳道数', 'Lanes')} <input type="number" class="num" min="1" max="60" value="${sg.lanes.length}"> </span>
           <button class="btn sm ghost" data-act="redetect" title="${L('只看框里的像素，重新找泳道', 'Find the lanes again from the pixels in the box only')}">${sg.laneCount||S().defaultLaneCount ? L(`按 ${sg.laneCount||S().defaultLaneCount} 道定位`,`Locate ${sg.laneCount||S().defaultLaneCount} lanes`) : L('框内重新识别','Detect in box')}</button></div>
+        ${sg.countOrigin==='image'&&sg.expectedLaneCount&&sg.expectedLaneCount!==sg.lanes.length?`<p class="hint count-note">${L(`图像识别 ${sg.lanes.length} 道，本框识别时参考 ${sg.expectedLaneCount} 道；已保留图像结果，可在上方单独修改。`,`Image detected ${sg.lanes.length} lanes; the reference at detection was ${sg.expectedLaneCount}. Image-based count retained; edit this box above if needed.`)}</p>`:sg.countOrigin==='reference'?`<p class="hint count-note">${L(`信号不清，暂按参考 ${sg.lanes.length} 道，请核对首尾位置。`,`Unclear signal: using the ${sg.lanes.length}-lane reference; check both endpoints.`)}</p>`:''}
         <div class="bt-line"><span class="bt-rot">${L('倾斜', 'Tilt')} <button class="pnav" data-rot="-0.1" title="${L('逆时针 0.1°（选中框后按 [ ）', '0.1° anticlockwise ([ with the box selected)')}">−</button><b>${(sg.rot || 0).toFixed(1)}°</b><button class="pnav" data-rot="0.1" title="${L('顺时针 0.1°（选中框后按 ] ）', '0.1° clockwise (] with the box selected)')}">+</button></span>
           <button class="btn sm ghost" data-act="level" title="${L('按框里的条带把框摆正（条带和膜条不完全水平时）', "Level the box by its bands (when bands and strip aren't quite horizontal)")}">${L('按条带摆正', 'Level by bands')}</button>${sg.rot ? `<button class="link" data-act="rot0">${L('归零', 'Reset')}</button>` : ''}</div>
       </div>`;
@@ -823,7 +827,7 @@
       if (r0) r0.onclick = done(() => { App.setSegRot(pcOf(), sg, 0); App.findBand(row, sg); });
       const inp = div.querySelector('.bt-even input');
       const even = done(() => {
-        const n = App.editLanes(row, sg, () => App.evenEnds(row, sg, +inp.value)); sg.laneCount=n; App.selLane = null;
+        const n = App.editLanes(row, sg, () => App.evenEnds(row, sg, +inp.value)); sg.laneCount=n;sg.countOrigin='manual'; App.selLane = null;
         toast(L(`已按最左、最右两条泳道等间距排布 ${n} 道`, `${pl(n, 'lane')} spaced evenly between the outermost two`));
       });
       inp.addEventListener('change', even);
@@ -832,6 +836,7 @@
     return wrap;
   }
   function selectRow(id, showImage) {
+    App.selectedBoxes.clear();
     if (id && App.row(id)) activateColumn(App.rowColumn(App.row(id)));
     if (App.selRow !== id) { App.selSeg = null; App.selLane = null; }
     App.selRow = id;
@@ -845,6 +850,8 @@
     const base = ['GAPDH', 'β-actin', 'α-tubulin', 'Vinculin', 'HSP90', 'Lamin B1', 'Histone H3', 'p-ERK1/2', 'ERK1/2', 'p-AKT (S473)', 'AKT', 'Cleaved caspase-3', 'PARP', 'LC3B', 'p62'];
     $('protList').innerHTML = [...new Set(sug.concat(used, base))].map(n => `<option value="${esc(n)}">`).join('');
   }
+  function deleteSelectedBoxes(){const n=App.deleteBoxes();if(n)toast(L(`已删除 ${n} 个蛋白框（Ctrl+Z 可撤销）`,`Deleted ${n} protein boxes (Ctrl+Z to undo)`));}
+  $('deleteSelectedBoxes').onclick=deleteSelectedBoxes;
   $('btnAddRow').onclick = () => { if (!S()) return; App.setMode(App.mode === 'addrow' ? null : 'addrow'); };
   function rebuildGroup() {
     const b=App.blot(App.viewBlot);if(!b)return;
@@ -1111,6 +1118,7 @@
     const on = $('imgTabs').querySelector('button.on');
     if (on) { const T = $('imgTabs'), a = on.getBoundingClientRect(), c = T.getBoundingClientRect(); if (a.left < c.left || a.right > c.right) T.scrollLeft += a.left - c.left - (c.width - a.width) / 2; }
     const isC = rec && rec.kind === 'chemi';
+    const multi=App.boxSelection().length>1;
     $('levelBar').classList.toggle('hidden', !isC);
     if (isC) {
       // No implicit whole-image editing. Browsing another exposure must not change other protein regions.
@@ -1125,7 +1133,8 @@
       if ($('lvToImg')) $('lvToImg').onclick = () => { lvImage = true; renderStageHead(); };
       if ($('lvToRow')) $('lvToRow').onclick = () => { lvImage = false; renderStageHead(); };
       if ($('lvBackPic')) $('lvBackPic').onclick = () => { App.viewImg = sel.img; App.viewBlot = sel.blot; App.emit('select'); };
-      ['lvBlack', 'lvWhite', 'btnLvAuto'].forEach(id => { $(id).disabled = !row && !lvImage; });
+      if(multi)$('levelName').textContent=L('已多选蛋白框：退格批量删除；单选后可调亮度','Multiple boxes selected: Backspace deletes them; select one to adjust levels');
+      ['lvBlack', 'lvWhite', 'btnLvAuto'].forEach(id => { $(id).disabled = multi || (!row && !lvImage); });
       $('lvBlack').value = toSl(lv.black); $('lvWhite').value = toSl(lv.white);
     }
   }
@@ -1140,7 +1149,7 @@
   const lvSet = (key) => live(e => {
     const rec = G.View.curImage(); if (!rec) return;
     const row = lvRow(), lv = Object.assign({}, row ? App.rowLevels(row) : App.levelsOf(rec.id)), v = fromSl(+e.target.value);
-    if (!row && !lvImage) return;
+    if (App.boxSelection().length>1 || (!row && !lvImage)) return;
     if (key === 'black') lv.black = Math.min(v, lv.white - 0.0005); else lv.white = Math.max(v, lv.black + 0.0005);
     if (row) row.lv = { black: lv.black, white: lv.white };
     else { lv.manual = true; S().levels[rec.id] = lv; G.View.draw(); }
@@ -1209,7 +1218,7 @@
     bar.classList.remove('hidden');
     const below = r.bottom + 4 + bar.offsetHeight < innerHeight;
     bar.style.left = clamp(r.left, 4, Math.max(4, innerWidth - bar.offsetWidth - 4)) + 'px';
-    bar.style.top = (below ? r.bottom + 4 : r.top - bar.offsetHeight - 4) + 'px';
+    bar.style.top = clamp(below ? r.bottom+4 : r.top-bar.offsetHeight-4,4,Math.max(4,innerHeight-bar.offsetHeight-4)) + 'px';
   }
   // the multi-line editor grows with typed line breaks
   const autoRows = () => { fta.rows = Math.min(4, Math.max(1, fta.value.split('\n').length)); if (edit) placeBar(); };
@@ -1287,7 +1296,7 @@
   // undo / redo / another project: open editors belong to the old state — dropped without writing back
   App.onSwap = () => {
     if (edit) { edit = null; fed.classList.add('hidden'); fta.classList.add('hidden'); bar.classList.add('hidden'); }
-    dropPop();
+    dropPop();App.selectedBoxes.clear();
   };
 
   let press = null;
@@ -1711,9 +1720,9 @@
     } else if (n === 2) {
       const bn = st.blots.length > 1 && esc(App.blotName(App.blot(App.viewBlot)));
       const many = bn ? L(`（${bn}${pcUnseen() ? '，看完再看下一组' : ''}）`, ` (${bn}${pcUnseen() ? ', then the next group' : ''})`) : '';
-      msg = L(`第 2 步：看<b>蓝框</b>是不是刚好框住每条膜${many}，不对就在图上拖动修改；对了点"下一步"`,
-        `Step 2: check that the <b>blue boxes</b> just enclose each strip${many}; drag on the picture to fix them, then click "Next"`);
-      coachAct = () => flash('next2');
+      msg = L(`第 2 步：确认前先填<b>预计泳道数（可选）</b>，再检查蓝框${many}；各框独立识别，不强制统一条数`,
+        `Step 2: set <b>expected lanes (optional)</b> before confirming, then check the blue boxes${many}; each box keeps its own count`);
+      coachAct = () => {flash('defaultLanesBefore');$('defaultLanesBefore').focus();};
     } else if (n === 3) {
       if (!vis.length) { msg = L('第 3 步：没找到蛋白条带，<b>点这里</b>再到膜上点一下放一个框', 'Step 3: no protein bands found. <b>Click here</b>, then click on the membrane to place a box'); coachAct = () => App.setMode('addrow'); }
       else {
@@ -1749,7 +1758,7 @@
         ok = true; coachAct = () => flash('btnPNG');
       }
     }
-    if(n<st.step && n!==1) { msg=L('可直接展开其他步骤继续编辑，当前修改会保留。','Expand another tool to continue; your changes are kept.');coachAct=()=>openStep(st.step); }
+    if(n<st.step && n!==1 && n!==2) { msg=L('可直接展开其他步骤继续编辑，当前修改会保留。','Expand another tool to continue; your changes are kept.');coachAct=()=>openStep(st.step); }
     $('coachText').innerHTML = msg + (coachAct && !ok ? ' <span class="coach-go">→</span>' : '');
     $('coach').classList.toggle('done', ok); $('coach').classList.toggle('act', !!coachAct);
     $('imgCount').textContent = L(`${App.images.size} 张图 · 添加`, `${pl(App.images.size, 'picture')} · add`);
@@ -1844,6 +1853,7 @@
     showSelRow(); renderStageHead(); syncLayout(); renderSteps(); updateCoach(); updatePreview();
   });
   window.addEventListener('resize', () => { if (S()) updatePreview(); });
+  window.addEventListener('blotfigure-markers-changed',()=>{if(S())keepFocus(()=>renderMarker());});
 
   /* ---------- exports: uncropped originals, quantification ---------- */
   function exportRaw() {

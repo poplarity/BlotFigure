@@ -942,16 +942,11 @@
     });
     const cands = regions.map((rg, ri) => pieceAnchors(rowsRaw.filter(r => r.region === ri), ladderU[ri], pitchDs));
     const pJoint = jointPitch(cands.map(c => c.anchors), pitchDs);
-    const fixedCount=Number.isInteger(opt.laneCount)&&opt.laneCount>=1&&opt.laneCount<=60?opt.laneCount:0;
-    const lat = regions.map((rg, ri) => {
-      const natural=pieceLattice(rg, cands[ri], ladderU[ri], pJoint);
-      // A requested box count must not compress the entire membrane to that many lanes.
-      // Preserve a wide lattice so all blocks can become independent protein regions below.
-      if(!fixedCount || natural && natural.roles.length>=2*fixedCount)return natural;
-      const fit=detectBoxLanes(compImg,frame(rg.cx,rg.cy,rg.angle),-rg.w/2,rg.w/2,-rg.h/2,rg.h/2,{count:fixedCount});
-      return {u0:fit.lanes[0],pitch:fit.pitch,roles:Array(fixedCount).fill('sample')};
-    });
-    const slotOf = (ri, u) => { const L = lat[ri]; if (!L) return -1; const raw = Math.round((u - L.u0) / L.pitch), m=fixedCount?clamp(raw,0,L.roles.length-1):raw; return m >= 0 && m < L.roles.length && L.roles[m] === 'sample' ? m : -1; };
+    const preferredCount=Number.isInteger(opt.laneCount)&&opt.laneCount>=1&&opt.laneCount<=60?opt.laneCount:0;
+    // Geometry comes from the image. A lane-count reference must never change the
+    // membrane lattice, cut a continuous region, or force different regions to match.
+    const lat=regions.map((rg,ri)=>pieceLattice(rg,cands[ri],ladderU[ri],pJoint));
+    const slotOf=(ri,u)=>{const L=lat[ri];if(!L)return -1;const m=Math.round((u-L.u0)/L.pitch);return m>=0&&m<L.roles.length&&L.roles[m]==='sample'?m:-1;};
     // --- row records: one segment each (piece, band centre vc, band extent b0..b1 around it; full resolution)
     let out = rowsRaw.map(r => {
       const ri = r.region, rg = r.rg;
@@ -1013,23 +1008,23 @@
         u0: L ? L.u0 * f : 0, pitch: L ? L.pitch * f : pitch, roles: L ? L.roles.slice() : [], col0: 1, ladderUs: ladderU[ri].map(u => u * f) };
     });
     assignColumns(pieces, out);
-    if(fixedCount) {
+    if(opt.autoMarkerLanes===false) {
       const strengths=regions.map((_,ri)=>Math.max(0,...out.filter(r=>r.region===ri).map(r=>r.strength)));
       out=out.flatMap(r=>{
         const sg=r.segs[0],pc=pieces[sg.region];
-        if(pc.roles.length<2*fixedCount)return [r];
         if(r.strength<strengths[r.region]*.1)return [];
-        const blocks=signalBlocks(compImg,regions[sg.region],sg,f,fixedCount,pc,opt.dividerLane);
+        const fullFits=chemis.map((c,k)=>detectBoxLanes({w:c.img.w,h:c.img.h,data:sigs[k].cs.sig},frame(pc.cx,pc.cy,pc.angle),-pc.w/2,pc.w/2,sg.vc-r.above,sg.vc+r.below,{}));
+        const blocks=signalBlocks(compImg,regions[sg.region],sg,f,pc,opt.dividerLane,fullFits);
         return blocks.map(block=>{
           const rg=regions[sg.region],F=frame(rg.cx,rg.cy,rg.angle),pitch=block.pitch;
           const band=bandInBox(compImg,F,block.lanes,pitch*.3,Math.max(-rg.h/2,(sg.vc-r.above)/f),Math.min(rg.h/2,(sg.vc+r.below)/f),null);
           if(!band)return null;
-          const vc=band.v*f,b0=(band.v0-band.v)*f,b1=(band.v1-band.v)*f,h=(band.v1-band.v)*f,margin=clamp(h*2.5,16,100);
+          const vc=band.v*f,b0=(band.v0-band.v)*f,b1=(band.v1-band.v)*f,h=(band.v1-band.v)*f,margin=Math.max(clamp(h*2.5,16,100),pitch*f*.45);
           const above=Math.min(-b0+margin,vc+pc.h/2-2),below=Math.min(b1+margin,pc.h/2-vc-2);
           const [ox,oy]=toImg(frame(pc.cx,pc.cy,pc.angle),(block.x0+block.x1)*f/2,vc);
-          return {...r,ox,oy,above,below,bandH:h,localRel:band.rel,partialBlock:block.count<fixedCount,segs:[{...sg,vc,b0,b1,
+          return {...r,ox,oy,above,below,bandH:h,localRel:band.rel,partialBlock:false,segs:[{...sg,vc,b0,b1,
             ms:Array.from({length:block.count},(_,i)=>i),x0:block.x0*f,x1:block.x1*f,laneCount:block.count,
-            signalLanes:block.lanes.map(u=>u*f),signalPitch:pitch*f}]};
+            signalLanes:block.lanes.map(u=>u*f),signalPitch:pitch*f,evidenceLaneCount:block.trustedCount||null,minLanePitch:(block.minPitch||0)*f}]};
         }).filter(Boolean);
       });
       // The same pair can be seen in a main band, doublet or nearby smear. One box may
@@ -1037,17 +1032,31 @@
       const localMax=regions.map((_,ri)=>Math.max(0,...out.filter(r=>r.region===ri).map(r=>r.localRel||0)));
       out=out.filter(r=>r.localRel==null||r.localRel>=localMax[r.region]*.15);
       out.forEach(r=>{r.weakCandidate=r.localRel!=null && r.localRel<localMax[r.region]*.3;});
-      const kept=[];
-      for(const r of out.sort((a,b)=>b.strength-a.strength)){
-        const s=r.segs[0],hit=kept.find(k=>{
-          const t=k.segs[0];if(t.region!==s.region||s.x0==null||t.x0==null)return false;
-          const overlap=Math.max(0,Math.min(s.x1,t.x1)-Math.max(s.x0,t.x0));
-          return overlap/Math.max(s.x1-s.x0,t.x1-t.x0)>.65 && Math.abs(s.vc-t.vc)<2*Math.max(r.bandH,k.bandH);
-        });
-        if(!hit){kept.push(r);continue;}
-        const t=hit.segs[0],top=Math.min(t.vc-hit.above,s.vc-r.above),bottom=Math.max(t.vc+hit.below,s.vc+r.below);
+      const sameArea=(a,b)=>{
+        const s=a.segs[0],t=b.segs[0];if(t.region!==s.region||s.x0==null||t.x0==null)return false;
+        const overlap=Math.max(0,Math.min(s.x1,t.x1)-Math.max(s.x0,t.x0));
+        const shared=(s.signalLanes||[]).some(u=>(t.signalLanes||[]).some(v=>Math.abs(u-v)<Math.min(s.signalPitch,t.signalPitch)*.3));
+        return (overlap/Math.max(s.x1-s.x0,t.x1-t.x0)>.5 || shared&&overlap>0)&&Math.abs(s.vc-t.vc)<Math.max(24,1.2*Math.max(a.bandH,b.bandH));
+      };
+      const mergeArea=(a,b)=>{
+        const hit=a.strength>=b.strength?a:b,other=hit===a?b:a,t=hit.segs[0],s=other.segs[0];
+        const top=Math.min(t.vc-hit.above,s.vc-other.above),bottom=Math.max(t.vc+hit.below,s.vc+other.below);
         hit.above=t.vc-top;hit.below=bottom-t.vc;
         t.b0=Math.min(t.b0,s.vc+s.b0-t.vc);t.b1=Math.max(t.b1,s.vc+s.b1-t.vc);
+        // Keep the better-supported grid; only extend it with new end lanes. A weaker
+        // smear must not add interleaved false lanes inside the same broad band.
+        const base=s.signalPitch<t.signalPitch*.8?s:t,extra=base===s?t:s;
+        const lanes=base.signalLanes.slice().sort((a,b)=>a-b),p=base.signalPitch;
+        for(const u of extra.signalLanes){if(u<lanes[0]-p*.55||u>lanes[lanes.length-1]+p*.55){lanes.push(u);lanes.sort((a,b)=>a-b);}}
+        t.signalLanes=lanes;t.evidenceLaneCount=lanes.length;t.laneCount=lanes.length;
+        if(lanes.length>1)t.signalPitch=(lanes[lanes.length-1]-lanes[0])/(lanes.length-1);
+        t.x0=Math.min(t.x0,s.x0);t.x1=Math.max(t.x1,s.x1);return hit;
+      };
+      const kept=[];
+      for(const r of out.sort((a,b)=>b.strength-a.strength)){
+        let candidate=r;
+        for(let i=0;i<kept.length;){if(sameArea(kept[i],candidate)){candidate=mergeArea(kept.splice(i,1)[0],candidate);i=0;}else i++;}
+        kept.push(candidate);
       }
       out=kept;
     }
@@ -1061,6 +1070,17 @@
       });
       r.expo = chemis.map((c, k) => evalExposure(c.img, sigs[k].cs, parts, factors[k]));
       r.choice = chooseExposure(r.expo);
+      if(opt.autoMarkerLanes===false && chemis[r.choice])for(const sg of r.segs){
+        const pc=pieces[sg.region],c=chemis[r.choice],signal={w:c.img.w,h:c.img.h,data:sigs[r.choice].cs.sig};
+        const F=frame(pc.cx,pc.cy,pc.angle),u0=sg.x0??-pc.w/2,u1=sg.x1??pc.w/2;
+        const v0=sg.vc-r.above,v1=sg.vc+r.below;
+        let fit=detectBoxLanes(signal,F,u0,u1,v0,v1,{minPitch:sg.minLanePitch||0}),origin='image';
+        const observed=fit.lanes.length;
+        if(sg.evidenceLaneCount){fit={lanes:sg.signalLanes.slice(),pitch:sg.signalPitch,confident:true};}
+        else if(!fit.confident && preferredCount){const pitch=(u1-u0)/preferredCount;fit={lanes:Array.from({length:preferredCount},(_,i)=>u0+(i+.5)*pitch),pitch};origin='reference';}
+        if(fit.lanes.length){sg.signalLanes=fit.lanes;sg.signalPitch=fit.pitch;sg.laneCount=fit.lanes.length;sg.detectedLaneCount=observed;sg.countOrigin=origin;sg.expectedLaneCount=preferredCount||null;}
+      }
+
       // figure columns the row has bands in (tests and default lane range)
       r.ks = [...new Set(r.segs.flatMap(sg => sg.ms.map(m => colOf(pieces[sg.region], m)).filter(c => c != null)))].sort((a, b) => a - b);
     });
@@ -1072,7 +1092,7 @@
   // Count-constrained regions start at real horizontal signal islands, never at every
   // slot of the membrane-wide lattice. A lone marker, dust or a blank interval is not
   // enough evidence to invent another two-lane protein box.
-  function signalBlocks(img,rg,sg,f,count,pc,dividerLane) {
+  function signalBlocks(img,rg,sg,f,pc,dividerLane,fullFits=[]) {
     const win=sampleWindow(img,frame(rg.cx,rg.cy,rg.angle),-rg.w/2,rg.w/2,(sg.vc+sg.b0)/f,(sg.vc+sg.b1)/f,1);
     const profile=new Float32Array(win.w);
     for(let x=0;x<win.w;x++){for(let y=0;y<win.h;y++)profile[x]+=win.data[y*win.w+x];profile[x]/=win.h;}
@@ -1088,46 +1108,48 @@
     }
     const strongest=bands.slice().sort((a,b)=>b.mass-a.mass)[0];
     if(!strongest)return [];
-    let use=bands.filter(b=>b.width>=strongest.width*.35 && b.width<=strongest.width*3 && b.mass>=strongest.mass*.08);
+    let use=bands.filter(b=>b.width>=strongest.width*.15 && b.width<=strongest.width*3 && b.mass>=strongest.mass*.025);
     if(Number.isInteger(dividerLane)&&dividerLane>0&&dividerLane<=pc.roles.length){
       const d=dividerLane-1,p=pc.pitch/f,u=(pc.u0+d*pc.pitch)/f;use=use.filter(b=>Math.abs(b.u-u)>p*.4);
       const blocks=[];
-      for(const [a,z] of [[0,d-1],[d+1,pc.roles.length-1]])for(let k=a;k<=z;k+=count){
-        const n=Math.min(count,z-k+1),lanes=Array.from({length:n},(_,i)=>(pc.u0+(k+i)*pc.pitch)/f);
+      for(const [a,z] of [[0,d-1],[d+1,pc.roles.length-1]]){
+        const n=z-a+1;if(n<1)continue;const lanes=Array.from({length:n},(_,i)=>(pc.u0+(a+i)*pc.pitch)/f);
         const supports=lanes.filter(x=>use.some(b=>Math.abs(b.u-x)<Math.max(p*.35,b.width*.5-p*.05)));
         // Explicit boundaries can retain a weak/empty lane, but still require local
         // signal at two distinct lane positions before creating a multi-lane box.
         if(supports.length<Math.min(2,n))continue;
-        blocks.push({x0:Math.max(-rg.w/2,lanes[0]-p/2),x1:Math.min(rg.w/2,lanes[n-1]+p/2),count:n,pitch:p,lanes});
+        blocks.push({x0:Math.max(-rg.w/2,lanes[0]-p/2),x1:Math.min(rg.w/2,lanes[n-1]+p/2),count:n,pitch:p,lanes,trustedCount:n,minPitch:p*.5});
       }
       return blocks;
     }
+    // A well-supported continuous lattice in the original exposures also includes
+    // faint end lanes and fused bright bands that the HDR threshold can miss.
+    const widths=use.map(b=>b.width).sort((a,b)=>a-b),minWidthPitch=(widths[Math.floor((widths.length-1)/2)]||0)*.85;
+    const votes=[];
+    for(const fit of fullFits.filter(x=>x.pitch/f>=minWidthPitch&&x.confident&&x.lanes.length>=3&&x.support/x.lanes.length>=.85)){
+      let v=votes.find(v=>Math.abs(v.fit.pitch/fit.pitch-1)<.12&&Math.abs((v.fit.lanes[0]-fit.lanes[0])/fit.pitch-Math.round((v.fit.lanes[0]-fit.lanes[0])/fit.pitch))<.2);
+      if(!v){v={fit,n:0};votes.push(v);}v.n++;if(fit.lanes.length>v.fit.lanes.length)v.fit=fit;
+    }
+    votes.sort((a,b)=>b.n-a.n||b.fit.support-a.fit.support);
+    if(votes[0]&&votes[0].n>=Math.min(2,fullFits.length)){
+      const fit=votes[0].fit;return [{x0:-rg.w/2,x1:rg.w/2,lanes:fit.lanes.map(u=>u/f),pitch:fit.pitch/f,count:fit.lanes.length,trustedCount:fit.lanes.length,minPitch:minWidthPitch}];
+    }
+    const distances=use.slice(1).map((b,i)=>b.u-use[i].u).sort((a,b)=>a-b);
+    const typicalGap=distances[Math.floor((distances.length-1)/2)]||pc.pitch/f;
     const runs=[];
     for(const b of use){const run=runs[runs.length-1],last=run&&run[run.length-1];
-      if(last && b.u-last.u<2.6*(last.width+b.width)/2 && Math.max(last.width,b.width)<3*Math.min(last.width,b.width))run.push(b);else runs.push([b]);}
+      if(last && b.u-last.u<Math.min(1.85*typicalGap,2.6*(last.width+b.width)/2) && Math.max(last.width,b.width)<3*Math.min(last.width,b.width))run.push(b);else runs.push([b]);}
     const blocks=[];
     for(const run of runs){
-      if(run.length<Math.min(count,2))continue;
-      const emit=(a,z)=>{
-        const bs=run.slice(a,z+1),n=bs.length;
-        const pitch=n>1?(bs[n-1].u-bs[0].u)/(n-1):strongest.width*1.4;
-        const x0=Math.max(-rg.w/2,bs[0].u-pitch*.5),x1=Math.min(rg.w/2,bs[n-1].u+pitch*.5);
-        blocks.push({x0,x1,count:n,pitch,lanes:bs.map(b=>b.u)});
-      };
-      let a=0,z=run.length-1;
-      if(run.length>=2*count){
-        while(z-a+1>=2*count){emit(a,a+count-1);emit(z-count+1,z);a+=count;z-=count;}
-        const mass=run.map(b=>b.mass).sort((a,b)=>a-b),typical=mass[mass.length>>1];
-        if(z>=a&&run.slice(a,z+1).every(b=>b.mass>=typical*.35))emit(a,z);
-      }else{
-        const windows=[];
-        for(let k=0;k+count<=run.length;k++){
-          const bs=run.slice(k,k+count),lo=Math.min(...bs.map(b=>b.mass)),hi=Math.max(...bs.map(b=>b.mass));
-          if(lo>=hi*.18)windows.push({k,score:bs.reduce((n,b)=>n+b.mass,0)});
-        }
-        windows.sort((a,b)=>b.score-a.score);
-        if(windows.length)emit(windows[0].k,windows[0].k+count-1);
-      }
+      if(run.length<2)continue;
+      const gaps=run.slice(1).map((b,i)=>b.u-run[i].u).sort((a,b)=>a-b),p=gaps[gaps.length>>1];
+      let x0=Math.max(-rg.w/2,run[0].u-p/2),x1=Math.min(rg.w/2,run[run.length-1].u+p/2);
+      if(runs.length===1&&x1-x0>rg.w*.6){x0=-rg.w/2;x1=rg.w/2;}
+      const widths=run.map(b=>b.width).sort((a,b)=>a-b),minPitch=widths[Math.floor((widths.length-1)/2)]*.85;
+      const fit=detectBoxLanes(img,frame(rg.cx,rg.cy,rg.angle),x0,x1,(sg.vc+sg.b0)/f,(sg.vc+sg.b1)/f,{minPitch});
+      const distinct=run.every(b=>b.width<widths[Math.floor((widths.length-1)/2)]*1.65);
+      const lanes=distinct?run.map(b=>b.u):fit.lanes.length>=2?fit.lanes:run.map(b=>b.u),pitch=distinct?p:fit.lanes.length>=2?fit.pitch:p;
+      blocks.push({x0,x1,lanes,pitch,minPitch,count:lanes.length,trustedCount:distinct?lanes.length:null});
     }
     return blocks.sort((a,b)=>a.x0-b.x0);
   }
@@ -1383,16 +1405,17 @@
    * implies the fewest empty lanes. opt.pitch, the spacing the membrane's rows show, stands when the box does
    * not clearly keep another one — unless the box's bands are wider than it, which no lane spacing can be.
    * Returns {lanes: [u], pitch} (frame units). */
-  function fitCountGrid(profile, noise, count, u0, u1, step) {
+  function fitCountGrid(profile, noise, count, u0, u1, step, anchors) {
     const w=profile.length, fallback={lanes:Array.from({length:count},(_,i)=>u0+(i+.5)*(u1-u0)/count),pitch:(u1-u0)/count,confident:false};
     const max=Math.max(...profile);
     if(count===1 || w<8 || !(max>Math.max(1e-7,noise*6)))return fallback;
     const q=Float32Array.from(profile,v=>Math.sqrt(Math.max(0,v)/max)), at=(x,arr=q)=>{const a=Math.max(0,Math.min(w-1,Math.floor(x))),b=Math.min(w-1,a+1);return arr[a]+(arr[b]-arr[a])*Math.max(0,Math.min(1,x-a));};
-    const nominal=w/count, pMin=Math.max(2,nominal*.25),pMax=(w-1)/(count-.55);
+    const nominal=w/count,anchor=anchors?.length===count?{o:(anchors[0]-u0)/step-.5,p:(anchors[count-1]-anchors[0])/(count-1)/step}:null;
+    const pMin=anchor?Math.max(2,anchor.p*.88):Math.max(2,nominal*.25),pMax=anchor?Math.min((w-1)/(count-.55),anchor.p*1.12):(w-1)/(count-.55);
     let best=null;
     for(let t=0;t<=70;t++) {
       const p=pMin+(pMax-pMin)*t/70, smooth=gaussSmooth(q,Math.max(1,p*.065));
-      const lo=p*.2,hi=w-1-(count-1)*p-p*.2,delta=Math.max(.75,p/20);
+      const lo=anchor?Math.max(p*.2,anchor.o-anchor.p*.3):p*.2,hi=anchor?Math.min(w-1-(count-1)*p-p*.2,anchor.o+anchor.p*.3):w-1-(count-1)*p-p*.2,delta=Math.max(.75,p/20);
       for(let o=lo;o<=hi+.001;o+=delta) {
         let sum=0,support=0;
         for(let k=0;k<count;k++) {const x=o+k*p,v=at(x,smooth),edge=(at(x-p*.45,smooth)+at(x+p*.45,smooth))/2;const c=Math.max(0,v-edge);sum+=c;if(c>.11&&v>.16)support++;}
@@ -1446,7 +1469,7 @@
     const dif = []; for (let x = 2; x < w; x++) dif.push(Math.abs(prof[x] - prof[x - 2]));
     dif.sort((a, b) => a - b);
     const noise = 1.4826 * dif[dif.length >> 1] / Math.SQRT2 / Math.sqrt(2 * Math.sqrt(Math.PI) * sig0);
-    if(count)return fitCountGrid(q,noise,count,u0,u1,step);
+    if(count)return fitCountGrid(q,noise,count,u0,u1,step,opt.anchors);
     // two peaks of one lane (a band with a dip, the two edges of a smeared or clipped band) are one lane, at
     // their weighted middle: closer than 0.6 of the membrane's spacing, or — spacing unknown — with only a
     // shallow dip between them
@@ -1464,7 +1487,7 @@
       peaks.push({ i: p.i, v: p.v, prom: p.prom });
     });
     const U = x => win.u0 + (x + 0.5) * step;
-    if (peaks.length < 2) return { lanes: peaks.map(p => U(p.i)), pitch: opt.pitch || (u1 - u0) };
+    if (peaks.length < 2) return { lanes: peaks.map(p => U(p.i)), pitch: opt.pitch || (u1 - u0), confident:false };
     let xs = peaks.map(p => p.i);
     const gaps = [];
     for (let i = 1; i < xs.length; i++) gaps.push(xs[i] - xs[i - 1]);
@@ -1476,7 +1499,7 @@
     const halfW = p => { const lim = p.v - p.prom / 2, c = Math.round(p.i); let a = c, b = c; while (a > 0 && q[a - 1] > lim) a--; while (b < w - 1 && q[b + 1] > lim) b++; return b - a + 1; };
     const ws = peaks.map(halfW).sort((a, b) => a - b), wBand = ws[ws.length >> 1];
     // nor narrower than half the spacing the membrane's other rows show
-    const cands = new Set(), pMin = Math.max(4, w / 80, P0 ? P0 * 0.45 : 0, wBand * 0.85);
+    const cands = new Set(), pMin = Math.max(4, w / 80, P0 ? P0 * 0.45 : 0, wBand * 0.85, (opt.minPitch||0)/step);
     gaps.forEach(g => [1, 2, 3].forEach(d => { const p = g / d; if (p >= pMin && p <= w / 1.2) cands.add(Math.round(p * 2) / 2); }));
     let pitch = 0, bs = -Infinity;
     for (const p of cands) {
@@ -1525,7 +1548,8 @@
     const Pu = P * step;
     while (lanes.length > 1 && lanes[0] - u0 < Pu * 0.2) lanes.shift();
     while (lanes.length > 1 && u1 - lanes[lanes.length - 1] < Pu * 0.2) lanes.pop();
-    return { lanes, pitch: Pu };
+    const errors=kept.map(t=>Math.abs((t.x-O)/P-Math.round((t.x-O)/P))).sort((a,b)=>a-b);
+    return { lanes, pitch: Pu, confident:kept.length>=2 && kept.length/Math.max(1,lanes.length)>=.55 && errors[Math.floor((errors.length-1)*.8)]<.2, support:kept.length };
   }
 
   /* The band of a row inside its box: down the lanes' cores, a peak above the box's background and its extent

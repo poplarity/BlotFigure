@@ -204,3 +204,11 @@ msedge --headless=new --disable-gpu --user-data-dir=$env:TEMP\wb_dbg --allow-fil
 - 宽膜小条数：不能用 `pieceLattice` 的所有格子乘所有条带高度生成区域。`signalBlocks` 读取局部水平条带，需至少两个位置有支持才生成多道候选；明确分隔可保留弱/空道。`signalLanes` 传到应用层，不能重新在大框内拟合后丢失定位。垂直细化仅用原候选附近，不能全膜只取最高峰，否则会吞掉同一道上的其他蛋白。
 - `App.rebuildBoxes(ids)` 显式替换指定图片组，出错还原状态，调用方统一 commit 保留一次撤销。普通 `makeBoxes`/步骤切换继续保留人工编辑。`#secPieces.open .step-next` 必须可见；完成过的步骤也允许重复识别。
 - `tests/redetect.mjs` 测空白/窄伪影、同一膜多个蛋白高度、返回修改再识别、只影响本组、撤销、保留动作、清空再生和失败原子性。真实 TIFF 仅在仓库外回归。
+
+## 0.13.0：条数参考、多选、小屏与 Marker 缓存
+
+- `S.defaultLaneCount` 仍供手动新框、预设和显式批量操作使用；自动区域检测中它是参考，不可参与物理区域拆分。`sg.countOrigin` 区分图像、参考回退和手动条数，`expectedLaneCount` 记录识别时参考值。强证据来自各区域自身及跨曝光连续格点，不能把同图不同区域锁成一个数量。
+- `App.selectedBoxes` 是临时 UI 状态，不进项目或处理日志。矩形选择用旋转框多边形相交，限当前原图可见框；`App.deleteBoxes` 一次 commit，保留未选中的同膜/同排片段。切换工具、组或历史状态清除批量选择；表单与 IME 不触发删除。
+- 亮度输入放在可换行的 label 内，浮窗有最大视窗高度并滚动。源图标签需在 canvas 边界内，不能只依赖裁剪隐藏溢出。
+- 自定义 Marker 使用 `blotfigure-markers` IndexedDB v1 的 `catalog/ladders`；与 `blotfig.customLadders` 旧偏好合并恢复，写事务内按 ID/更新时间合并，避免其他标签页的导入丢失。`ProteinLadders.ready` 完成启动恢复，`flush()` 等待落盘；UI 只有持久写成功才提示已缓存。项目缓存的删除不影响这个库。
+- `tests/workspace014.mjs` 验证参考值 2–6、同图 8/4/6、鼠标矩形和修饰键多选、片段删除/撤销、输入法/文字保护、900/1024/1366 宽视窗、Marker 重开与阻止 localStorage 的 IDB 恢复。

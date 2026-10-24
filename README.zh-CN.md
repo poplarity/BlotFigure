@@ -4,7 +4,7 @@
 
 **把一次 Western blot 实验的原始图片做成可投稿的成图 —— 在浏览器里完成，离线可用。**
 
-[**下载单文件 HTML**](https://github.com/poplarity/BlotFigure/releases/download/v0.12.1/BlotFigure-v0.12.1.html) · [在线使用](https://poplarity.github.io/BlotFigure/) · [English](README.md)
+[**下载单文件 HTML**](https://github.com/poplarity/BlotFigure/releases/download/v0.13.0/BlotFigure-v0.13.0.html) · [在线使用](https://poplarity.github.io/BlotFigure/) · [English](README.md)
 
 [![CI](https://github.com/poplarity/BlotFigure/actions/workflows/ci.yml/badge.svg)](https://github.com/poplarity/BlotFigure/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -17,13 +17,13 @@
 
 **只需下载一个文件，用浏览器打开就能做图。不用安装、不用解压，也不用注册 GitHub。**
 
-1. **[点击下载 BlotFigure-v0.12.1.html](https://github.com/poplarity/BlotFigure/releases/download/v0.12.1/BlotFigure-v0.12.1.html)**，约 800 KB，保存到桌面或"下载"文件夹。
+1. **[点击下载 BlotFigure-v0.13.0.html](https://github.com/poplarity/BlotFigure/releases/download/v0.13.0/BlotFigure-v0.13.0.html)**，约 800 KB，保存到桌面或"下载"文件夹。
 2. **双击刚下载的文件。** 它会在浏览器中打开；如果打开的是记事本等软件，右键文件 → **打开方式** → 选择 Firefox、Chrome、Edge 或 Safari。
 3. **把一次实验的全部图片拖进去**：每张膜的各次曝光，加上一张看得见 Marker 的图（白光图，或白光 + 化学发光的复合图）。然后按左边的 5 步走，最后点 **导出 PNG**。
 
 这一个 HTML 文件已经包含完整界面和处理功能。保存后可以断网使用，也可以把同一个文件直接发给同事。
 
-**认准文件名：** 下载的是 **BlotFigure-v0.12.1.html**，不是仓库里的 **index.html**，也不是 **Source code (zip)** 或 **Source code (tar.gz)**。如果进入了[版本下载页](https://github.com/poplarity/BlotFigure/releases/latest)，展开 **Assets（附件）**，只点结尾为 **.html** 的文件即可。
+**认准文件名：** 下载的是 **BlotFigure-v0.13.0.html**，不是仓库里的 **index.html**，也不是 **Source code (zip)** 或 **Source code (tar.gz)**。如果进入了[版本下载页](https://github.com/poplarity/BlotFigure/releases/latest)，展开 **Assets（附件）**，只点结尾为 **.html** 的文件即可。
 
 **下次接着做：** 关闭前点 **文件 → 保存项目**（Ctrl+S）。得到的 **.blotfig** 项目文件包含全部图片和所有调整，下次用 BlotFigure 打开即可继续，换电脑也行。
 
@@ -83,13 +83,13 @@
 
 <img src="docs/gallery-zh.png" alt="相册式分组和右侧放大浏览" width="900">
 
-## 先指定泳道数
+## 预计泳道数作为参考
 
-第 2 步生成蛋白框之前，填写「每个蛋白框的泳道数」。填写每个成图区域的道数，框内空道也计数；较宽的膜会生成多个独立区域。中间是 Marker 时，可在「中间有分隔用的 Marker？」填写其序号，例如每框 4 道、分隔第 5 道生成左右两个框。未指定时按局部条带分区，不会把全膜网格按指定条数机械拆开。留空则自动计数。
+第 2 步可先填写「预计泳道数（参考）」。每个区域独立识别，同一张图里的 8 道、4 道分别保留；预设不强制统一，也不用于机械拆框。清晰图像与参考值不符时会提示核对，信号不清时才参考预设。中间有 Marker 时仍可手动指定分隔泳道，或自己框选需要的区域。
 
-第 3 步新增框沿用默认数量；不同的框可单独修改。修改默认数量不会改动已有框，需要时点「统一已有框的条数」。清空全部框再添加，会自动恢复新框所需的完整预览范围。
+第 3 步新加的手动框以预设数量起步；不同的框可单独修改。修改默认数量不会改动已有框，需要时点「统一已有框的条数」。清空全部框再添加，会自动恢复新框所需的完整预览范围。
 
-<img src="docs/lane-count.png" alt="生成蛋白框前指定泳道数" width="900">
+<img src="docs/lane-count.png" alt="生成蛋白框前填写预计泳道数参考" width="900">
 
 ## 五个步骤
 
@@ -115,6 +115,12 @@
 
 ## 常见操作
 
+<img src="docs/multi-select.png" alt="框选多个蛋白区域，批量退格删除" width="900">
+
+**多选删除**：常规编辑时在原图空白处左键拖出选择框；Ctrl/⌘/Shift 点击可增减选择。按退格或 Delete 批量删除，Ctrl/⌘+Z 一次恢复。空格或右键拖动用来平移；在文字框中输入时不会删蛋白框。
+
+**自定义 Marker 重复使用**：保存后从第 4 步列表顶部「我的 Marker」选择。缓存属于当前浏览器与站点；换电脑或换离线文件环境，可在「自定义 Marker」里备份为 JSON 后导入。
+
 - **框的范围不合适**（第 3 步）：在中间膜图上点框选中这一行，拖四条边或四个角自由缩放：框里的泳道留在原处，拖出去的地方按同样的间距补上泳道；拖框内部移动，可以拖到任何位置，包括别的膜条上（框就归那条膜条，分子量按它的 Marker 算）；按住 Shift 只上下移动这一行在各条膜条上的框。
 - **泳道对不上**（和 GelFigure 一样的"首尾泳道等间距"）：把框里最左、最右两条泳道线拖到泳道中心，中间的泳道均匀排开（按住 Alt 只动这一条）；条数不对就展开这一行，直接改泳道数（立即生效）。边缘条带被切掉一部分：把最外侧的泳道线往外拖。框上方数字是每一道在成图里的列（M = Marker 道，× = 不用，点数字切换）。多认了一道：点那根竖线按 Delete；漏了：双击框内加一道。列号错位：点 ‹ ›（最左到第 1 列，不会推动其他行）。
 - **框歪了**：框生成时已按条带自动摆正；还不正就拖框上方的 ↻，或选中后按 [ ]（0.1°，Shift 1°），或在展开的行里点"倾斜 − +"；"按条带摆正"重新自动摆，"归零"回到和膜条一样的角度。
@@ -134,7 +140,7 @@
 
 ## 版本
 
-当前版本 **0.12.1**：修复小泳道数造成大量空白、重叠候选框的问题。检查膜条可修改参数后直接「重新识别本组」，也可选择保留原框返回；重跑可撤销，其他组不变。保留 [可编辑 PPT 导出](docs/pptx.md) 等已有功能。详见[更新记录](CHANGELOG.md)。
+当前版本 **0.13.0**：各蛋白区域独立识别泳道数，预计条数仅作参考；新增框选多框批量删除，小屏亮度控件与浮窗适配，自定义 Marker 持久缓存和备份。详见[更新记录](CHANGELOG.md)。
 
 ## 隐私
 

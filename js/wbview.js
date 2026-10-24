@@ -32,7 +32,9 @@
     const n = id => App.S.rows.filter(r => r.blot === b.id && !r.hidden && r.img === id).length;
     return (App.chemiOf(b).slice().sort((p, q) => n(q.id) - n(p.id))[0] || App.markersOf(b)[0] || {}).id;
   }
+  let selectionBlot=null;
   function curImage() {
+    if(selectionBlot!==App.viewBlot){App.selectedBoxes.clear();selectionBlot=App.viewBlot;}
     const b = App.S && App.blot(App.viewBlot);
     if (!b) return null;
     if (!App.viewImg || !b.images.includes(App.viewImg)) {
@@ -229,10 +231,10 @@
       let last = null;
       row.segs.forEach(sg => {
         const pc = App.piece(b, sg.piece); if (!pc || sg.x0 == null) return;
-        const bx = segBox(row, sg, pc);
-        ctx.strokeStyle = col; ctx.lineWidth = sel ? 2 : 1.4; ctx.setLineDash(row.img === rec.id || rec.kind === 'marker' ? [] : [6, 4]);
+        const bx = segBox(row, sg, pc), chosen=sel||App.selectedBoxes.has(App.boxId(sg));
+        ctx.strokeStyle = chosen?'#2f6feb':col; ctx.lineWidth = chosen ? 2.2 : 1.4; ctx.setLineDash(row.img === rec.id || rec.kind === 'marker' ? [] : [6, 4]);
         line(bx.pts, true); ctx.stroke(); ctx.setLineDash([]);
-        if (sel) { ctx.fillStyle = col + '12'; line(bx.pts, true); ctx.fill(); }
+        if (chosen) { ctx.fillStyle = '#2f6feb20'; line(bx.pts, true); ctx.fill(); }
         drawLanes(row, sg, bx, sel, col, line);
         if (!marking && !pcsEd && (!row.hidden || sel)) {
           const tag = toScr(...bx.pts[0]); ctx.fillStyle = col; ctx.font = `600 10px ${FONT}`; ctx.textAlign = 'left';
@@ -246,9 +248,13 @@
         const on = App.images.get(row.img), ex = on ? App.expoLabel(on) : '';
         const txt = `${App.rowLabel(row).replace(L(/ 行$/, / row$/), '')} · ${on ? (row.img === App.bestSeen(row) ? '★ ' : '') + (ex.length > 10 ? ex.slice(0, 9) + '…' : ex) : ''}`;
         ctx.font = `600 11px ${FONT}`; ctx.textAlign = 'left';
-        const tw = ctx.measureText(txt).width + 12;
-        ctx.fillStyle = col; roundRect(p.x + 6, p.y - 1, tw, 18, 6); ctx.fill();
-        ctx.fillStyle = '#fff'; ctx.fillText(txt, p.x + 12, p.y + 12);
+        const limit=Math.max(60,Math.min(220,box.clientWidth*.55));let shown=txt;
+        while(shown.length>1&&ctx.measureText(shown+'…').width+12>limit)shown=shown.slice(0,-1);
+        if(shown!==txt)shown+='…';
+        const tw=ctx.measureText(shown).width+12,px=Math.max(4,Math.min(p.x+6,box.clientWidth-tw-4));
+        const py=Math.max(4,Math.min(p.y-(px<p.x?24:1),box.clientHeight-22));
+        ctx.fillStyle = col; roundRect(px, py, tw, 18, 6); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.fillText(shown, px+6, py+13);
       }
       ctx.globalAlpha = 1;
     });
@@ -284,7 +290,15 @@
         ctx.fillStyle = '#2f6feb'; ctx.font = `600 11px ${FONT}`; ctx.textAlign = 'left'; ctx.fillText(L('点一下放在这里', 'Click to put it here'), t.x + 6, t.y + 4);
       }
     }
-    document.getElementById('zoomLabel').textContent = Math.round(view.s * 100) + '%';
+    if(drag?.h.type==='marquee'&&drag.cur){
+      const a=toScr(drag.p0.x,drag.p0.y),b=toScr(drag.cur.x,drag.cur.y);
+      ctx.fillStyle='#2f6feb18';ctx.strokeStyle='#2f6feb';ctx.lineWidth=1;
+      ctx.fillRect(Math.min(a.x,b.x),Math.min(a.y,b.y),Math.abs(a.x-b.x),Math.abs(a.y-b.y));ctx.strokeRect(Math.min(a.x,b.x),Math.min(a.y,b.y),Math.abs(a.x-b.x),Math.abs(a.y-b.y));
+    }
+    const selection=App.boxSelection(),sb=document.getElementById('boxSelectionBar');
+    sb.classList.toggle('hidden',selection.length<2||!!App.mode);
+    document.getElementById('boxSelectionCount').textContent=L(`选中 ${selection.length} 个蛋白框`,`${selection.length} protein boxes selected`);
+    const zoomText=Math.round(view.s*100)+'%',zoomLabel=document.getElementById('zoomLabel');if(zoomLabel.textContent!==zoomText)zoomLabel.textContent=zoomText;
   }
   // adding a row: the box a click puts down — in the frame of the nearest piece, centred at p, as big as the
   // other boxes there
@@ -511,6 +525,16 @@
     }
     return { type: 'pan', p };
   }
+  function intersects(poly,a,b){
+    const rect=[[Math.min(a.x,b.x),Math.min(a.y,b.y)],[Math.max(a.x,b.x),Math.min(a.y,b.y)],[Math.max(a.x,b.x),Math.max(a.y,b.y)],[Math.min(a.x,b.x),Math.max(a.y,b.y)]];
+    const axes=[[1,0],[0,1],...poly.map((p,i)=>{const q=poly[(i+1)%poly.length];return[-(q[1]-p[1]),q[0]-p[0]];})];
+    return axes.every(([x,y])=>{const p=poly.map(t=>t[0]*x+t[1]*y),q=rect.map(t=>t[0]*x+t[1]*y);return Math.max(...p)>=Math.min(...q)&&Math.max(...q)>=Math.min(...p);});
+  }
+  function selectRectangle(d,p){
+    const ids=new Set(d.base);
+    for(const row of App.S.rows.filter(r=>r.blot===App.viewBlot&&!r.hidden))for(const sg of row.segs){const pc=App.pieceOf(row,sg);if(pc&&intersects(segBox(row,sg,pc).pts,d.p0,p))ids.add(App.boxId(sg));}
+    App.selectBoxes(ids);
+  }
   const CURSORS = { nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize', n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize' };
   const cursorFor = h => (!h ? 'default' : h.type === 'resize' || h.type === 'pcsize' ? CURSORS[h.k] : h.type === 'mark' ? 'ns-resize' : h.type === 'lane' ? 'ew-resize'
     : h.type === 'move' || h.type === 'align' || h.type === 'pcmove' ? 'move' : h.type === 'lanechip' || h.type === 'pcrot' || h.type === 'rotate' ? 'pointer'
@@ -532,6 +556,15 @@
       return;
     }
     const h = hitTest(sx, sy);
+    if(!App.mode&&!spaceDown&&(e.shiftKey||e.ctrlKey||e.metaKey)&&h.row){
+      const ids=new Set(App.boxSelection().map(x=>App.boxId(x.sg))),id=App.boxId(h.sg);
+      if(ids.has(id))ids.delete(id);else ids.add(id);App.selectBoxes(ids);G.UI.focusProtein();App.emit('select');e.preventDefault();return;
+    }
+    if(!App.mode&&!spaceDown&&h.type==='pan'){
+      const original=App.boxSelection().map(x=>App.boxId(x.sg));
+      drag={h:{type:'marquee'},sx,sy,p0:p,base:e.shiftKey||e.ctrlKey||e.metaKey?original:[],original,moved:false};
+      cv.style.cursor='crosshair';e.preventDefault();return;
+    }
     if (/^pc/.test(h.type)) {
       pedit.sel = h.pc ? h.pc.id : null;
       drag = { h, sx, sy, p0: p, orig: h.pc ? Object.assign({}, h.pc) : null, moved: false };
@@ -566,6 +599,7 @@
       draw();
     }
     if (h.row) {
+      App.selectedBoxes.clear();
       G.UI.focusProtein();
       if (App.selRow !== h.row.id || App.selSeg !== App.boxId(h.sg)) App.selLane = null;
       App.selRow = h.row.id; App.selSeg = App.boxId(h.sg);
@@ -586,12 +620,14 @@
     if (!drag) {
       if (e.target !== cv) return;
       hover = hitTest(sx, sy); hover.p = toImg(sx, sy);
+      cv.title=hover.row?App.rowLabel(hover.row):'';
       cv.style.cursor = cursorFor(hover);
       if (App.mode) draw();
       return;
     }
     if (Math.abs(sx - drag.sx) + Math.abs(sy - drag.sy) > 3) drag.moved = true;      // (a click with a shaky hand moves nothing)
     const h = drag.h, p = toImg(sx, sy);
+    if(h.type==='marquee'){drag.cur=p;if(drag.moved)selectRectangle(drag,p);draw();return;}
     if (h.type === 'newbox') { drag.cur = p; draw(); return; }
     if (/^pc/.test(h.type)) { if (drag.moved && pedit) { pieceDrag(drag, p, e); draw(); } return; }
     if (h.type === 'pan') { view.ox = drag.view0.ox + sx - drag.sx; view.oy = drag.view0.oy + sy - drag.sy; draw(); return; }
@@ -648,6 +684,7 @@
     if (!drag) return;
     const d = drag; drag = null;
     App.dragging = false;
+    if(d.h.type==='marquee'){if(!d.moved)App.selectBoxes(d.base);if(App.boxSelection().length)G.UI.focusProtein();App.emit('select');cv.style.cursor='default';return;}
     if (d.h.type === 'newbox') {
       const b = App.blot(App.viewBlot);
       let row = null;
@@ -722,6 +759,11 @@
   // move together (Alt: their spacing), ↑↓ moves the row, Delete removes it
   box.addEventListener('keydown', e => {
     if (e.target !== box || !App.S || e.isComposing || e.keyCode === 229 || e.defaultPrevented || e.repeat) return;
+    if(!App.mode&&e.key==='Escape'&&drag?.h.type==='marquee'){App.selectBoxes(drag.original);drag=null;App.emit('select');e.preventDefault();return;}
+    if(!App.mode&&(e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='a'){
+      App.selectBoxes(App.S.rows.filter(r=>r.blot===App.viewBlot&&!r.hidden).flatMap(r=>r.segs.map(App.boxId)));App.emit('select');e.preventDefault();return;
+    }
+    if(!App.mode&&(e.key==='Backspace'||e.key==='Delete')&&App.boxSelection().length>1){const n=App.deleteBoxes();G.UI.toast(L(`已删除 ${n} 个蛋白框（Ctrl+Z 可撤销）`,`Deleted ${n} protein boxes (Ctrl+Z to undo)`));e.preventDefault();return;}
     if (App.mode === 'align' && aligning(curImage())) {
       const rec = curImage(), k = e.key, big = e.shiftKey;
       const dir = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[k];
@@ -788,7 +830,8 @@
       lanes: sg.lanes.map(l => { const [x, y] = WB.toImg(bx.F, l.u, vm), p = toScr(x, y); return [p.x, p.y]; }) };
   }
 
-  new ResizeObserver(resize).observe(box);
+  let resizeFrame=0;
+  new ResizeObserver(()=>{if(!resizeFrame)resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;resize();});}).observe(box);
   App.on(w => {
     if (w === 'loaded') { document.getElementById('dropHint').classList.add('hidden'); fitted = null; resize(); }
     else if (fitted !== App.viewBlot && App.S) fitFull();

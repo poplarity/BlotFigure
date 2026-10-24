@@ -30,7 +30,7 @@
   }
 
   const App = { images: new Map(), analysis: {}, S: null, hist: [], future: [], listeners: [], selRow: null, selSeg: null, selLane: null, viewBlot: null, viewImg: null, mode: null };
-  App.VERSION = '0.12.1';
+  App.VERSION = '0.13.0';
   App.activeColumn = 'main';
   const columnFields = new Set(['lanes', 'range', 'hiCol', 'groups', 'conditions']);
   App.layoutColumns = () => App.S.layoutColumns || (App.S.layoutColumns = [{ id: 'main', title: '', titleSide: 'top' }]);
@@ -150,6 +150,19 @@
   const newState = () => ({ step: 1, defaultLaneCount: null, blots: [], rows: [], lanes: [], range: [1, 1], hiCol: 0, levels: {}, align: {}, conditions: [], groups: [], arrows: [], brackets: [], layoutColumns: [{ id: 'main', title: '', titleSide: 'top' }], style: defaultStyle() });
 
   /* ---------- events / undo ---------- */
+  // Selection is transient UI state, never part of a saved project or image processing.
+  App.selectedBoxes = new Set();
+  App.boxSelection = () => {
+    if(!App.S)return [];
+    const chosen=App.S.rows.filter(r=>r.blot===App.viewBlot&&!r.hidden).flatMap(row=>row.segs.filter(sg=>App.selectedBoxes.has(App.boxId(sg))).map(sg=>({row,sg})));
+    if(chosen.length)return chosen;
+    const row=App.row(App.selRow),sg=App.curSeg(row);return row&&sg&&row.blot===App.viewBlot&&!row.hidden?[{row,sg}]:[];
+  };
+  App.selectBoxes = ids => {
+    App.selectedBoxes=new Set(ids);
+    const chosen=App.S.rows.filter(r=>r.blot===App.viewBlot&&!r.hidden).flatMap(row=>row.segs.filter(sg=>App.selectedBoxes.has(App.boxId(sg))).map(sg=>({row,sg})));
+    App.selRow=chosen.length===1?chosen[0].row.id:null;App.selSeg=chosen.length===1?App.boxId(chosen[0].sg):null;App.selLane=null;
+  };
   App.on = fn => App.listeners.push(fn);
   App.emit = what => App.listeners.forEach(fn => fn(what));
   let raf = 0;
@@ -175,6 +188,7 @@
    * without writing back, selections that no longer exist cleared; pictures are resampled again where the
    * restored state aligns them differently */
   function swapState(json) {
+    App.selectedBoxes.clear();
     if (App.onSwap) App.onSwap();
     App.S = JSON.parse(json);
     if (!App.layoutColumns().some(c => c.id === App.activeColumn)) App.activeColumn = 'main';
@@ -351,6 +365,7 @@
   App.restoreSnapshot = restoreFrom;
   App.customLadders = () => [...new Set((App.S?.blots || []).map(b => b.ladderId))].map(G.ProteinLadders.get).filter(l => l?.custom);
   App.resetSession = () => {
+    App.selectedBoxes.clear();
     clearTimeout(App.draftTimer); if (App.onSwap) App.onSwap();
     App.S = null; App.images.clear(); retiredImages.clear(); App.analysis = {};
     App.hist = []; App.future = []; App.initial = null; App.saved = null;
@@ -358,18 +373,24 @@
     App.projectId = null; App.projectName = ''; App.cachedSnapshot=null; App.cacheStatus=null; App.activeColumn = 'main'; App.curStep = 1;
     App.emit('empty');
   };
-  App.deleteBox = (row, sg) => {
-    if (!row || !App.S.rows.includes(row)) return false;
-    sg = sg || App.curSeg(row); if (!sg || !row.segs.includes(sg)) return false;
-    App.blot(row.blot).boxesReady = true;
-    row.segs.forEach(s => { s.above = App.boxAbove(row, s); s.below = App.boxBelow(row, s); });
-    row.segs = row.segs.filter(s => s !== sg);
-    if (!row.segs.length) { App.S.rows = App.S.rows.filter(r => r !== row); App.selRow = null; }
-    else App.fitRowHeight(row);
-    App.selSeg = null; App.selLane = null; App.commit(); return true;
+  App.deleteBoxes = (chosen=App.boxSelection()) => {
+    if(!App.S)return 0;
+    const targets=new Set(chosen.filter(({row,sg})=>App.S.rows.includes(row)&&row.segs.includes(sg)).map(x=>x.sg));
+    if(!targets.size)return 0;
+    for(const row of App.S.rows){
+      if(!row.segs.some(s=>targets.has(s)))continue;
+      App.blot(row.blot).boxesReady=true;
+      row.segs.forEach(s=>{s.above=App.boxAbove(row,s);s.below=App.boxBelow(row,s);});
+      row.segs=row.segs.filter(s=>!targets.has(s));if(row.segs.length)App.fitRowHeight(row);
+    }
+    App.S.rows=App.S.rows.filter(r=>r.segs.length);App.selectedBoxes.clear();
+    if(!App.row(App.selRow))App.selRow=null;App.selSeg=null;App.selLane=null;
+    App.commit();return targets.size;
   };
+  App.deleteBox = (row,sg) => !!(row&&App.deleteBoxes([{row,sg:sg||App.curSeg(row)}]));
 
   App.addFiles = async function (files) {
+    await G.ProteinLadders.ready;
     files = [...files].filter(f => /\.(tiff?|png|jpe?g|bmp)$/i.test(f.name));
     if (!files.length) return 0;
     const first = !App.S;
@@ -763,8 +784,8 @@
         const pc = pcs[s.region], lat = latticeLanes(pc, -Infinity, Infinity);
         const sg = { piece: pc.id, vc: s.vc, b0: s.b0, b1: s.b1, lanes: lat.lanes, c0: lat.c0, p: lat.p, x0: s.x0 ?? -pc.w / 2, x1: s.x1 ?? pc.w / 2 };
         // a piece without lanes of its own in the analysis: read them from the row's box
-        if(s.signalLanes){sg.lanes=s.signalLanes.map(u=>({u,r:'s'}));sg.c0=1;sg.laneCount=s.laneCount;sg.p=s.signalPitch;}
-        else if(App.S.defaultLaneCount){sg.lanes=[];sg.c0=1;sg.laneCount=s.laneCount||App.S.defaultLaneCount;App.redetectBox(row,sg);}
+        if(s.signalLanes){sg.lanes=s.signalLanes.map(u=>({u,r:'s'}));sg.c0=1;sg.laneCount=s.laneCount;sg.p=s.signalPitch;sg.countOrigin=s.countOrigin||'image';sg.detectedLaneCount=s.detectedLaneCount??s.signalLanes.length;sg.expectedLaneCount=s.expectedLaneCount||null;}
+        else if(!sg.lanes.length&&App.S.defaultLaneCount){sg.c0=1;sg.laneCount=App.S.defaultLaneCount;sg.countOrigin='reference';App.redetectBox(row,sg);}
         else if (!sg.lanes.length) App.redetectBox(row, sg);
         App.snapBox(sg);
         row.segs.push(sg);
@@ -888,6 +909,7 @@
    * lane of the row's picture, when 3 lanes or more show it clearly and agree on a line. The angle added
    * (degrees), or null. */
   App.levelBox = function (row, sg) {
+    if(sg.countOrigin==='reference')return null;
     const pc = App.pieceOf(row, sg), rec = App.images.get(row.img);
     if (!pc || !rec || rec.kind !== 'chemi') return null;
     const F = App.segFrame(pc, sg), p = App.segPitch(sg), vT = sg.vc - App.boxAbove(row, sg), vB = sg.vc + App.boxBelow(row, sg), was = sg.vc + (sg.b0 + sg.b1) / 2;
@@ -905,6 +927,13 @@
     App.setSegRot(pc, sg, (sg.rot || 0) + deg);
     App.findBand(row, sg);
     return deg;
+  };
+  App.prepareDetectedBox=(row,sg)=>{
+    App.levelBox(row,sg);
+    if(sg.countOrigin!=='image'||sg.lanes.length<2)return;
+    const pc=App.pieceOf(row,sg),rec=App.images.get(row.img);if(!pc||!rec)return;
+    const fit=WB.detectBoxLanes(sigOf(rec),App.segFrame(pc,sg),sg.x0,sg.x1,sg.vc-App.boxAbove(row,sg),sg.vc+App.boxBelow(row,sg),{count:sg.lanes.length,anchors:sg.lanes.map(l=>l.u)});
+    if(fit.confident){sg.lanes.forEach((l,i)=>l.u=fit.lanes[i]);sg.p=fit.pitch;App.snapBox(sg);}
   };
   // edges of lane i: half-way to its neighbours, half a spacing out at the ends
   App.laneLeft = (sg, i) => { const lns = sg.lanes; return i > 0 ? (lns[i - 1].u + lns[i].u) / 2 : lns[i].u - App.segPitch(sg) / 2; };
@@ -1046,7 +1075,7 @@
             App.restoreContinuous(row,sg.cut.id);
           }
         }
-        sg.laneCount=n;App.evenBox(row,sg,n);
+        sg.laneCount=n;sg.countOrigin='manual';App.evenBox(row,sg,n);
         roles.forEach(l=>{const near=sg.lanes.slice().sort((a,b)=>Math.abs(a.u-l.u)-Math.abs(b.u-l.u))[0];if(near&&Math.abs(near.u-l.u)<sg.p*.4)near.r=l.r;});
         if(parts) {
           const index=row.segs.indexOf(sg),temporary={...row,segs:[sg]};App.splitExcluded(temporary);
@@ -1095,12 +1124,12 @@
   App.addLane = function (row, sg, u) {
     const pc = App.pieceOf(row, sg), p = App.segPitch(sg), r = App.roleAt(pc, u, p);
     const at = sg.lanes.filter(l => l.u < u).length, firstS = r === 's' && !sg.lanes.slice(0, at).some(l => l.r === 's');
-    sg.lanes.splice(at, 0, { u, r }); if(sg.laneCount)sg.laneCount=sg.lanes.length;
+    sg.lanes.splice(at, 0, { u, r });sg.countOrigin='manual'; if(sg.laneCount)sg.laneCount=sg.lanes.length;
     if (firstS && App.nSample(sg) > 1 && sg.c0 > 1) sg.c0--;
     return at;
   };
   // a lane taken out (detected where there is none): the lanes after it move up a column
-  App.removeLane = (row, sg, i) => { if (sg.lanes.length > 1 && sg.lanes[i]) {sg.lanes.splice(i, 1);if(sg.laneCount)sg.laneCount=sg.lanes.length;} };
+  App.removeLane = (row, sg, i) => { if (sg.lanes.length > 1 && sg.lanes[i]) {sg.lanes.splice(i, 1);sg.countOrigin='manual';if(sg.laneCount)sg.laneCount=sg.lanes.length;} };
   App.moveLane = function (sg, i, u) {
     const lns = sg.lanes, lo = i > 0 ? lns[i - 1].u + 3 : -Infinity, hi = i < lns.length - 1 ? lns[i + 1].u - 3 : Infinity;
     lns[i].u = Math.max(lo, Math.min(hi, u));
@@ -1673,7 +1702,7 @@
       if (App.analysis[b.id] && App.analysis[b.id].outlinesOnly) App.analyze(b);
       if (!b.boxesReady && !App.S.rows.some(r => r.blot === b.id) && App.analysis[b.id]) App.S.rows.push(...App.rowsFromAnalysis(b));
       b.boxesReady = true;
-      App.S.rows.filter(r => r.blot === b.id && !old.has(r.id)).forEach(r => r.segs.forEach(sg => App.levelBox(r, sg)));
+      App.S.rows.filter(r => r.blot === b.id && !old.has(r.id)).forEach(r => r.segs.forEach(sg => App.prepareDetectedBox(r, sg)));
     });
   };
   // Explicit repeatable detection. Ordinary navigation still preserves edited boxes.
@@ -1687,7 +1716,7 @@
       for(const b of App.S.blots.filter(b=>targets.has(b.id))){
         if(outlines && Object.hasOwn(outlines,b.id))App.setPieces(b,outlines[b.id]);
         App.reanalyze(b,{fresh:true});
-        App.S.rows.filter(r=>r.blot===b.id).forEach(r=>r.segs.forEach(s=>App.levelBox(r,s)));
+        App.S.rows.filter(r=>r.blot===b.id).forEach(r=>r.segs.forEach(s=>App.prepareDetectedBox(r,s)));
       }
       columns.forEach(id=>App.fitLanes(true,id));
       if(App.selRow&&!App.row(App.selRow)){App.selRow=null;App.selSeg=null;App.selLane=null;}
@@ -1935,7 +1964,7 @@
           recommendedExposure: (App.images.get(App.bestExpo(r)) || {}).name || null, saturatedBandFrac: e ? +e.satFrac.toFixed(5) : null,
           apparentKDa: App.rowKda(r) ? r1(App.rowKda(r)) : null,
           levels: { black: lv.black, white: lv.white, ownToThisRow: !!r.lv },
-          boxes: r.segs.map(sg => ({ id: App.boxId(sg), label: App.boxLabel(sg), piece: letter(b, sg.piece), firstFigureColumn: sg.c0, fixedLaneCount: sg.laneCount || null, tiltDeg: sg.rot || 0,
+          boxes: r.segs.map(sg => ({ id: App.boxId(sg), label: App.boxLabel(sg), piece: letter(b, sg.piece), firstFigureColumn: sg.c0, fixedLaneCount: sg.laneCount || null, countOrigin:sg.countOrigin||null, expectedLaneCountAtDetection:sg.expectedLaneCount||null, tiltDeg: sg.rot || 0,
             boxPx: { u0: r1(sg.x0), u1: r1(sg.x1), vTop: r1(sg.vc - App.boxAbove(r, sg)), vBottom: r1(sg.vc + App.boxBelow(r, sg)) },
             lanes: sg.lanes.map(l => ({ uPx: r1(l.u), role: l.r === 's' ? 'sample' : l.r === 'm' ? 'marker' : 'left out' })) })) };
       }),

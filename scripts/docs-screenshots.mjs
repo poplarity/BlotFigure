@@ -84,5 +84,10 @@ try {
   await page.locator('#btnRebuildGroup').scrollIntoViewIfNeeded();
   await page.waitForTimeout(400);
   await page.screenshot({path:path.join(root,'docs/redetect.png')});
+  await page.evaluate(()=>{UI.openStep(3);BApp.selectBoxes(BApp.S.rows.filter(r=>r.blot===BApp.viewBlot).slice(0,2).flatMap(r=>r.segs.map(BApp.boxId)));BApp.emit('select');});
+  await page.screenshot({path:path.join(root,'docs/multi-select.png')});
+  await page.setViewportSize({width:1024,height:600});
+  await page.evaluate(()=>{BApp.selectBoxes([BApp.boxId(BApp.S.rows[0].segs[0])]);BApp.viewImg=BApp.S.rows[0].img;BApp.emit('select');View.fitFull();});
+  await page.waitForTimeout(300);await page.screenshot({path:path.join(root,'docs/compact-controls.png')});
   console.log('Documentation screenshots (synthetic demo only):', info);
 } finally { await browser.close(); }

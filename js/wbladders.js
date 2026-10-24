@@ -55,7 +55,50 @@
     { id: 'sg_c610210', vendor: 'Chinese vendors', name: 'Sangon RealBand Two-color 10–250 kDa (C610210)', zh: 'Sangon 生工 RealBand Two-color 10–250 kDa (C610210)', sizes: [250, 150, 100, 70, 50, 40, 35, 25, 20, 15, 10], ref: [70, 25] }
   ];
   const KEY = 'blotfig.customLadders';
-  function loadCustom() { try { return JSON.parse(G.PrefStorage.getItem(KEY) || '[]'); } catch (e) { return []; } }
+  function validCustom(list){
+    if(!Array.isArray(list))return [];
+    return list.flatMap(l=>{try{if(!l||!l.id||!Array.isArray(l.sizes))return [];return [{...l,name:String(l.name||'My marker'),sizes:parseSizes(l.sizes.join(' ')),custom:true,vendor:'Custom'}];}catch{return [];}});
+  }
+  function readLegacy(){try{return validCustom(JSON.parse(G.PrefStorage?.getItem(KEY)||'[]'));}catch{return [];}}
+  let custom=readLegacy(),dbPromise=null,writeQueue=Promise.resolve(),durable=false;
+  const loadCustom=()=>custom;
+  const changed=()=>G.dispatchEvent(new Event('blotfigure-markers-changed'));
+  function merge(incoming){const map=new Map(incoming.map(l=>[l.id,l]));for(const l of custom){const old=map.get(l.id);if(!old||(l.updatedAt||0)>=(old.updatedAt||0))map.set(l.id,l);}custom=[...map.values()];}
+  function database(){
+    if(!dbPromise)dbPromise=new Promise((resolve,reject)=>{
+      const timer=setTimeout(()=>reject(new Error('Marker cache timeout')),3000);
+      let r;try{r=G.indexedDB.open('blotfigure-markers',1);}catch(e){clearTimeout(timer);reject(e);return;}
+      r.onupgradeneeded=()=>r.result.createObjectStore('catalog');
+      r.onsuccess=()=>{clearTimeout(timer);r.result.onversionchange=()=>{r.result.close();dbPromise=null;};resolve(r.result);};
+      r.onerror=r.onblocked=()=>{clearTimeout(timer);reject(r.error||new Error('Marker cache unavailable'));};
+    });
+    return dbPromise;
+  }
+  async function transaction(mode,value){const db=await database();return new Promise((resolve,reject)=>{
+    const tx=db.transaction('catalog',mode),st=tx.objectStore('catalog'),r=st.get('ladders');let result;
+    r.onsuccess=()=>{
+      if(mode==='readonly'){result=r.result;return;}
+      // Merge inside the write transaction so another tab's imports cannot be lost.
+      const merged=new Map(validCustom(r.result).map(l=>[l.id,l]));
+      for(const l of value){const old=merged.get(l.id);if(!old||(l.updatedAt||0)>=(old.updatedAt||0))merged.set(l.id,l);}
+      result=[...merged.values()];st.put(result,'ladders');
+    };
+    tx.oncomplete=()=>resolve(result);tx.onerror=tx.onabort=()=>reject(tx.error||new Error('Marker cache failed'));
+  });}
+  const ready=(async()=>{
+    try{merge(validCustom(await transaction('readonly')));if(custom.length)await transaction('readwrite',JSON.parse(JSON.stringify(custom)));durable=true;}
+    catch{durable=false;}
+    if(custom.length)G.PrefStorage?.setItem(KEY,JSON.stringify(custom));changed();
+  })();
+  function persist(){
+    G.PrefStorage?.setItem(KEY,JSON.stringify(custom));
+    writeQueue=writeQueue.catch(()=>{}).then(async()=>{
+      await ready;
+      try{merge(await transaction('readwrite',JSON.parse(JSON.stringify(custom))));durable=true;}catch{durable=false;}
+      return durable||!!G.PrefStorage?.persistent;
+    });return writeQueue;
+  }
+  G.addEventListener('storage',e=>{if(e.key===KEY){try{merge(validCustom(JSON.parse(e.newValue||'[]')));changed();}catch{}}});
   function parseSizes(raw) {
     const tokens=String(raw).replace(/kda/ig,'').trim().split(/[\s,，;；、]+/).filter(Boolean);
     if(!tokens.length || tokens.some(t=>!/^\d+(?:\.\d+)?$/.test(t) || +t<=0 || +t>2000)) throw new Error((G.L|| (zh=>zh))('请输入 0–2000 之间的分子量数字，以空格、逗号或换行分隔。','Enter molecular weights between 0 and 2000, separated by spaces, commas or new lines.'));
@@ -65,8 +108,8 @@
   }
   function saveCustom(name, sizes, options={}) {
     sizes=parseSizes(sizes.join(' ')); name=String(name||'').trim() || (G.L|| (zh=>zh))('我的 Marker','My marker');
-    const list=loadCustom(), old=list.find(l=>l.name===name && l.sizes.join(',')===sizes.join(',') && (l.ref||[]).join(',')===(options.ref||[]).join(',')), lad={id:options.id||old?.id||'c_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),name,sizes,ref:(options.ref||[]).filter(k=>sizes.includes(k)),custom:true,vendor:'Custom'};
-    G.PrefStorage.setItem(KEY,JSON.stringify([...list.filter(l=>l.id!==lad.id),lad]));return lad;
+    const list=loadCustom(), old=list.find(l=>l.name===name && l.sizes.join(',')===sizes.join(',') && (l.ref||[]).join(',')===(options.ref||[]).join(',')), lad={id:options.id||old?.id||'c_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),name,sizes,ref:(options.ref||[]).filter(k=>sizes.includes(k)),custom:true,vendor:'Custom',updatedAt:Date.now()};
+    custom=[...list.filter(l=>l.id!==lad.id),lad];persist();changed();return lad;
   }
   function importDefinitions(definitions) {
     for(const l of definitions) { if(l?.custom && l.id && Array.isArray(l.sizes)) saveCustom(l.name,l.sizes,{id:l.id,ref:l.ref}); }
@@ -81,11 +124,11 @@
     const numbers=sizeCol>=0 ? lines.slice(1).filter(x=>x.trim()).map(x=>x.split(/[,;\t]/)[sizeCol]||'').join(' ') : txt;
     return [{name:filename.replace(/\.[^.]+$/,''),sizes:parseSizes(numbers),ref:[]}];
   }
-  const all = () => L.concat(loadCustom());
+  const all = () => loadCustom().concat(L);
   const get = id => all().find(l => l.id === id);
   // the vendors in list order, each with its ladders (for grouped menus), in the interface language (custom
   // ladders saved by earlier versions say 自定义)
-  const VENDOR_ZH = { 'Chinese vendors': '国内厂家', Custom: '自定义', '自定义': '自定义', Other: '其他' };
+  const VENDOR_ZH = { 'Chinese vendors': '国内厂家', Custom: '我的 Marker', '自定义': '自定义', Other: '其他' };
   const vendorLabel = v => { const L = G.L || (zh => zh), en = v === '自定义' ? 'Custom' : v; return VENDOR_ZH[v] ? L(VENDOR_ZH[v], en) : v; };
   const groups = () => { const out = []; all().forEach(l => { const v = vendorLabel(l.vendor || 'Other'); let g = out.find(x => x.vendor === v); if (!g) out.push(g = { vendor: v, ladders: [] }); g.ladders.push(l); }); return out; };
   // a ladder's name on screen: Chinese vendors' with their Chinese brand in the Chinese interface; figures,
@@ -103,5 +146,5 @@
   }
   const LOADING_RE = /gapdh|actin|tubulin|vinculin|lamin|histone|h3\b|hsp90|pcna|cofilin|total protein|ponceau|内参/i;
 
-  G.ProteinLadders = { all, get, groups, label, saveCustom, parseSizes, parseImport, importDefinitions, suggest, LOADING_RE };
+  G.ProteinLadders = { ready, flush:()=>writeQueue, custom:()=>JSON.parse(JSON.stringify(custom)), get persistent(){return durable||!!G.PrefStorage?.persistent;}, all, get, groups, label, saveCustom, parseSizes, parseImport, importDefinitions, suggest, LOADING_RE };
 })(window);

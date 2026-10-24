@@ -4,6 +4,24 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-25
+
+Independent lane counts, file-manager-style box selection, compact controls and persistent custom markers.
+
+**中文摘要**
+- 预计泳道数改为识别参考。先找连续蛋白区域，再逐框读图数泳道；同图的 8、4、6 道各自保留。清晰图像与参考值不符时保留图像结果并提示，信号不足时才使用参考；不再按预设数量机械拆框。
+- 跨曝光核对连续泳道，保留弱端道，限制把宽条带的内部起伏误当成多道；重复候选只在同一膜条、相近高度和同一来源区域内合并。明确的 Marker 分隔与单框手动修改仍有效。
+- 原图空白处左键拖动框选多个蛋白框，Ctrl/⌘/Shift 点击增减；Backspace/Delete 批量删除，一次撤销恢复；同一膜条的其他框不受影响。空格或右键拖动继续平移，文本输入和中文输入法保持安全。
+- 亮度栏、曝光标签与小屏顶栏自动换行；浮窗、菜单限制在视窗内并可滚动，图上标签也限制在画布内。第二步顶部引导明确提示先填写预计泳道数（可选），点击引导可定位输入框。
+- 自定义 Marker 增加独立 IndexedDB 缓存，与旧偏好数据合并恢复；「我的 Marker」在列表顶部，一次导入可重复使用，支持导出备份。保存失败不会声称已缓存，临时模式仍能使用。
+
+### Added / fixed
+- Lane-count references no longer determine protein-region segmentation. Dense image-supported grids are retained per region; explicit local counts and batch application remain available.
+- Rectangle/multi-selection with one-action deletion/undo, individual crop-fragment isolation, and preserved pan/IME/text-edit gestures.
+- Wrapping level controls, bounded scrollable popovers and menus, viewport-safe labels, and actionable step-two lane guidance.
+- Durable custom-marker catalogue independent of projects, legacy preference recovery, cross-tab transactional merges and backup export.
+- New regression cases sweep references 2–6 on the demo, preserve 8/4/6 regions in one synthetic picture, drive real mouse/key gestures at small laptop sizes, and reopen marker caches with preferences unavailable.
+
 ## [0.12.1] - 2026-10-23
 
 Fix over-segmentation with small lane counts and make strip-stage detection repeatable.

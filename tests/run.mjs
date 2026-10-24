@@ -18,6 +18,7 @@ import { usabilityChecks } from './usability.mjs';
 import { layoutChecks } from './layout.mjs';
 import { laneCountChecks } from './lanecount.mjs';
 import { workflowChecks } from './workflow.mjs';
+import { workspaceChecks } from './workspace014.mjs';
 import { redetectChecks } from './redetect.mjs';
 import { iterationChecks } from './iteration012.mjs';
 
@@ -53,6 +54,8 @@ async function runIn(name, base) {
   const add = list => { out.results.push(...list); if (list.some(r => r[0] === 'FAIL')) out.ok = false; };
   const browser = await ENGINES[name].launch(channel && name === 'chromium' ? { channel } : {});
   try {
+    if (arg('suite') === 'startup') { add(await startupChecks(browser,base,ROOT)); return out; }
+    if (arg('suite') === 'workspace') { add(await workspaceChecks(browser,base,ROOT,name)); return out; }
     if (arg('suite') === 'redetect') { add(await redetectChecks(browser, base)); return out; }
     if (arg('suite') === 'iteration012') { add(await iterationChecks(browser, base, ROOT, name)); return out; }
     if (arg('suite') === 'lanecount') { add(await laneCountChecks(browser, base)); return out; }
@@ -89,6 +92,7 @@ async function runIn(name, base) {
     add(await usabilityChecks(browser, base));
     add(await laneCountChecks(browser, base));
     add(await redetectChecks(browser, base));
+    add(await workspaceChecks(browser, base, ROOT, name));
     add(await iterationChecks(browser, base, ROOT, name));
     // privacy: the Content Security Policy must stop every request to another origin
     {

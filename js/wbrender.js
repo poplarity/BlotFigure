@@ -133,6 +133,7 @@
           const iy = y + (row.above - App.boxAbove(row, cur.sg)) * sc, ih = (App.boxAbove(row, cur.sg) + App.boxBelow(row, cur.sg)) * sc;
           const tag = P ? `data-column="${column.id}" data-row="${row.id}" data-piece="${cur.sg.piece}" data-box="${App.boxId(cur.sg)}" ` : '';
           els.push(`<image ${forPPT?`data-pptx-image="${imageId}" `:""}${tag}x="${f(x0)}" y="${f(iy)}" width="${f(w)}" height="${f(ih)}" preserveAspectRatio="none" href="${ras.href}" xlink:href="${ras.href}"/>`);
+          if(P&&App.selectedBoxes.has(App.boxId(cur.sg)))els.push(`<rect x="${f(x0)}" y="${f(iy)}" width="${f(w)}" height="${f(ih)}" fill="#2f6feb" fill-opacity="0.08" stroke="#2f6feb" stroke-width="1.1" pointer-events="none"/>`);
           if (st.border) els.push(`<rect ${tag}x="${f(x0)}" y="${f(iy)}" width="${f(w)}" height="${f(ih)}" fill="none" stroke="#000" stroke-width="${f(lw)}" pointer-events="none"/>`);
           cur = null;
         };
