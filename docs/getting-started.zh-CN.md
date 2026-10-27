@@ -1,6 +1,6 @@
 # 下载一个文件，开始做图
 
-`0.14.0-dev` 的字体、标注和局部放大见[桌面编辑说明](desktop-editing.zh-CN.md)。下方下载链接指向已发布的稳定版。
+`0.14.0` 的字体、标注和局部放大见[桌面编辑说明](desktop-editing.zh-CN.md)。下方下载的版本已包含这些功能。
 
 [English](getting-started.md) · [返回项目介绍](../README.zh-CN.md)
 
@@ -10,7 +10,7 @@
 
 ## 1. 下载
 
-**[点击下载 BlotFigure-v0.13.1.html](https://github.com/poplarity/BlotFigure/releases/download/v0.13.1/BlotFigure-v0.13.1.html)**，保存到桌面或"下载"文件夹。
+**[点击下载 BlotFigure-v0.14.0.html](https://github.com/poplarity/BlotFigure/releases/download/v0.14.0/BlotFigure-v0.14.0.html)**，保存到桌面或"下载"文件夹。
 
 这是完整的工具，约 700 KB。网页界面、样式和图像处理代码都已经装在这个文件里。
 

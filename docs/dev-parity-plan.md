@@ -1,6 +1,6 @@
 # Desktop parity work (dev only)
 
-User scope, 2026-10-27: implement the retained GelFigure parity features, finish and push to `dev`. Do not merge or deploy `main` until the user confirms.
+User scope, 2026-10-27: implement the retained GelFigure parity features and push to `dev`. The user subsequently confirmed merging into `main`; v0.14.0 is prepared for that release.
 
 Excluded by the user's latest correction: original-colour/gray switching and RGB source-image processing; phone/tablet adaptation; redesigning Marker operations, catalogue previews/favourites, draggable marker panels or other minor Marker UX changes. Marker changes are limited to substantiated serious bugs (the imported-definition ID collision).
 
@@ -15,6 +15,6 @@ Implementation checklist:
 - [x] Compact layout/export checks and existing-core regression. Existing WB numbering stays regional; no forced global well numbering.
 - [x] Offline update history, explicit text feedback, voluntary support/Star and post-export notices.
 - [x] Bilingual docs, single-file build, meaningful browser/export tests.
-- [ ] Commit and push `dev`, verify remote/CI. Keep `main` unchanged.
+- [x] Initial dev push and three-engine PR CI verified. Main merge is now explicitly authorised; deployment and release checks are tracked in GitHub.
 
 This file replaces the earlier broad planning documents for implementation scope.

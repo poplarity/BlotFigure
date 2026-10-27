@@ -1,8 +1,8 @@
-# Desktop figure editing (0.14.0-dev)
+# Desktop figure editing (0.14.0)
 
 [中文说明](desktop-editing.zh-CN.md) · [Project](../README.md)
 
-This is the `dev` preview. The stable site remains v0.13.1. Image groups, the five-step workflow, per-region exposure/levels, local lane detection, manual Marker calibration and sorting retain their existing behaviour.
+Available in v0.14.0. Image groups, the five-step workflow, per-region exposure/levels, local lane detection, manual Marker calibration and sorting retain their existing behaviour.
 
 ![Desktop typography and region inset, using the synthetic built-in example](desktop-typography.png)
 

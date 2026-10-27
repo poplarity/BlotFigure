@@ -10,10 +10,11 @@ export async function communityChecks(browser,base,root){
  const check=async(n,fn)=>{console.log('community:',n);try{await fn();out.push(['ok',n]);}catch(e){out.push(['FAIL',n,e.message]);}};
  try{
   await page.goto(base+'/index.html?lang=en');
+  const version=await page.evaluate(()=>BApp.VERSION);
   await check('Version notice appears once without stealing focus; history remains available',async()=>{
    await page.waitForSelector('#updateNotice:not(.hidden)');assert.equal(await page.evaluate(()=>document.activeElement.tagName),'BODY');
    await page.click('#updateNoticeClose');await page.reload({waitUntil:'domcontentloaded'});assert(await page.locator('#updateNotice').evaluate(e=>e.classList.contains('hidden')));
-   await page.click('#btnUpdatesStart');assert((await page.locator('#updatesHistory').textContent()).includes('0.14.0-dev'));assert((await page.locator('#updatesHistory .release-entry').count())>=12);await page.click('#updatesClose');
+   await page.click('#btnUpdatesStart');assert((await page.locator('#updatesHistory').textContent()).includes(version));assert((await page.locator('#updatesHistory .release-entry').count())>=12);await page.click('#updatesClose');
   });
   await check('Feedback/support and Star are available before loading pictures',async()=>{
    await page.click('#btnCommunity');assert.equal(await page.locator('#communityChoices [data-support="star"]').getAttribute('href'),'https://github.com/poplarity/BlotFigure');await page.click('#communityChoices [data-support="feedback"]');await page.waitForSelector('#feedbackDlg:not(.hidden)');
@@ -23,7 +24,7 @@ export async function communityChecks(browser,base,root){
    await page.fill('#feedbackMessage','Synthetic test feedback, do not deliver.');await page.fill('#feedbackEmail','tester@example.invalid');await page.click('#feedbackSend');await page.waitForFunction(()=>document.getElementById('feedbackStatus').classList.contains('error'));
    await page.click('#feedbackClose');await page.click('#communityChoices [data-support="feedback"]');assert.equal(await page.inputValue('#feedbackMessage'),'Synthetic test feedback, do not deliver.');accepted=true;
    await page.evaluate(()=>{const form=document.getElementById('feedbackForm');form.dispatchEvent(new Event('submit',{cancelable:true}));form.dispatchEvent(new Event('submit',{cancelable:true}));});
-   await page.waitForFunction(()=>document.getElementById('feedbackStatus').classList.contains('success'));assert.equal(payloads.length,2);for(const p of payloads){assert.equal(p.version,'0.14.0-dev');assert(p._subject.startsWith('BlotFigure'));assert.deepEqual(Object.keys(p).sort(),['category','message','version','_subject','_url','_template','_honey','email'].sort());}
+   await page.waitForFunction(()=>document.getElementById('feedbackStatus').classList.contains('success'));assert.equal(payloads.length,2);for(const p of payloads){assert.equal(p.version,version);assert(p._subject.startsWith('BlotFigure'));assert.deepEqual(Object.keys(p).sort(),['category','message','version','_subject','_url','_template','_honey','email'].sort());}
    await page.click('#feedbackClose');
   });
   await check('Support uses the existing configured destination and does not start payment',async()=>{

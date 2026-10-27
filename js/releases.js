@@ -1,7 +1,7 @@
 /* Local bilingual release summaries, available without network access. */
 window.BlotFigureReleases = [
   {
-    "version": "0.14.0-dev",
+    "version": "0.14.0",
     "date": "2026-10-27",
     "zh": [
       "桌面成图工具条、系统字体、局部文字格式与红色标注；各格式导出保持一致。",

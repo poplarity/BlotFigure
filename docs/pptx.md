@@ -1,8 +1,8 @@
 # 可编辑 PowerPoint / Editable PowerPoint
 
-`0.14.0-dev` 还会保留所选系统字体、局部斜体/上下标/颜色、区域注释框、局部放大和侧边文字。它们继续使用原生可编辑对象；放大图与蛋白图共享完整处理后来源，使用独立的原生裁切。详见[桌面编辑说明](desktop-editing.zh-CN.md)。
+`0.14.0` 还会保留所选系统字体、局部斜体/上下标/颜色、区域注释框、局部放大和侧边文字。它们继续使用原生可编辑对象；放大图与蛋白图共享完整处理后来源，使用独立的原生裁切。详见[桌面编辑说明](desktop-editing.zh-CN.md)。
 
-The development build also preserves system fonts, run-level formatting, annotation frames, insets and side labels as native editable objects. Insets reuse full processed image sources with native crops.
+Version 0.14.0 also preserves system fonts, run-level formatting, annotation frames, insets and side labels as native editable objects. Insets reuse full processed image sources with native crops.
 
 在右上角 **导出 ▾ → PowerPoint（可编辑 .pptx）** 下载。网页版和单文件离线版都可用，不上传图片，不依赖网络或 Office 插件。
 

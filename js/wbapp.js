@@ -30,7 +30,7 @@
   }
 
   const App = { images: new Map(), analysis: {}, S: null, hist: [], future: [], listeners: [], selRow: null, selSeg: null, selLane: null, viewBlot: null, viewImg: null, mode: null };
-  App.VERSION = '0.14.0-dev';
+  App.VERSION = '0.14.0';
   App.activeColumn = 'main';
   const columnFields = new Set(['lanes', 'range', 'hiCol', 'groups', 'conditions']);
   App.layoutColumns = () => App.S.layoutColumns || (App.S.layoutColumns = [{ id: 'main', title: '', titleSide: 'top' }]);

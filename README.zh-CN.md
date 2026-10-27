@@ -2,11 +2,11 @@
 
 # BlotFigure
 
-> **开发分支：0.14.0-dev。** 本分支新增桌面文字格式、区域注释/局部放大、反馈与更新入口，见[桌面编辑说明](docs/desktop-editing.zh-CN.md)。下方稳定下载和在线网站仍是 **v0.13.1**，等待维护者确认后才合并 `dev` 到 `main`。
+> **v0.14.0：** 新增桌面文字格式、区域注释/局部放大、侧边文字、反馈与更新入口，见[桌面编辑说明](docs/desktop-editing.zh-CN.md)。WB 原有流程及每个蛋白的独立曝光、亮度和裁切方式保留。
 
 **把一次 Western blot 实验的原始图片做成可投稿的成图 —— 在浏览器里完成，离线可用。**
 
-[**下载单文件 HTML**](https://github.com/poplarity/BlotFigure/releases/download/v0.13.1/BlotFigure-v0.13.1.html) · [在线使用](https://poplarity.github.io/BlotFigure/) · [English](README.md)
+[**下载单文件 HTML**](https://github.com/poplarity/BlotFigure/releases/download/v0.14.0/BlotFigure-v0.14.0.html) · [在线使用](https://poplarity.github.io/BlotFigure/) · [English](README.md)
 
 [![CI](https://github.com/poplarity/BlotFigure/actions/workflows/ci.yml/badge.svg)](https://github.com/poplarity/BlotFigure/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -19,13 +19,13 @@
 
 **只需下载一个文件，用浏览器打开就能做图。不用安装、不用解压，也不用注册 GitHub。**
 
-1. **[点击下载 BlotFigure-v0.13.1.html](https://github.com/poplarity/BlotFigure/releases/download/v0.13.1/BlotFigure-v0.13.1.html)**，约 800 KB，保存到桌面或"下载"文件夹。
+1. **[点击下载 BlotFigure-v0.14.0.html](https://github.com/poplarity/BlotFigure/releases/download/v0.14.0/BlotFigure-v0.14.0.html)**，约 910 KB，保存到桌面或"下载"文件夹。
 2. **双击刚下载的文件。** 它会在浏览器中打开；如果打开的是记事本等软件，右键文件 → **打开方式** → 选择 Firefox、Chrome、Edge 或 Safari。
 3. **把一次实验的全部图片拖进去**：每张膜的各次曝光，加上一张看得见 Marker 的图（白光图，或白光 + 化学发光的复合图）。然后按左边的 5 步走，最后点 **导出 PNG**。
 
 这一个 HTML 文件已经包含完整界面和处理功能。保存后可以断网使用，也可以把同一个文件直接发给同事。
 
-**认准文件名：** 下载的是 **BlotFigure-v0.13.1.html**，不是仓库里的 **index.html**，也不是 **Source code (zip)** 或 **Source code (tar.gz)**。如果进入了[版本下载页](https://github.com/poplarity/BlotFigure/releases/latest)，展开 **Assets（附件）**，只点结尾为 **.html** 的文件即可。
+**认准文件名：** 下载的是 **BlotFigure-v0.14.0.html**，不是仓库里的 **index.html**，也不是 **Source code (zip)** 或 **Source code (tar.gz)**。如果进入了[版本下载页](https://github.com/poplarity/BlotFigure/releases/latest)，展开 **Assets（附件）**，只点结尾为 **.html** 的文件即可。
 
 **下次接着做：** 关闭前点 **文件 → 保存项目**（Ctrl+S）。得到的 **.blotfig** 项目文件包含全部图片和所有调整，下次用 BlotFigure 打开即可继续，换电脑也行。
 
@@ -142,7 +142,7 @@
 
 ## 版本
 
-当前版本 **0.13.1**：修复跨图片组的预览间距偏大，所有蛋白区域统一使用「统一行距」，默认 2 pt。旧项目无需重新识别即可应用，预览和导出一致。详见[更新记录](CHANGELOG.md)。
+当前版本 **0.14.0**：桌面字体与局部格式、红色标注、区域注释框及局部放大、侧边文字、Marker 定义冲突修复，以及本地更新日志和反馈/支持入口。保持 WB 核心流程、区域独立设置和统一行距。详见[更新记录](CHANGELOG.md)。
 
 ## 隐私
 

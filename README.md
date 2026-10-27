@@ -2,11 +2,11 @@
 
 # BlotFigure
 
-> **Development branch: 0.14.0-dev.** Desktop typography, annotations/insets and feedback/update controls are being prepared here. See the [desktop editing guide](docs/desktop-editing.md). The stable download and live website below remain **v0.13.1** until the maintainer approves merging `dev` into `main`.
+> **v0.14.0:** desktop typography, region annotations and magnified insets, plus feedback and local release history. See the [desktop editing guide](docs/desktop-editing.md).
 
 **Turn the raw pictures of a Western blot experiment into a publication-ready figure — in your browser, offline.**
 
-[**Download the single HTML file**](https://github.com/poplarity/BlotFigure/releases/download/v0.13.1/BlotFigure-v0.13.1.html) · [Use online](https://poplarity.github.io/BlotFigure/) · [中文说明](README.zh-CN.md)
+[**Download the single HTML file**](https://github.com/poplarity/BlotFigure/releases/download/v0.14.0/BlotFigure-v0.14.0.html) · [Use online](https://poplarity.github.io/BlotFigure/) · [中文说明](README.zh-CN.md)
 
 [![CI](https://github.com/poplarity/BlotFigure/actions/workflows/ci.yml/badge.svg)](https://github.com/poplarity/BlotFigure/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -19,13 +19,13 @@
 
 **Download one file, open it in your browser, and start making your figure. No installation, ZIP extraction or GitHub account is needed.**
 
-1. **[Download BlotFigure-v0.13.1.html](https://github.com/poplarity/BlotFigure/releases/download/v0.13.1/BlotFigure-v0.13.1.html)** (about 800 KB). Save it to your Desktop or Downloads folder.
+1. **[Download BlotFigure-v0.14.0.html](https://github.com/poplarity/BlotFigure/releases/download/v0.14.0/BlotFigure-v0.14.0.html)** (about 910 KB). Save it to your Desktop or Downloads folder.
 2. **Double-click the downloaded file.** It opens in your browser. If a text editor opens instead, right-click → **Open with** → Firefox, Chrome, Edge or Safari.
 3. **Drop in all pictures of one experiment**: every exposure of each membrane plus a picture that shows the marker (the white-light picture, or white light merged with chemiluminescence). Then follow the 5 steps on the left and choose **Export PNG**.
 
 That one HTML file is the complete tool. Keep it on your computer or send the same file to a colleague. Once downloaded, it works without an internet connection.
 
-**Get the right file:** choose the release attachment named **BlotFigure-v0.13.1.html**, not the repository's **index.html**, **Source code (zip)** or **Source code (tar.gz)**. If you reach the [release page](https://github.com/poplarity/BlotFigure/releases/latest), expand **Assets** and click the file ending in **.html**.
+**Get the right file:** choose the release attachment named **BlotFigure-v0.14.0.html**, not the repository's **index.html**, **Source code (zip)** or **Source code (tar.gz)**. If you reach the [release page](https://github.com/poplarity/BlotFigure/releases/latest), expand **Assets** and click the file ending in **.html**.
 
 **Keep your work:** use **File → Save project** (Ctrl+S) before closing. Your **.blotfig** file contains all the pictures and every adjustment; reopen it in BlotFigure to continue, on any computer.
 
@@ -104,7 +104,7 @@ In step 5 choose **Add a layout column**, then drag regions into it or use **⋯
 
 ## Versions
 
-The current version is **0.13.1**: uniform spacing between all protein rows, regardless of source image group. Legacy projects use the same rule without re-detection; the configured row gap is preserved. See the [changelog](CHANGELOG.md).
+The current version is **0.14.0**: desktop typography and coloured annotations, source-linked insets, side text, safe custom Marker imports and local release history/feedback. The WB workflow and per-region image settings are retained. See the [changelog](CHANGELOG.md).
 
 ## Privacy
 
