@@ -2,6 +2,8 @@
 
 # BlotFigure
 
+> **Development branch: 0.14.0-dev.** Desktop typography, annotations/insets and feedback/update controls are being prepared here. See the [desktop editing guide](docs/desktop-editing.md). The stable download and live website below remain **v0.13.1** until the maintainer approves merging `dev` into `main`.
+
 **Turn the raw pictures of a Western blot experiment into a publication-ready figure — in your browser, offline.**
 
 [**Download the single HTML file**](https://github.com/poplarity/BlotFigure/releases/download/v0.13.1/BlotFigure-v0.13.1.html) · [Use online](https://poplarity.github.io/BlotFigure/) · [中文说明](README.zh-CN.md)
@@ -108,7 +110,7 @@ The current version is **0.13.1**: uniform spacing between all protein rows, reg
 
 BlotFigure is a static web page with no backend. Pictures are decoded and processed by JavaScript in your browser, and results are saved by your browser's own download mechanism.
 
-The page carries a [Content Security Policy](index.html) that **forbids it from connecting to any other server** (it may only load its own files), so this is enforced by the browser, not just promised. The only data kept on your computer are preferences, custom ladders and the local project library in IndexedDB.
+The [Content Security Policy](index.html) allows app resources and the exact configured text-feedback endpoint. Only an explicit feedback submission sends the entered text, optional reply email and version; no image or project is attached automatically. Preferences, custom ladders, presets and project history remain in this browser's storage.
 
 ## Supported input
 
@@ -159,7 +161,7 @@ Exposures are recognised by their file names (`Chemi`, `ECL`, `_30s`, `2min` …
 | Export | Content |
 |---|---|
 | PNG | Rendered at the chosen dpi (300 / 600 / 1200). Includes `pHYs` (resolution), `sRGB` and an embedded processing summary (`iTXt`, UTF-8). |
-| TIFF | 8-bit grayscale, LZW, with resolution tags and the processing summary. For journals that accept only TIFF. |
+| TIFF | LZW with resolution and processing summary: 8-bit gray for grayscale figures; RGB when annotations contain colour. Source WB processing stays grayscale. |
 | SVG | Vector text and lines; edit in Illustrator or Inkscape. |
 | Uncropped originals | Every exposure and marker picture used, as taken (not aligned or rotated), with each box, its lanes' figure columns and the protein names drawn where the bands really are. For the supplementary information. |
 | Processing log (JSON) | Each source's SHA-256, alignment, every row's boxes, lanes, exposure, levels and tilt, all layout parameters, legend notes. |

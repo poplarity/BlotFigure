@@ -30,7 +30,7 @@
   }
 
   const App = { images: new Map(), analysis: {}, S: null, hist: [], future: [], listeners: [], selRow: null, selSeg: null, selLane: null, viewBlot: null, viewImg: null, mode: null };
-  App.VERSION = '0.13.1';
+  App.VERSION = '0.14.0-dev';
   App.activeColumn = 'main';
   const columnFields = new Set(['lanes', 'range', 'hiCol', 'groups', 'conditions']);
   App.layoutColumns = () => App.S.layoutColumns || (App.S.layoutColumns = [{ id: 'main', title: '', titleSide: 'top' }]);
@@ -53,6 +53,7 @@
       const next = remaining[0], oldId = next.id;
       columnFields.forEach(k => { App.S[k] = next[k]; });
       App.rowsInColumn(oldId).forEach(r => { r.column = 'main'; }); next.id = 'main';
+      (App.S.notes||[]).forEach(n=>{if(!n.row&&n.column===oldId)n.column='main';});
       columnFields.forEach(k => { delete next[k]; });
     }
     App.S.layoutColumns = remaining; App.activeColumn = 'main'; return true;
@@ -140,7 +141,7 @@
 
   /* the figure's layout. Text sizes per kind (lane names, marker labels, protein names; null = fontPt); a group
    * label wider than its line wraps ('wrap'), shrinks down to minFontPt ('shrink') or stays ('none') */
-  const defaultStyle = () => ({ mmPerLane: 5, fontPt: 7, lineWidthPt: 0.5, labelAngle: 'auto', rowGapPt: 2,
+  const defaultStyle = () => ({ mmPerLane: 5, fontPt: 7, fontFamily:'Arial', laneItalic:false, lineWidthPt: 0.5, labelAngle: 'auto', rowGapPt: 2,
     tickLenPt: 2.5, labelGapPt: 2.5, unitHeader: true, showMW: true, panelLetter: '', dpi: 600, invert: true, border: true, mwSide: 'left', nameSide: 'right',
     laneNumbers: false, lanePt: null, markerPt: null, namePt: null, groupFit: 'wrap', minFontPt: 5, groupTicks: false,
     columnGapMm: 6, alignColumnRows: false });
@@ -178,6 +179,7 @@
     App.S.blots.forEach(b => (b.pieces || []).forEach(pc => (pc.marks || []).forEach(App.markerId)));
     if (App.S.arrows) App.S.arrows = App.S.arrows.filter(a => App.row(a.row));     // (a deleted row takes its arrows; undo brings both)
     if (App.S.brackets) App.S.brackets = App.S.brackets.filter(k => App.row(k.r0) && App.row(k.r1));
+    G.WBNotes?.clean();
     App.fitLanes(false);
     App.refreshChoices();
     const snap = JSON.stringify(App.S);
@@ -325,6 +327,8 @@
    * fingerprints, the membranes analysed again (pieces found at the same places keep their ids, the boxes on
    * them stay as saved) */
   async function restoreFrom(head, bufs, what) {
+    await G.ProteinLadders.ready;
+    const state=JSON.parse(JSON.stringify(head.S)),initial=typeof head.initial==='string'?JSON.parse(head.initial):null;
     const recs = [];
     for (let i = 0; i < head.images.length; i++) {
       const im = head.images[i], b = bufs[i];
@@ -335,13 +339,15 @@
       recs.push({ id: im.id, name: im.name, img: { w: d.width, h: d.height, data: d.data }, spp: d.spp, bits: d.bits, src: new File([b], im.name), kind: im.kind, exposure: im.exposure,
         sha256: sha, bytes: b.byteLength, dpi: d.dpi || 0 });
     }
+    const markerIds=G.ProteinLadders.importDefinitions(head.ladders || []);
+    const remapMarkers=s=>{(s.blots||[]).forEach(b=>{if(markerIds.has(b.ladderId))b.ladderId=markerIds.get(b.ladderId);});return s;};
+    head={...head,S:remapMarkers(state),initial:initial?JSON.stringify(remapMarkers(initial)):head.initial};
     if (App.onSwap) App.onSwap();
     App.images.clear(); retiredImages.clear(); App.analysis = {};
     matchSizes(recs);
     recs.forEach(r => { prepare(r); App.images.set(r.id, r); });
     App.S = head.S;
     App.projectId = head.projectId || uid('project'); App.projectName = head.projectName || '';
-    G.ProteinLadders.importDefinitions(head.ladders || []);
     if (!App.S.step) App.S.step = 5;          // (projects saved before the steps: everything done)
     if (!App.S.arrows) App.S.arrows = [];
     if (!App.S.brackets) App.S.brackets = [];
@@ -1873,7 +1879,7 @@
    * A lane is printed mmPerLane wide from about one lane spacing (pitch) of picture pixels: the narrowest pitch
    * among the shown rows sets the resolution of the bands themselves (exporting at a higher dpi only enlarges
    * those pixels). */
-  const shownPitches = () => App.S.rows.filter(r => !r.hidden).flatMap(r => r.segs.filter(sg => App.nSample(sg)).map(sg => App.segPitch(sg)));
+  const shownPitches = () => App.S.rows.filter(r => !r.hidden).flatMap(r => r.segs.filter(sg => App.nSample(sg)).map(sg => App.segPitch(sg))).concat(G.WBNotes?.insetPitches()||[]);
   App.effectiveDpi = function () {
     const ps = shownPitches();
     return ps.length ? Math.min(...ps) / (App.S.style.mmPerLane / 25.4) : Infinity;
@@ -1914,6 +1920,12 @@
 
       st.fontPt = Math.max(st.fontPt, 6); ['lanePt', 'markerPt', 'namePt'].forEach(k => { st[k] = up(st[k]); }); st.minFontPt = Math.max(st.minFontPt || 5, 6);
       [...App.layoutColumns().flatMap(c => [App.columnData(c.id).groups, App.columnData(c.id).conditions]), S.arrows, S.brackets].forEach(list => (list || []).forEach(o => { if (o.pt) o.pt = up(o.pt); }));
+      const script=(o,k)=>o?.[k+'Runs']?.some(r=>r.script==='sup'||r.script==='sub');
+      const lanes=App.layoutColumns().flatMap(c=>App.columnData(c.id).lanes);
+      if(lanes.some(l=>script(l,'name')))st.lanePt=Math.max(st.lanePt||st.fontPt,8.5);
+      if(S.rows.some(r=>script(r,'name')))st.namePt=Math.max(st.namePt||st.fontPt,8.5);
+      lanes.forEach(l=>{if(l.nameStyle?.pt)l.nameStyle.pt=Math.max(l.nameStyle.pt,script(l,'name')?8.5:6);});
+      [...App.layoutColumns().flatMap(c=>[...App.columnData(c.id).groups,...App.columnData(c.id).conditions]),...(S.arrows||[]),...(S.brackets||[]),...(S.notes||[])].forEach(o=>{if(script(o,'text')||script(o,'name'))o.pt=Math.max(o.pt||st.fontPt,8.5);else if(o.pt)o.pt=up(o.pt);});
     } });
     if (st.lineWidthPt < 0.25) add('warn', L(`线宽 ${st.lineWidthPt} pt 太细。`, `Line width ${st.lineWidthPt} pt is too thin.`), { label: L('改为 0.5 pt', 'Use 0.5 pt'), run: () => { st.lineWidthPt = 0.5; } });
     const wmm = f.w / MM;
@@ -1945,7 +1957,7 @@
     const letter = (b, id) => (App.piece(b, id) || {}).letter || '?';
     return {
       tool: 'BlotFigure', version: App.VERSION, exportedAt: new Date().toISOString(),
-      environment: { userAgent: navigator.userAgent, figureFont: 'Arial, Helvetica, sans-serif (vector text)' },
+      environment: { userAgent: navigator.userAgent, figureFont: G.FigureText.fontName(S.style.fontFamily)+' (system font; vector text)' },
       images: [...App.images.values()].map(r => {
         const b = S.blots.find(x => x.images.includes(r.id)), al = S.align[r.id], raw = r.raw || r;
         return { file: r.name, sha256: r.sha256 || null, bytes: r.bytes || null, width: raw.img.w, height: raw.img.h, bitDepth: r.bits,
@@ -1973,7 +1985,7 @@
         effectiveBandDpi: Math.round(Math.min(99999, App.effectiveDpi())), exportDpi: S.style.dpi },
       arrows: (S.arrows || []).map(a => ({ row: (App.row(a.row) || {}).name || null, symbol: a.sym, side: a.side, text: a.text || null, size: a.sym === '◀' ? (a.sizeText || App.arrowSize(a) || null) : null, userSize: a.sizeText || null })),
       brackets: (S.brackets || []).map(k => ({ fromRow: (App.row(k.r0) || {}).name || null, toRow: (App.row(k.r1) || {}).name || null, fromFrac: k.f0, toFrac: k.f1, side: k.side, vertical: !!k.vertical, line: !!k.line, text: k.text || null })),
-      groups: S.groups, conditions: S.conditions, style: S.style,
+      groups: S.groups, conditions: S.conditions, style: S.style,notes:S.notes||[],textFormats:S.rows.map(r=>({row:r.id,nameRuns:r.nameRuns,nameColor:r.nameColor})),
       legendHints: ck.legend
     };
   };
@@ -1993,33 +2005,38 @@
    * (relative to the figure's first column), the protein names top to bottom, the ladder and the layout */
   App.template = function () {
     const S = App.S, fl = App.figLanes('main'), rel = j => fl.indexOf(j);
+    const formatted=l=>({name:l.name||'',...(l.nameRuns?{nameRuns:l.nameRuns}:{}),...(l.nameStyle?{nameStyle:l.nameStyle}:{}),...(l.nameColor?{nameColor:l.nameColor}:{})});
     return { blotfigTemplate: 1, defaultLaneCount: S.defaultLaneCount || null, app: 'BlotFigure ' + App.VERSION,
-      layoutColumns: App.layoutColumns().map(c => ({ id: c.id, title: c.title, titleSide: c.titleSide, lanes: App.columnData(c.id).lanes.map(l => ({name:l.name})), groups: App.columnData(c.id).groups, conditions: App.columnData(c.id).conditions })),
+      layoutColumns: App.layoutColumns().map(c => ({ id: c.id, title: c.title, titleSide: c.titleSide, lanes: App.columnData(c.id).lanes.map(formatted), groups: App.columnData(c.id).groups, conditions: App.columnData(c.id).conditions })),
       rowColumns: S.rows.filter(r => !r.hidden).map(App.rowColumn),
-      lanes: fl.map(j => ({ name: (S.lanes[j - 1] || {}).name || '' })),
-      groups: S.groups.map(g => ({ from: rel(Math.min(g.from, g.to)), to: rel(Math.max(g.from, g.to)), text: g.text || '', pt: g.pt || null })).filter(g => g.from >= 0 && g.to >= 0),
-      conditions: S.conditions.map(c => ({ name: c.name || '', values: fl.map(j => c.values[j - 1] || ''), pt: c.pt || null })),
+      lanes: fl.map(j => formatted(S.lanes[j-1]||{})),
+      groups: S.groups.map(g => ({...g,from:rel(Math.min(g.from,g.to)),to:rel(Math.max(g.from,g.to))})).filter(g=>g.from>=0&&g.to>=0),
+      conditions: S.conditions.map(c => ({...c,values:fl.map(j=>c.values[j-1]||'')})),
       proteins: S.rows.filter(r => !r.hidden).map(r => r.name || ''),
+      proteinFormats:S.rows.filter(r=>!r.hidden).map(formatted),ladders:App.customLadders(),notes:G.WBNotes.template(),
       ladderId: (S.blots.find(b => b.ladderId) || {}).ladderId || null,
       style: S.style };
   };
   App.applyTemplate = function (t) {
     if (!t || !t.blotfigTemplate) throw new Error(L('不是 BlotFigure 样式文件', 'Not a BlotFigure style file'));
     const S = App.S, fl = App.figLanes('main'), vis = S.rows.filter(r => !r.hidden);
+    const ids=G.ProteinLadders.importDefinitions(t.ladders||[]),ladderId=ids.get(t.ladderId)||t.ladderId;
+    const applyName=(o,n)=>{o.name=n.name||'';for(const k of ['nameRuns','nameStyle','nameColor']){if(n[k])o[k]=JSON.parse(JSON.stringify(n[k]));else delete o[k];}};
     if('defaultLaneCount' in t)App.setDefaultLaneCount(t.defaultLaneCount);
     const abs = k => fl[Math.max(0, Math.min(fl.length - 1, k))];
-    (t.lanes || []).forEach((l, k) => { if (fl[k] != null) S.lanes[fl[k] - 1].name = l.name || ''; });
-    S.groups = (t.groups || []).filter(g => g.from < fl.length).map(g => Object.assign({ from: abs(g.from), to: abs(g.to), text: g.text || '' }, g.pt ? { pt: g.pt } : {}));
+    (t.lanes || []).forEach((l, k) => { if (fl[k] != null) applyName(S.lanes[fl[k]-1],l); });
+    S.groups = (t.groups || []).filter(g => g.from < fl.length).map(g => ({...JSON.parse(JSON.stringify(g)),from:abs(g.from),to:abs(g.to),text:g.text||''}));
     S.conditions = (t.conditions || []).map(c => {
       const values = S.lanes.map(() => '');
       fl.forEach((j, k) => { values[j - 1] = (c.values || [])[k] || ''; });
-      return Object.assign({ name: c.name || '', values }, c.pt ? { pt: c.pt } : {});
+      return {...JSON.parse(JSON.stringify(c)),name:c.name||'',values};
     });
     (t.proteins || []).forEach((n, k) => { if (vis[k] && n) vis[k].name = n; });
-    if (t.ladderId && G.ProteinLadders.get(t.ladderId)) S.blots.forEach(b => App.setLadder(b, t.ladderId));
+    (t.proteinFormats||[]).forEach((n,k)=>{if(vis[k])applyName(vis[k],n);});
+    if (ladderId && G.ProteinLadders.get(ladderId)) S.blots.forEach(b => App.setLadder(b, ladderId));
     if (t.layoutColumns?.length) {
       const cs = JSON.parse(JSON.stringify(t.layoutColumns));
-      S.layoutColumns = cs.map(c => ({ ...c, lanes: (c.lanes || []).map(l => ({name:l.name || '', hidden:false})), range:[1,Math.max(1,c.lanes?.length || 1)], hiCol:0 }));
+      S.layoutColumns = cs.map(c => ({ ...c, lanes: (c.lanes || []).map(l => ({...l,name:l.name || '', hidden:false})), range:[1,Math.max(1,c.lanes?.length || 1)], hiCol:0 }));
       const main = S.layoutColumns.find(c => c.id === 'main');
       if (!main) S.layoutColumns.unshift({ id:'main', title:'', titleSide:'top' });
       else { S.lanes = main.lanes; S.groups = main.groups || []; S.conditions = main.conditions || []; S.range = main.range; }
@@ -2030,6 +2047,7 @@
       App.fitLanes(true);
     }
     S.style = Object.assign(defaultStyle(), t.style || {});
+    if(Array.isArray(t.notes))G.WBNotes.applyTemplate(t.notes);
     return { lanes: (t.lanes || []).length, figLanes: fl.length, proteins: (t.proteins || []).filter(Boolean).length, rows: vis.length };
   };
   App.summaryText = function () {

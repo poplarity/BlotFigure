@@ -4,8 +4,8 @@ title: "BlotFigure: publication-ready Western blot figures in the browser"
 type: software
 authors:
   - alias: poplarity
-version: 0.13.1
-date-released: 2026-10-25
+version: 0.14.0-dev
+date-released: 2026-10-27
 license: MIT
 repository-code: "https://github.com/poplarity/BlotFigure"
 url: "https://poplarity.github.io/BlotFigure/"

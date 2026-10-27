@@ -4,6 +4,24 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+Desktop figure editing parity with GelFigure; development preview `0.14.0-dev`.
+
+**中文摘要**
+- 成图上方集中放置字体/字号及 0–90° 泳道名角度；支持五种系统字体、局部正体/斜体/上下标/红色、单泳道名设置及清除格式。常用版式直接展示，小窗口与中文输入法保持可用。
+- 新增独立区域注释框、×2/×3/×4 局部放大和侧边文字；括号可拖动端点改范围，普通标注支持红色。注释跟随对应蛋白区域，曝光、亮度、裁切和识别设置保持独立。
+- PNG/TIFF/SVG 与原生可编辑 PPT 保留新格式；有红色标注时自动使用 RGB TIFF，原始 WB 图像仍按灰度处理。项目、历史和样式保存新标注，放大图参与有效分辨率检查。
+- 修复项目/预设中的自定义 Marker 同 ID 异定义覆盖：保留双方定义并重映射导入引用及重置快照；现有 Marker 操作界面和统一字号保持不变。
+- 复用 GelFigure 的离线更新历史、每版本一次提示、文字反馈及自愿支持/Star 入口；成功导出后提供可关闭提示。反馈仅在明确提交时发送所填文字、可选邮箱及版本，不自动附加原图或项目。
+- 本次不加入原色切换、手机/平板工作台或新的图像处理控制。开发仅在 `dev`，稳定网站与 `main` 等维护者确认后再更新。
+
+### Added / changed
+- Desktop typography with system fonts, per-selection italic/superscript/subscript/colour runs, opt-in lane-name overrides, continuous angles and inline editing undo. Adapted from GelFigure's text model and editable PowerPoint runs.
+- Region annotations separate from protein crops, source-linked zoomed insets, side text and draggable bracket ends. New fields round-trip through projects, templates, history and logs without re-detecting protein boxes.
+- RGB TIFF only when the rendered annotations contain colour. Source processing stays grayscale and linear; exposure selection and per-region geometry are unchanged.
+- Conflict-safe custom Marker definitions on project/preset restoration, including reset snapshots. No Marker UI redesign.
+- Local bilingual release history, once-per-version non-modal notices, explicit text-only feedback, voluntary author support and GitHub Star. The sole external connection exception is the configured feedback endpoint, used only on submission.
+- Browser coverage for formatting, editable PPT baselines, TIFF channels, actual annotation/bracket gestures, restoration conflicts and mocked feedback. Existing WB suites remain required before merging.
+
 ## [0.13.1] - 2026-10-25
 
 Uniform row spacing regardless of source image group.

@@ -65,14 +65,14 @@
   }
   const nameXml = (id, name) => `<p:cNvPr id="${id}" name="${esc(name)}"/>`;
   const fontXml = family => {
-    const name = esc(family || 'Arial');
+    const name = esc(G.FigureText.fontName(family));
     return `<a:latin typeface="${name}"/><a:ea typeface="${name}"/><a:cs typeface="${name}"/>`;
   };
   function textShape(o, id) {
     const font = fontXml(o.fontFamily);
-    const props = r => `sz="${Math.round(o.pt * 100)}" b="${r.bold ? 1 : 0}" i="${r.italic ? 1 : 0}"`;
+    const props = r => `sz="${Math.round((r.pt||o.pt)*100)}" b="${r.bold ? 1 : 0}" i="${r.italic ? 1 : 0}"${r.baseline?` baseline="${Math.round(r.baseline/(r.pt||o.pt)*100000)}"`:''}`;
     const lines = o.lines.map(runs => '<a:p>' + `<a:pPr algn="${o.align}" marL="0" marR="0" indent="0"><a:lnSpc><a:spcPts val="${Math.round(o.leading * 100)}"/></a:lnSpc><a:spcBef><a:spcPts val="0"/></a:spcBef><a:spcAft><a:spcPts val="0"/></a:spcAft><a:buNone/></a:pPr>` + runs.map(r => `<a:r><a:rPr ${props(r)} dirty="0">${fill(r.fill)}${font}</a:rPr><a:t xml:space="preserve">${esc(r.text)}</a:t></a:r>`).join('') + `<a:endParaRPr sz="${Math.round(o.pt * 100)}">${font}</a:endParaRPr></a:p>`).join('');
-    return `<p:sp><p:nvSpPr>${nameXml(id, o.name)}<p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>${xfrm(o)}${rect}<a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="none" lIns="0" tIns="0" rIns="0" bIns="0" anchor="t" rtlCol="0"><a:noAutofit/></a:bodyPr><a:lstStyle/>${lines}</p:txBody></p:sp>`;
+    return `<p:sp><p:nvSpPr>${nameXml(id, o.name)}<p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>${xfrm(o)}${rect}<a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="none" lIns="0" tIns="${emu(o.insetTop||0)}" rIns="0" bIns="0" anchor="t" rtlCol="0"><a:noAutofit/></a:bodyPr><a:lstStyle/>${lines}</p:txBody></p:sp>`;
   }
   function picture(o, id) {
     return `<p:pic><p:nvPicPr>${nameXml(id, o.name)}<p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${o.rel}"/><a:srcRect l="${o.crop.l}" t="${o.crop.t}" r="${o.crop.r}" b="${o.crop.b}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${xfrm(o)}${rect}</p:spPr></p:pic>`;
@@ -99,7 +99,7 @@
     const out = [];
     function visit(n) {
       if (n.nodeType === 3) {
-        if (n.textContent) out.push({ text: n.textContent, italic: inherited(n.parentElement, 'font-style', '') === 'italic', bold: inherited(n.parentElement, 'font-weight', '') === 'bold', fill: inherited(n.parentElement, 'fill', '#000') });
+        if (n.textContent) out.push({ text: n.textContent, italic: inherited(n.parentElement, 'font-style', '') === 'italic', bold: inherited(n.parentElement, 'font-weight', '') === 'bold', fill: inherited(n.parentElement, 'fill', '#000'),pt:+inherited(n.parentElement,'font-size',0)||undefined,baseline:+inherited(n.parentElement,'data-name-baseline',0)||0 });
       } else n.childNodes.forEach(visit);
     }
     visit(el); return out;
@@ -119,9 +119,10 @@
       // italic overhangs; no auto-fit, so per-item font sizes survive editing/imports.
       const w = widest + pt * 0.12, leading = nodes.length > 1 ? num(nodes[1], 'y') - num(first, 'y') : pt * 1.18;
       const x = num(first, 'x') - (anchor === 'middle' ? w / 2 : anchor === 'end' ? w : 0);
-      const y = num(first, 'y') - pt * 0.91, h = (nodes.length - 1) * leading + pt * 1.3;
+      const y0=num(first,'y')-pt*.91,rich=first.hasAttribute('data-lane-name'),insetTop=rich?Math.max(0,y0-Math.min(...boxes.map(b=>b.y))):0,y=y0-insetTop;
+      const h=Math.max((nodes.length-1)*leading+pt*1.3+insetTop,rich?Math.max(...boxes.map(b=>b.y+b.height))-y:0);
       const lines = nodes.map(getRuns);
-      add(Object.assign({ kind: 'text', name: lines.map(r => r.map(s => s.text).join('')).join(' / ').slice(0, 100), fontFamily: fig.fontFamily, pt, lines, leading, align: { middle: 'ctr', end: 'r', start: 'l' }[anchor] || 'l' }, transformedBox(x, y, w, h, m)));
+      add(Object.assign({ kind: 'text', name: lines.map(r => r.map(s => s.text).join('')).join(' / ').slice(0, 100), fontFamily: fig.fontFamily, pt, lines, leading, insetTop,align: { middle: 'ctr', end: 'r', start: 'l' }[anchor] || 'l' }, transformedBox(x, y, w, h, m)));
     }
     function image(el, m) {
       const src=sources.get(el.getAttribute('data-pptx-image'));
@@ -217,8 +218,8 @@
         spec={R,im,u0,u1,v0,v1,map:App.mapper(row.img,{black:lv.black,white:lv.white}),rel:'rId'+(mediaSpecs.length+2)};mediaSpecs.push(spec);seen.set(key,spec);
       }
       const du=F.ox*F.c+F.oy*F.s,dv=-F.ox*F.s+F.oy*F.c;
-      const x0=App.laneLeft(sg,i0)+du,x1=App.laneRight(sg,i1)+du;
-      const y0=sg.vc-App.boxAbove(row,sg)+dv,y1=sg.vc+App.boxBelow(row,sg)+dv;
+      const x0=(slice.u0??App.laneLeft(sg,i0))+du,x1=(slice.u1??App.laneRight(sg,i1))+du;
+      const y0=(slice.v0??(sg.vc-App.boxAbove(row,sg)))+dv,y1=(slice.v1??(sg.vc+App.boxBelow(row,sg)))+dv;
       const pct=x=>Math.round(x*100000);
       sources.set(slice.id,{rel:spec.rel,name:(row.name||App.boxLabel(sg))+' — '+App.expoLabel(rec)+' (editable crop)',
         crop:{l:pct((x0-spec.u0)/(spec.u1-spec.u0)),r:pct((spec.u1-x1)/(spec.u1-spec.u0)),t:pct((y0-spec.v0)/(spec.v1-spec.v0)),b:pct((spec.v1-y1)/(spec.v1-spec.v0))}});

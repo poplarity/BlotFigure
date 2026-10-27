@@ -108,7 +108,7 @@
     const preset={id:id(),name:name.trim()||L('我的预设','My preset'),style:clone(App.S.style),defaultLaneCount:App.S.defaultLaneCount||null,ladderId:App.S.blots.find(b=>b.ladderId)?.ladderId||null,ladders:clone(App.customLadders())};
     G.PrefStorage.setItem(PRESETS,JSON.stringify([...App.presets(),preset]));return preset;
   };
-  App.applyPreset=p=>{if(!App.S)return;G.ProteinLadders.importDefinitions(p.ladders||[]);App.S.style={...App.defaultStyle(),...clone(p.style)};if('defaultLaneCount' in p)App.setDefaultLaneCount(p.defaultLaneCount);if(p.ladderId&&G.ProteinLadders.get(p.ladderId))App.S.blots.forEach(b=>App.setLadder(b,p.ladderId));App.commit();};
+  App.applyPreset=p=>{if(!App.S)return;const ids=G.ProteinLadders.importDefinitions(p.ladders||[]),ladderId=ids.get(p.ladderId)||p.ladderId;App.S.style={...App.defaultStyle(),...clone(p.style)};if('defaultLaneCount' in p)App.setDefaultLaneCount(p.defaultLaneCount);if(ladderId&&G.ProteinLadders.get(ladderId))App.S.blots.forEach(b=>App.setLadder(b,ladderId));App.commit();};
   App.deletePreset=id=>G.PrefStorage.setItem(PRESETS,JSON.stringify(App.presets().filter(p=>p.id!==id)));
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'&&App.S)App.saveDraft();});
 })(window);

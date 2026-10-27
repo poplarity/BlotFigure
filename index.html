@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#131c29">
 <!-- Everything runs locally. This policy forbids the page from contacting any server other than its own origin (its own files), so the pictures can never leave the computer. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self' file:; style-src 'self' file: 'unsafe-inline'; img-src 'self' file: data: blob:; connect-src 'self' file: data: blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self' file:; style-src 'self' file: 'unsafe-inline'; img-src 'self' file: data: blob:; connect-src 'self' file: data: blob: https://formsubmit.co/ajax/wyang404%40qq.com; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="description" content="BlotFigure: turn the raw pictures of a Western blot experiment into a publication-ready figure in the browser. Offline, nothing is uploaded.">
 <title>BlotFigure · Western blot 作图</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23131c29'/%3E%3Cg fill='%23fff'%3E%3Crect x='5' y='8' width='22' height='4' rx='2'/%3E%3Crect x='5' y='15' width='22' height='3' rx='1.5' opacity='.7'/%3E%3Crect x='5' y='21' width='22' height='4' rx='2'/%3E%3C/g%3E%3C/svg%3E">
@@ -19,6 +19,7 @@
   <button class="cache-status" id="cacheStatus" data-en="Recent projects" title="历史项目">历史项目</button>
   <div class="coach" id="coach"><span class="coach-dot"></span><span id="coachText" data-en="Drop all pictures of one experiment into the window: every exposure + a picture that shows the marker (white light or merged)">把一次实验的全部图片拖进窗口：各个曝光 + 看得见 Marker 的图（白光或复合图）</span></div>
   <div class="topbar-right">
+    <button class="text-btn community-entry" id="btnCommunity" data-en="Feedback / support">反馈 / 支持</button>
     <button class="icon-btn" id="btnUndo" title="撤销 (Ctrl+Z)" data-en-title="Undo (Ctrl+Z)">↺</button>
     <button class="icon-btn" id="btnRedo" title="重做 (Ctrl+Shift+Z)" data-en-title="Redo (Ctrl+Shift+Z)">↻</button>
     <div class="menu-wrap">
@@ -30,6 +31,7 @@
         <div class="menu-sep"></div>
         <button id="btnHistory" data-en="Recent projects">历史项目</button>
         <button id="btnPresets" data-en="Parameter presets">参数预设</button>
+        <button id="btnUpdates" data-en="Release history">更新日志</button>
         <button id="btnSaveTpl"><span data-en="Save style…">保存样式…</span><small data-en="Lane names, groups, condition rows, protein order, ladder, layout: reuse for the next figure of the series">泳道名、分组、条件行、蛋白名顺序、Marker 型号、版式：下一张同类的图一键套用</small></button>
         <label><span data-en="Apply style…">载入样式…</span><small data-en="Apply a saved style to this figure">把保存的样式套到这张图上</small><input type="file" id="tplInput" accept=".json" hidden></label>
         <div class="menu-sep"></div>
@@ -44,7 +46,7 @@
     <div class="menu-wrap">
       <div class="split"><button class="btn primary" id="btnPNG" data-en="Export PNG">导出 PNG</button><button class="btn primary caret" id="btnExportMenu" title="更多导出格式" aria-label="更多导出格式" data-en-title="More export formats">▾</button></div>
       <div class="menu hidden right" id="exportMenu">
-        <button id="btnTIFF"><span data-en="TIFF (LZW, grayscale)">TIFF（LZW，灰度）</span><small data-en="For journals that only accept TIFF (e.g. PLOS)">只收 TIFF 的期刊（如 PLOS）</small></button>
+        <button id="btnTIFF"><span data-en="TIFF (LZW)">TIFF（LZW）</span><small data-en="Preserves annotation colours; grayscale otherwise">保留标注颜色，纯灰度时导出灰度</small></button>
         <button id="btnPPTX"><span data-en="PowerPoint (editable .pptx)">PowerPoint（可编辑 .pptx）</span><small data-en="Editable text and shapes; each protein image keeps its full source for recropping">文字、标注可编辑；各蛋白图片保留全图，可恢复裁切</small></button>
         <button id="btnSVG" data-en="SVG (vector, editable in Illustrator)">SVG（矢量，可在 AI 中编辑）</button>
         <div class="menu-sep"></div>
@@ -68,6 +70,7 @@
       <label class="btn primary big"><span data-en="Choose pictures (several at once)">选择图片（可多选）</span><input type="file" id="fileInput2" multiple accept=".tif,.tiff,.png,.jpg,.jpeg,.bmp" hidden></label>
       <button class="btn big" id="btnDemo" title="3 次曝光的切开的膜 + 另一张斜放的膜" data-en-title="A membrane cut into strips, 3 exposures + another membrane lying askew" data-en="Try the example">看看示例</button>
       <button class="btn big" id="btnHistoryStart" data-en="Open a recent project">打开历史项目</button>
+      <button class="btn sm ghost" id="btnUpdatesStart" data-en="What’s new / release history">新版变化 / 更新日志</button>
       <div id="draftBox" class="draft hidden">
         <div><span data-en="Your most recent project:">最近一次的项目：</span><b id="draftName"></b><br><span class="muted small" id="draftTime"></span></div>
         <div class="inline"><button class="btn sm primary" id="btnDraftRestore" data-en="Restore">恢复</button><button class="btn sm ghost" id="btnDraftDrop" data-en="Discard">丢弃</button></div>
@@ -272,6 +275,7 @@
 <div id="toasts"></div>
 
 <div id="helpDlg" class="dlg hidden"><div class="dlg-body">
+  <button class="btn sm" id="btnHelpUpdates" data-en="Release history">更新日志</button>
   <button class="dlg-x" id="btnHelpClose" title="关闭" aria-label="关闭" data-en-title="Close">×</button>
   <h3 data-en="Follow the steps for a new experiment; later expand any tool directly to continue editing">新实验按顺序确认；之后随时展开各步骤修改，切换时保留进度</h3>
   <ol>
@@ -348,10 +352,21 @@
 <script src="js/wbdemo.js"></script>
 <script src="js/wbapp.js"></script>
 <script src="js/wblibrary.js"></script>
+<script src="js/name-text.js"></script>
+<script src="js/figure-text.js"></script>
+<script src="js/wbnotes.js"></script>
+<script src="js/wbnote-render.js"></script>
 <script src="js/wbrender.js"></script>
 <script src="js/pptx.js"></script>
 <script src="js/wbview.js"></script>
 <script src="js/wbui.js"></script>
 <script src="js/wbextras.js"></script>
+<script src="js/wbformat.js"></script>
+<script src="js/wbnote-ui.js"></script>
+<script src="js/support-config.js"></script>
+<script src="js/feedback.js"></script>
+<script src="js/export-support.js"></script>
+<script src="js/releases.js"></script>
+<script src="js/updates.js"></script>
 </body>
 </html>

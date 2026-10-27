@@ -1,5 +1,7 @@
 # 开发与调试说明
 
+当前 `dev` 对标工作以 [docs/dev-parity-plan.md](docs/dev-parity-plan.md) 为准。新组件：`name-text`/`figure-text` 处理文字片段与字体；`wbformat` 接入原有行内编辑器；`wbnotes`/`wbnote-render`/`wbnote-ui` 处理与蛋白裁切分离的注释；`feedback`、`export-support`、`updates` 由 GelFigure 桌面组件适配。未添加原色显示、手机工作台或 Marker 操作重构。下文较早的数据模型说明以当前代码为准。
+
 纯前端，无构建、无依赖。改完 JS/CSS 刷新浏览器即可看到效果。
 
 ## 在一台新电脑上开始

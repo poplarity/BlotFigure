@@ -26,7 +26,7 @@ export async function workspaceChecks(browser,base,root,engine){
     await page.setViewportSize(size);await page.evaluate(()=>{UI.openStep(3);const r=BApp.S.rows[0];r.name='A very long protein name with an extended treatment label';BApp.selRow=r.id;BApp.viewBlot=r.blot;BApp.viewImg=r.img;BApp.commit();BApp.emit('select');});await page.waitForTimeout(120);
     const bad=await page.evaluate(()=>{const pane=document.getElementById('rawCol').getBoundingClientRect();return ['lvBlack','lvWhite','btnLvAuto','showSat','fitFull','fitSel'].filter(id=>{const r=document.getElementById(id).getBoundingClientRect();return r.left<pane.left-1||r.right>pane.right+1||r.bottom>innerHeight;});});assert.deepEqual(bad,[],JSON.stringify(size));
     await page.evaluate(()=>UI.markerPopover(BApp.S.rows[0],{left:innerWidth-20,right:innerWidth-5,top:innerHeight-15,bottom:innerHeight-5}));
-    const bounds=await page.locator('.popover').boundingBox();assert(bounds.x>=0&&bounds.y>=0&&bounds.x+bounds.width<=size.width&&bounds.y+bounds.height<=size.height,JSON.stringify(bounds));
+    const bounds=await page.locator('#popover').boundingBox();assert(bounds.x>=0&&bounds.y>=0&&bounds.x+bounds.width<=size.width&&bounds.y+bounds.height<=size.height,JSON.stringify(bounds));
     await page.locator('#markerDisplayDone').scrollIntoViewIfNeeded();assert(await page.locator('#markerDisplayDone').isVisible());await page.click('#markerDisplayDone');
     await page.screenshot({path:path.join(out,'viewport-'+size.width+'.png')});
    }

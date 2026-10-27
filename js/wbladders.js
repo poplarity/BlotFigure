@@ -112,7 +112,24 @@
     custom=[...list.filter(l=>l.id!==lad.id),lad];persist();changed();return lad;
   }
   function importDefinitions(definitions) {
-    for(const l of definitions) { if(l?.custom && l.id && Array.isArray(l.sizes)) saveCustom(l.name,l.sizes,{id:l.id,ref:l.ref}); }
+    // Validate the entire import before mutating the catalogue. A project may have an older
+    // definition under an ID already used locally: preserve both and remap only the import.
+    if(!Array.isArray(definitions))throw new Error('Invalid marker definitions');
+    const checked=definitions.map(l=>{
+      if(!l?.custom||typeof l.id!=='string'||!Array.isArray(l.sizes))throw new Error('Invalid marker definition');
+      const sizes=parseSizes(l.sizes.join(' '));
+      return {...l,name:String(l.name||'My marker'),sizes,ref:[...new Set((l.ref||[]).map(Number).filter(k=>sizes.includes(k)))].sort((a,b)=>b-a)};
+    });
+    const remap=new Map(), staged=custom.slice(), signature=l=>JSON.stringify([l.name,l.sizes,(l.ref||[]).slice().sort((a,b)=>b-a)]);
+    for(const l of checked){
+      const previous=staged.find(x=>x.id===l.id)||L.find(x=>x.id===l.id), same=staged.find(x=>signature(x)===signature(l));
+      if(remap.has(l.id)&&signature(staged.find(x=>x.id===remap.get(l.id)))!==signature(l))throw new Error('Conflicting definitions in one marker file');
+      const id=same?.id||(previous?'c_'+Date.now()+'_'+Math.random().toString(36).slice(2,9):l.id);
+      if(!same)staged.push({...l,id,custom:true,vendor:'Custom',updatedAt:Date.now()});
+      remap.set(l.id,id);
+    }
+    if(checked.length){custom=staged;persist();changed();}
+    return remap;
   }
   function parseImport(raw, filename='') {
     const txt=String(raw).trim();

@@ -1,5 +1,7 @@
 # 下载一个文件，开始做图
 
+`0.14.0-dev` 的字体、标注和局部放大见[桌面编辑说明](desktop-editing.zh-CN.md)。下方下载链接指向已发布的稳定版。
+
 [English](getting-started.md) · [返回项目介绍](../README.zh-CN.md)
 
 **电脑用户只需要一个 HTML 文件，不用安装、不用解压、不用注册 GitHub。**

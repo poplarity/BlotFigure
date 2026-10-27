@@ -314,6 +314,7 @@
       const f = G.BRender.build(false), dpi = S().style.dpi, eff = Math.round(App.effectiveDpi());
       if (kind === 'tiff') await G.Export.exportTIFF(f.svg, f.w, f.h, dpi, `${baseName()}_${dpi}dpi.tif`, exportTexts());
       else await G.Export.exportPNG(f.svg, f.w, f.h, dpi, `${baseName()}_${dpi}dpi.png`, exportTexts());
+      G.dispatchEvent(new Event('blotfigure-figure-exported'));
       const fmt = kind === 'tiff' ? 'TIFF' : 'PNG';
       toast(L(`已导出 ${dpi} dpi ${fmt}`, `Exported ${dpi} dpi ${fmt}`) + (eff < dpi ? L(`（条带本身 ${eff} dpi）`, ` (the bands themselves are ${eff} dpi)`) : ''));
     } catch (e) { alert(e.message); } finally { App.busy(false); }
@@ -323,10 +324,10 @@
   $('btnPPTX').onclick=async()=>{
     if(needFigure() || !(await preflight()))return;
     App.busy(true,L('生成可编辑 PPT…','Building editable PPT…'));
-    try { await new Promise(r=>setTimeout(r,20));await G.PPTX.exportFile(baseName()+'.pptx');toast(L('已导出：文字可编辑，图片格式 → 裁剪可恢复全图','Exported: edit text or use Picture Format → Crop to restore the full picture'),5000); }
+    try { await new Promise(r=>setTimeout(r,20));await G.PPTX.exportFile(baseName()+'.pptx');G.dispatchEvent(new Event('blotfigure-figure-exported'));toast(L('已导出：文字可编辑，图片格式 → 裁剪可恢复全图','Exported: edit text or use Picture Format → Crop to restore the full picture'),5000); }
     catch(e){toast(L('PPT 导出失败：','PPT export failed: ')+e.message,6000);}finally{App.busy(false);}
   };
-  $('btnSVG').onclick = async () => { if (needFigure() || !(await preflight())) return; G.Export.exportSVG(G.BRender.build(false).svg, baseName() + '.svg'); toast(L('已导出 SVG', 'Exported SVG')); };
+  $('btnSVG').onclick = async () => { if (needFigure() || !(await preflight())) return;try{G.Export.exportSVG(G.BRender.build(false).svg, baseName() + '.svg');G.dispatchEvent(new Event('blotfigure-figure-exported')); toast(L('已导出 SVG', 'Exported SVG'));}catch(e){toast(L('SVG 导出失败：','SVG export failed: ')+e.message,5000);} };
   $('btnLog').onclick = () => {
     if (needFigure()) return;
     G.Export.download(new Blob([JSON.stringify(App.processingLog(), null, 2)], { type: 'application/json' }), baseName() + '_processing_log.json');
@@ -985,12 +986,15 @@
       <div class="field inline"><label class="inline-label">${L('字号', 'Font size')}</label><input type="number" id="pbPt" min="4" max="14" step="0.5" class="num" placeholder="${S().style.fontPt}" value="${bk.pt || ''}"> pt
         <span class="hint" style="margin:0">${L('留空 = 跟随全局字号', 'Empty = the figure font size')}</span></div>
       <div class="field inline"><label><input type="checkbox" id="pbVertical" ${bk.vertical ? 'checked' : ''}>${L('竖排文字', 'Vertical text')}</label><label><input type="checkbox" id="pbLine" ${bk.line ? 'checked' : ''}>${L('直线样式', 'Straight line')}</label></div>
-      <p class="hint">${L('盖住的范围不对：删掉，再用"行旁括号"重新拖一个。', 'Wrong span? Delete it and drag a new one with "Side bracket".')}</p>
+      <div class="field inline"><label>${L('颜色','Colour')} <select id="pbColor"><option value="">${L('默认','Default')}</option><option value="red">${L('红色','Red')}</option></select></label></div>
+      <p class="hint">${L('在成图上拖动括号两端的小方块，可以直接修改覆盖范围。', 'Drag the small handles at the bracket ends on the figure to change its span.')}</p>
       <div class="actions"><button class="btn sm danger" id="pbDel">${L('删除', 'Delete')}</button><button class="btn sm primary" id="pbOk">${L('完成', 'Done')}</button></div>`;
     placePopNear(at);
     const q = id => pop.querySelector('#' + id);
     q('pbVertical').onchange = done(e => { bk.vertical = e.target.checked; }); q('pbLine').onchange = done(e => { bk.line = e.target.checked; });
-    q('pbText').addEventListener('input', live(e => { bk.text = e.target.value.replace(/\s*↵\s*/g, '\n'); }));
+    q('pbColor').value=bk.color||'';q('pbColor').onchange=done(e=>{bk.color=e.target.value;});
+    q('pbText').addEventListener('input', live(e => { G.FigureText.edit(bk,'text',e.target.value.replace(/\s*↵\s*/g, '\n')); }));
+    G.NoteUI?.formats(q('pbText'),bk,'text');
     q('pbText').addEventListener('change', done());
     q('pbText').addEventListener('keydown', e => { if (e.key === 'Enter' && !composing(e)) closePop(); });
     q('pbPt').addEventListener('input', live(e => { const v = +e.target.value; if (e.target.value !== '' && v >= 4 && v <= 14) bk.pt = v; else if (e.target.value === '') delete bk.pt; }));
@@ -1022,11 +1026,14 @@
         <span class="hint" style="margin:0">${L('在成图上上下拖动箭头，可以移到这一行的另一条带', 'Drag the arrow up or down on the figure to move it to another band of this row')}</span></div>
       <div class="field inline"><label class="inline-label">${L('字号', 'Font size')}</label><input type="number" id="paPt" min="4" max="14" step="0.5" class="num" placeholder="${S().style.fontPt}" value="${a.pt || ''}"> pt
         <span class="hint" style="margin:0">${L('留空 = 跟随全局字号', 'Empty = the figure font size')}</span></div>
+      <div class="field inline"><label>${L('颜色','Colour')} <select id="paColor"><option value="">${L('默认','Default')}</option><option value="red">${L('红色','Red')}</option></select></label></div>
       <div class="actions"><button class="btn sm danger" id="paDel">${L('删除', 'Delete')}</button><button class="btn sm primary" id="paOk">${L('完成', 'Done')}</button></div>`;
     pop.querySelector('#paSym').value = a.sym;
     placePopNear(at);
     const q = id => pop.querySelector('#' + id);
-    q('paText').addEventListener('input', live(e => { a.text = e.target.value; }));
+    q('paColor').value=a.color||'';q('paColor').onchange=done(e=>{a.color=e.target.value;});
+    q('paText').addEventListener('input', live(e => { G.FigureText.edit(a,'text',e.target.value); }));
+    G.NoteUI?.formats(q('paText'),a,'text');
     q('paText').addEventListener('change', done());
     q('paText').addEventListener('keydown', e => { if (e.key === 'Enter' && !composing(e)) closePop(); });
     q('paSym').addEventListener('change', done(e => { a.sym = e.target.value; }));
@@ -1186,15 +1193,16 @@
   }
   const edState = e => App.columnData(e.column || App.activeColumn);
   const getV = e => e.kind === 'lane' ? edState(e).lanes[e.id - 1].name : e.kind === 'rowname' ? (App.row(e.id) || {}).name : e.kind === 'group' ? edState(e).groups[e.id].text : edState(e).conditions[e.id].name;
-  const setV = (e, v) => { if (e.kind === 'lane') edState(e).lanes[e.id - 1].name = v; else if (e.kind === 'rowname') { const r = App.row(e.id); if (r) r.name = v; } else if (e.kind === 'group') edState(e).groups[e.id].text = v; else edState(e).conditions[e.id].name = v; };
+  const textTarget=e=>e.kind==='lane'?edState(e).lanes[e.id-1]:e.kind==='rowname'?App.row(e.id):e.kind==='group'?edState(e).groups[e.id]:edState(e).conditions[e.id];
+  const setV=(e,v)=>{const o=textTarget(e);if(o)G.FigureText.edit(o,e.kind==='group'?'text':'name',v);};
   const editEl = e => prev.querySelector((e.kind === 'lane' ? `g[data-edit="lane"][data-j="${e.id}"]` : e.kind === 'rowname' ? `g[data-edit="rowname"][data-row="${e.id}"]` : e.kind === 'group' ? `g[data-edit="group"][data-k="${e.id}"]` : `g[data-edit="condname"][data-r="${e.id}"]`) + `[data-column="${e.column || App.activeColumn}"]`);
   /* the text editor over the figure: one line (with the protein-name suggestions), or several for a group label
    * (Shift+Enter); under it a bar with the font size of what is edited (lane names and protein names share one
    * each, a group or a condition row has its own) and, for a group, a line break (as GelFigure) */
   const fta = $('floatTa'), bar = $('fedBar');
   const edBox = () => (edit && edit.kind === 'group' ? fta : fed);
-  const sizeHost = () => (edit.kind === 'lane' ? { o: S().style, k: 'lanePt' } : edit.kind === 'rowname' ? { o: S().style, k: 'namePt' }
-    : { o: edit.kind === 'group' ? S().groups[edit.id] : S().conditions[edit.id], k: 'pt' });
+  const sizeHost = () => (edit.kind === 'lane' ? (textTarget(edit).nameStyle?{o:textTarget(edit).nameStyle,k:'pt'}:{ o: S().style, k: 'lanePt' }) : edit.kind === 'rowname' ? { o: S().style, k: 'namePt' }
+    : { o: textTarget(edit), k: 'pt' });
   const curSize = () => { const h = sizeHost(); return (h.o && h.o[h.k]) || S().style.fontPt; };
   function setSize(v) {
     const h = sizeHost(); if (!h.o) return;
@@ -1230,6 +1238,8 @@
     edit = Object.assign(e, { orig: getV(e) || '' });
     const box = edBox();
     box.value = edit.orig;
+    G.Formatting?.opened(edit,box);
+    box.style.fontFamily=G.FigureText.fontStack(S().style.fontFamily);
     box.placeholder = kind === 'lane' ? L(`泳道 ${id} 名称`, `Lane ${id} name`) : kind === 'rowname' ? L('蛋白名（如 GAPDH）', 'Protein name (e.g. GAPDH)')
       : kind === 'group' ? L('分组文字', 'Group label') : L('条件名', 'Condition name');
     if (kind === 'rowname') { fed.setAttribute('list', 'protList'); fillDatalist(App.rowKda(App.row(id))); selectRow(id, true); } else fed.removeAttribute('list');
@@ -1248,6 +1258,7 @@
     if (!edit) return;
     const e = edit, box = edBox(); edit = null;
     setV(e, revert ? e.orig : cleanText(e.kind, box.value));
+    G.Formatting?.closed(revert);
     fed.classList.add('hidden'); fta.classList.add('hidden'); bar.classList.add('hidden');
     App.commit();
   }
@@ -1278,10 +1289,10 @@
       }
     });
     // leaving the field finishes the edit — unless it went to the size / line-break bar
-    box.addEventListener('blur', () => setTimeout(() => { if (edit && !barPress && document.activeElement !== edBox()) closeEd(false); }, 120));
+    box.addEventListener('blur', () => setTimeout(() => { if (edit && !barPress && document.activeElement !== edBox() && !bar.contains(document.activeElement)) closeEd(false); }, 120));
   });
-  bar.addEventListener('pointerdown', e => { barPress = true; e.preventDefault(); setTimeout(() => { barPress = false; }, 800); });
-  bar.addEventListener('mousedown', e => e.preventDefault());       // (the focus stays in the text field)
+  bar.addEventListener('pointerdown', e => { barPress = true; if(!e.target.matches('input,select'))e.preventDefault(); setTimeout(() => { barPress = false; }, 800); });
+  bar.addEventListener('mousedown', e => {if(!e.target.matches('input,select'))e.preventDefault();});
   bar.addEventListener('click', e => {
     const b = e.target.closest('button[data-fz]'); barPress = false;
     if (!b || !edit) return;
@@ -1695,7 +1706,7 @@
   };
   $('skip4').onclick = () => {
     S().style.showMW = false;
-    toast(L('这次不标分子量：成图不显示分子量刻度（第 5 步"更多版式"里可以再打开）', 'No molecular weights this time: the figure shows no MW ticks (turn them on again under "More layout" in step 5)'), 3600);
+    toast(L('这次不标分子量：成图不显示分子量刻度（第 5 步"版式"里可以再打开）', 'No molecular weights this time: the figure shows no MW ticks (turn them on again under "Layout" in step 5)'), 3600);
     nextStep(4);
   };
   // a done step's header opens it again
@@ -1933,6 +1944,7 @@
   }
 
   G.UI = { focusProtein, finishImages: async () => { if(App.reviewReturnStep>=3 && S().blots.every(b=>b.boxesReady)) {await App.ensurePrepared(); S().step=Math.max(S().step,App.reviewReturnStep);App.commit();openStep(App.reviewReturnStep);}else await nextStep(1);}, addFiles, markerPopover, flushPending: async () => { if(edit)closeEd(false);closePop(true);if(App.mode==='pieces'){const b=App.blot(App.viewBlot),pcs=G.View.piecesEnd(true);await new Promise(resolve=>applyPieces(b,pcs,false,resolve));if(App.curStep===2)G.View.piecesStart();}if(S())App.commit();}, toast, editRowName, openEd, markPicker, openStep, nextStep, lastFig: () => lastFig, preflight,
+    textEditing:{target:textTarget,get current(){return edit;},get box(){return edBox();},close:closeEd,refresh(){syncBar();placeBar();}},
     piecesChanged: () => { $('stPieces').textContent = L('已修改：切换步骤时保存', 'Changed: saved when switching tools'); } };
 
   const qs = new URLSearchParams(location.search);

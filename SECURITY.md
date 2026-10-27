@@ -1,12 +1,13 @@
 # Security and privacy
 
-BlotFigure runs entirely in the browser. It has no server, collects no telemetry and sends no data anywhere; a Content Security Policy in `index.html` forbids connections to any server other than the page's own origin (from which it loads only its own files). Pictures are read from files you choose and results are saved through your browser's downloads.
+BlotFigure processes pictures entirely in the browser, with no image-processing server or telemetry. The Content Security Policy allows app resources and one configured feedback endpoint. Only an explicit feedback submission sends the typed message, optional reply email and version to that endpoint; no image, project, filename or lane labels are attached automatically. Support/Star links open only when clicked. Pictures are read from files you choose and results are saved through the browser.
 
 Data kept on your computer, in the browser's storage for this page only:
 
 - preferences (language, last ladder, pre-flight setting, whether the interface tour was seen);
 - custom ladders;
-- the autosaved draft (the pictures and the current state), which you can discard from the start screen.
+- local project history (source pictures, every exposure, annotations and settings), with rename/delete controls;
+- parameter presets and the last seen release version. Feedback drafts remain in memory during the current session.
 
 ## Reporting a vulnerability
 

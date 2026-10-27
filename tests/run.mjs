@@ -21,6 +21,8 @@ import { workflowChecks } from './workflow.mjs';
 import { workspaceChecks } from './workspace014.mjs';
 import { redetectChecks } from './redetect.mjs';
 import { iterationChecks } from './iteration012.mjs';
+import { parityChecks } from './parity.mjs';
+import { communityChecks } from './community.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const arg = name => (process.argv.find(a => a.startsWith(`--${name}=`)) || '').split('=')[1];
@@ -55,6 +57,8 @@ async function runIn(name, base) {
   const browser = await ENGINES[name].launch(channel && name === 'chromium' ? { channel } : {});
   try {
     if (arg('suite') === 'startup') { add(await startupChecks(browser,base,ROOT)); return out; }
+    if (arg('suite') === 'parity') { add(await parityChecks(browser,base)); return out; }
+    if (arg('suite') === 'community') { add(await communityChecks(browser,base,ROOT)); return out; }
     if (arg('suite') === 'workspace') { add(await workspaceChecks(browser,base,ROOT,name)); return out; }
     if (arg('suite') === 'redetect') { add(await redetectChecks(browser, base)); return out; }
     if (arg('suite') === 'iteration012') { add(await iterationChecks(browser, base, ROOT, name)); return out; }
@@ -94,6 +98,8 @@ async function runIn(name, base) {
     add(await redetectChecks(browser, base));
     add(await workspaceChecks(browser, base, ROOT, name));
     add(await iterationChecks(browser, base, ROOT, name));
+    add(await parityChecks(browser,base));
+    add(await communityChecks(browser,base,ROOT));
     // privacy: the Content Security Policy must stop every request to another origin
     {
       const c2 = await browser.newContext(), page = await c2.newPage();

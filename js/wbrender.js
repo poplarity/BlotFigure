@@ -10,6 +10,8 @@
   const App = G.BApp, MM = 72 / 25.4;
   const L = G.L || (zh => zh);
   const mctx = document.createElement('canvas').getContext('2d');
+  const FT=G.FigureText;
+  let family='Arial';
   /* *italic* runs. A star opens only before a non-space and closes only after one, never right after its opener
    * (as Markdown): the rest stay stars ("WT*", "siRNA* control", "**", "a * b") instead of vanishing.
    * Private-use characters: LIT a star kept as it is; TOG an italic switch put in by the line breaking */
@@ -30,8 +32,9 @@
   }
   const runs = t => { t = String(t); return (t.includes(TOG) ? t.split(TOG) : litStar(t).split('*')).map((s, i) => ({ t: s.replace(/\uE000/g, '*'), it: i % 2 === 1 })).filter(r => r.t); };
   function measure(text, pt, bold) {
+    if(typeof text==='object')return FT.metrics(text,pt,family).width;
     let w = 0;
-    runs(text).forEach(r => { mctx.font = `${r.it ? 'italic ' : ''}${bold ? 'bold ' : ''}${pt * 4}px Arial`; w += mctx.measureText(r.t).width / 4; });
+    runs(text).forEach(r => { mctx.font = `${r.it ? 'italic ' : ''}${bold ? 'bold ' : ''}${pt * 4}px ${FT.fontStack(family)}`; w += mctx.measureText(r.t).width / 4; });
     return w;
   }
   const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -39,12 +42,13 @@
   const PH = '#aab3be';                 // grey placeholders in the preview (never exported)
   let usedMin = Infinity;               // the smallest text printed in this build (pre-flight)
   function text(t, x, y, pt, anchor, extra) {
+    if(typeof t==='object'){const m=FT.metrics(t,pt,family);if(!(extra||'').includes(PH))for(const r of m.runs)usedMin=Math.min(usedMin,r.pt);return FT.svg(m,x,y,pt,anchor,extra);}
     if (!(extra || '').includes(PH) && String(t).trim()) usedMin = Math.min(usedMin, pt);
     return `<text x="${f(x)}" y="${f(y)}" font-size="${f(pt)}" text-anchor="${anchor}"${extra || ''}>${runs(t).map(r => r.it ? `<tspan font-style="italic">${esc(r.t)}</tspan>` : esc(r.t)).join('')}</text>`;
   }
   // a symbol as it is (in text() a * starts italics)
   const symText = (t, x, y, pt, anchor) => { usedMin = Math.min(usedMin, pt); return `<text x="${f(x)}" y="${f(y)}" font-size="${f(pt)}" text-anchor="${anchor}">${esc(t)}</text>`; };
-  const symWidth = (t, pt) => { mctx.font = `${pt * 4}px Arial`; return mctx.measureText(t).width / 4; };
+  const symWidth = (t, pt) => { mctx.font = `${pt * 4}px ${FT.fontStack(family)}`; return mctx.measureText(t).width / 4; };
   const line = (x1, y1, x2, y2, lw) => `<line x1="${f(x1)}" y1="${f(y1)}" x2="${f(x2)}" y2="${f(y2)}" stroke="#000" stroke-width="${f(lw)}"/>`;
 
   // ---- multi-line labels (as GelFigure) ----
@@ -52,7 +56,7 @@
   // lines whose last baseline is y (they stack upwards from the line they label)
   const textLines = (lines, x, y, pt, anchor, extra) => '<g data-pptx-lines="1">' + lines.map((t, i) => text(t, x, y - (lines.length - 1 - i) * pt * LEAD, pt, anchor, extra)).join('') + '</g>';
   function vertical(t, pt) {
-    mctx.font = `${pt * 4}px Arial`;
+    mctx.font = `${pt * 4}px ${FT.fontStack(family)}`;
     const m=mctx.measureText(t);
     return {ascent:(m.fontBoundingBoxAscent || m.actualBoundingBoxAscent || pt*3.8)/4, descent:(m.fontBoundingBoxDescent || m.actualBoundingBoxDescent || pt*.8)/4};
   }
@@ -88,6 +92,7 @@
   function buildSingle(preview, column, slots, forPPT) {
     usedMin = Infinity;
     const S = App.columnState(column.id), st = S.style, pt = st.fontPt, lw = st.lineWidthPt, P = !!preview;
+    family=FT.fontName(st.fontFamily);
     // per-kind sizes (null = the figure font)
     const lp = st.lanePt || pt, mp = st.markerPt || pt, np = st.namePt || pt;
     const ph = ` fill="${PH}"`;
@@ -109,7 +114,7 @@
     const mwRight = st.mwSide === 'right', nameLeft = st.nameSide === 'left';
     const rows = C.rows, rowNames = [], ticksOut = [], arrowsOut = [];
     let y = 0, maxLeft = 0, maxRight = 0, tickLabW = 0;
-    const rowBoxes = [], exportSlices = [];   // the kDa header sits just above the first row
+    const rowBoxes = [], exportSlices = [],sourceRegions=[];   // the kDa header sits just above the first row
     rows.forEach((row, ri) => {
       if (slots) y = slots[ri];
       else if (ri) y += st.rowGapPt;
@@ -130,6 +135,7 @@
           const gR = right && (right.sg !== cur.sg || right.i !== cur.i1 + 1) ? gap / 2 : 0;
           const x0 = X.get(cur.j0) - laneW / 2 + gL, w = (cur.i1 - cur.i0 + 1) * laneW - gL - gR;
           const iy = y + (row.above - App.boxAbove(row, cur.sg)) * sc, ih = (App.boxAbove(row, cur.sg) + App.boxBelow(row, cur.sg)) * sc;
+          sourceRegions.push({row:row.id,box:App.boxId(cur.sg),column:column.id,x:x0,y:iy,w,h:ih,u0:App.laneLeft(cur.sg,cur.i0),u1:App.laneRight(cur.sg,cur.i1),v0:cur.sg.vc-App.boxAbove(row,cur.sg),v1:cur.sg.vc+App.boxBelow(row,cur.sg)});
           const tag = P ? `data-column="${column.id}" data-row="${row.id}" data-piece="${cur.sg.piece}" data-box="${App.boxId(cur.sg)}" ` : '';
           els.push(`<image ${forPPT?`data-pptx-image="${imageId}" `:""}${tag}x="${f(x0)}" y="${f(iy)}" width="${f(w)}" height="${f(ih)}" preserveAspectRatio="none" href="${ras.href}" xlink:href="${ras.href}"/>`);
           if(P&&App.selectedBoxes.has(App.boxId(cur.sg)))els.push(`<rect x="${f(x0)}" y="${f(iy)}" width="${f(w)}" height="${f(ih)}" fill="#2f6feb" fill-opacity="0.08" stroke="#2f6feb" stroke-width="1.1" pointer-events="none"/>`);
@@ -145,14 +151,15 @@
       });
       if (P && App.selRow === row.id) els.push(`<rect x="-1" y="${f(y - 1)}" width="${f(W + 2)}" height="${f(h + 2)}" fill="none" stroke="#2f6feb" stroke-width="1.2" pointer-events="none"/>`);
       // protein name (placed once the width of the kDa scale is known)
-      const nm = row.name || (P ? L('蛋白名', 'Protein name') : '');
+      const nm = row.name ? FT.label(row) : (P ? L('蛋白名', 'Protein name') : '');
       const kdaHint = App.rowKda(row);
       rowNames.push({ row, nm, y: y + h / 2, h, hint: !row.name && P && kdaHint ? `≈${Math.round(kdaHint)} kDa` : '' });
       // target-band arrows of the row, at their band (placed once the widths beside the bands are known)
       (S.arrows || []).forEach((a, k) => {
         if (a.row !== row.id) return;
         const ya = y + (App.arrowV(a) - (row.segs[0].vc - row.above)) * sc, lab = App.arrowLabel(a), wait = !lab && P && a.sym === '◀' && a.auto;
-        if (ya >= y - 0.5 && ya <= y + h + 0.5) arrowsOut.push({ a, k, y: ya, label: lab || (wait ? '? kDa' : ''), wait, pt: a.pt || pt });
+        let rich=lab|| (wait?'? kDa':'');if(a.textRuns&&lab.startsWith(a.text||'')){rich={name:lab,nameRuns:[...G.NameText.runs({name:a.text,nameRuns:a.textRuns}),{text:lab.slice((a.text||'').length)}]};}
+        if (ya >= y - 0.5 && ya <= y + h + 0.5) arrowsOut.push({ a, k, y: ya, label:rich, wait, pt: a.pt || pt });
       });
       // Every hand-set tick is retained, including single marks and marks from other boxes in a joined row.
       const b = App.blot(row.blot);
@@ -176,7 +183,7 @@
     // Fixed short ticks and a single aligned label column. Calibration positions never move.
     let previous = null, markerFit = mp;
     ticksOut.sort((a,b) => a.y-b.y).forEach(t => {
-      mctx.font = `${mp * 4}px Arial`;
+      mctx.font = `${mp * 4}px ${FT.fontStack(family)}`;
       const metric = mctx.measureText(String(t.k)), asc = (metric.actualBoundingBoxAscent || mp * 2.8) / 4;
       const desc = (metric.actualBoundingBoxDescent || 0) / 4, height = asc + desc, margin = 0.3;
       const crowded = previous && t.y - previous.y < (height + previous.height) / 2 + margin;
@@ -214,7 +221,7 @@
         g = symText(t.a.sym, x0, t.y + apt * (t.a.sym === '*' ? 0.55 : 0.35), apt, anchor) + (t.label ? text(t.label, x0 + dir * (sw + 2), t.y + apt * 0.35, apt, anchor) : '');
       }
       const hit = P ? `<rect x="${f(Math.min(x0, x0 + dir * t.w))}" y="${f(t.y - apt * 0.7)}" width="${f(t.w)}" height="${f(apt * 1.4)}" fill="transparent"/>` : '';
-      els.push(ed(`data-edit="arrow" data-k="${t.k}"`, hit + g));
+      els.push(ed(`data-edit="arrow" data-k="${t.k}"`, hit + `<g fill="${FT.color(t.a.color)}">${g}</g>`));
     });
     if (arrowW.right) maxRight = Math.max(maxRight, 2 + scaleOn(true) + arrowW.right);
     if (arrowW.left) maxLeft = Math.max(maxLeft, 2 + scaleOn(false) + arrowW.left);
@@ -223,8 +230,9 @@
     rowNames.forEach((n, i) => {
       const x = nameLeft ? -off : W + off, anchor = nameLeft ? 'end' : 'start';
       if (n.nm) {
-        els.push(ed(`data-edit="rowname" data-row="${n.row.id}"`, text(n.nm, x, n.y + np * 0.35, np, anchor, n.row.name ? '' : ph)));
+        els.push(ed(`data-edit="rowname" data-row="${n.row.id}"`, text(n.nm, x, n.y + np * 0.35, np, anchor, n.row.name ? ` fill="${FT.color(n.row.nameColor)}"` : ph)));
         const w = off + measure(n.nm, np);
+        if(typeof n.nm==='object'){const m=FT.metrics(n.nm,np,family),start=nameLeft?x-m.width:x;grow(start+m.left,n.y+np*.35-m.ascent,start+m.right,n.y+np*.35+m.descent);}
         if (nameLeft) maxLeft = Math.max(maxLeft, w); else maxRight = Math.max(maxRight, w);
         // names of neighbouring thin rows run into each other
         const nx = rowNames[i + 1];
@@ -264,14 +272,18 @@
       const xb = (side === 'right' ? W : 0) + dir * (off + tk), tx = xb + dir * 2;
       const path = o.bk.line ? `M${f(xb)} ${f(o.y1)}L${f(xb)} ${f(o.y2)}` : `M${f(xb - dir * tk)} ${f(o.y1)}L${f(xb)} ${f(o.y1)}L${f(xb)} ${f(o.y2)}L${f(xb - dir * tk)} ${f(o.y2)}`;
       const hit = P ? `<rect x="${f(Math.min(xb - dir * tk, tx + dir * tw) - 1)}" y="${f(yy1 - 1)}" width="${f(tk + 2 + tw + 2)}" height="${f(yy2 - yy1 + 2)}" fill="transparent"/>` : '';
-      els.push(ed(`data-edit="bracket" data-k="${o.k}"`, hit + `<path d="${path}" fill="none" stroke="#000" stroke-width="${f(lw)}"/>` +
-        (ls.length ? (vertical ? `<g transform="translate(${f(tx + dir * tw / 2)},${f(ym)}) rotate(-90)">${textLines(ls, 0, bp * 0.35 + (ls.length - 1) * bp * LEAD / 2, bp, 'middle', o.bk.text ? '' : ph)}</g>` : textLines(ls, tx, ym + bp * 0.35 + (ls.length - 1) * bp * LEAD / 2, bp, side === 'right' ? 'start' : 'end', o.bk.text ? '' : ph)) : '')));
+      const labelLines=FT.lines(FT.label(o.bk,'text'),ls),colour=FT.color(o.bk.color),extra=o.bk.text?` fill="${colour}"`:ph;
+      const handles=P?[o.y1,o.y2].map((yy,end)=>`<rect data-bracket-end="${end}" data-bracket="${o.k}" x="${f(xb-2)}" y="${f(yy-2)}" width="4" height="4" fill="#fff" stroke="#2f6feb" stroke-width=".6"/>`).join(''):'';
+      els.push(ed(`data-edit="bracket" data-k="${o.k}"`, hit + `<path d="${path}" fill="none" stroke="${colour}" stroke-width="${f(lw)}"/>` +
+        (ls.length ? (vertical ? `<g transform="translate(${f(tx + dir * tw / 2)},${f(ym)}) rotate(-90)">${textLines(labelLines, 0, bp * 0.35 + (ls.length - 1) * bp * LEAD / 2, bp, 'middle', extra)}</g>` : textLines(labelLines, tx, ym + bp * 0.35 + (ls.length - 1) * bp * LEAD / 2, bp, side === 'right' ? 'start' : 'end', extra)) : '')+handles));
       const end = off + tk + 2 + tw;
       placedBr[side].push({ y1: yy1, y2: yy2, end });
       if (side === 'right') maxRight = Math.max(maxRight, end); else maxLeft = Math.max(maxLeft, end);
       grow(0, yy1, W, yy2);
     });
     grow(-maxLeft, 0, W + maxRight, H);
+    const notes=G.WBNoteRender.build({S,column,preview:P,forPPT,regions:sourceRegions,rowBoxes,W,H,pt,measure,text,grow,left:maxLeft,right:maxRight});
+    els.push(notes.content);exportSlices.push(...notes.slices);
 
     /* ---- top stack (y grows negative): lane numbers, conditions, lane names, groups ---- */
     let yTop = -st.labelGapPt;
@@ -294,36 +306,38 @@
       const c = conds[k], cp = c.pt || pt;
       lanes.forEach(j => {
         const v = c.values[j - 1] || '', hit = P ? `<rect x="${f(X.get(j) - laneW * 0.45)}" y="${f(yTop - cp)}" width="${f(laneW * 0.9)}" height="${f(cp * 1.25)}" fill="transparent"/>` : '';
-        if (v || P) els.push(ed(`data-edit="cond" data-r="${c.r}" data-j="${j}"`, hit + text(v || '·', X.get(j), yTop, cp, 'middle', v ? '' : ph)));
+        if (v || P) els.push(ed(`data-edit="cond" data-r="${c.r}" data-j="${j}"`, hit + text(v || '·', X.get(j), yTop, cp, 'middle', v ? ` fill="${FT.color(c.color)}"` : ph)));
       });
       const nm = c.name || (P ? L('条件', 'Condition') : '');
-      if (nm) { els.push(ed(`data-edit="condname" data-r="${c.r}"`, text(nm, -st.labelGapPt * 2, yTop, cp, 'end', c.name ? '' : ph))); grow(-st.labelGapPt * 2 - measure(nm, cp), yTop - cp, 0, yTop); }
+      if (nm) { els.push(ed(`data-edit="condname" data-r="${c.r}"`, text(c.name?FT.label(c):nm, -st.labelGapPt * 2, yTop, cp, 'end', c.name ? ` fill="${FT.color(c.color)}"` : ph))); grow(-st.labelGapPt * 2 - measure(nm, cp), yTop - cp, 0, yTop); }
       yTop -= cp * 1.3;
     }
     // placeholders count the lanes shown (hidden ladder lanes skipped), the order bulk paste fills them in (with the
     // lane numbers printed: a dot, not the number twice)
-    const names = lanes.map((j, i) => S.lanes[j - 1].name || (P ? (st.laneNumbers ? '·' : String(i + 1)) : ''));
+    const names = lanes.map((j, i) => {const l=S.lanes[j-1];return l.name?(st.laneItalic?{name:l.name,nameRuns:l.nameRuns,italicDefault:true}:FT.label(l)):(P?(st.laneNumbers?'·':String(i+1)):'');});
     let angle = 0;
     if (names.some(t => t)) {
       const maxW = Math.max(...names.map(t => measure(t, lp)));
       angle = st.labelAngle === 'auto' ? (maxW <= laneW * 0.92 ? 0 : laneW >= lp * 1.6 ? 45 : 90) : +st.labelAngle;
-      const rad = angle * Math.PI / 180, sn = Math.sin(rad), cs = Math.cos(rad);
-      let hMax = lp;
+      let hMax = lp, anyTilt=angle!==0;
       lanes.forEach((j, i) => {
         const t = names[i]; if (!t) return;
-        const tw = measure(t, lp), xc = X.get(j), extra = S.lanes[j - 1].name ? '' : ph;
-        if (angle === 0 || !S.lanes[j - 1].name) { els.push(ed(`data-edit="lane" data-j="${j}"`, text(t, xc, yTop, lp, 'middle', extra))); grow(xc - tw / 2, yTop - lp, xc + tw / 2, yTop); }
+        const lane=S.lanes[j-1],own=G.NameText.style(lane.nameStyle),size=own.pt||lp,tw=measure(t,size),xc=X.get(j),extra=lane.name?'':ph;
+        const la=!lane.name?0:own.angle==='auto'?(tw<=laneW*.92?0:laneW>=size*1.6?45:90):own.angle!=null?+own.angle:angle;
+        const rad=la*Math.PI/180,sn=Math.sin(rad),cs=Math.cos(rad),metrics=FT.metrics(typeof t==='object'?t:{name:t},size,family);
+        anyTilt=anyTilt||la!==0;
+        if (la === 0) { els.push(ed(`data-edit="lane" data-j="${j}"`, text(t, xc, yTop, size, 'middle', extra))); grow(xc-tw/2+metrics.left,yTop-Math.max(size,metrics.ascent),xc-tw/2+metrics.right,yTop+metrics.descent);hMax=Math.max(hMax,size*1.3+metrics.descent); }
         else {
-          const ox = xc + lp * 0.35 * sn;
-          els.push(ed(`data-edit="lane" data-j="${j}"`, `<g transform="translate(${f(ox)},${f(yTop)}) rotate(${-angle})">${text(t, 0, 0, lp, 'start', extra)}</g>`));
-          hMax = Math.max(hMax, tw * sn + lp * cs * 0.8);
-          grow(ox - lp * sn, yTop - tw * sn - lp * cs, ox + tw * cs + lp * sn * 0.2, yTop);
+          const ox = xc + size * 0.35 * sn;
+          els.push(ed(`data-edit="lane" data-j="${j}"`, `<g transform="translate(${f(ox)},${f(yTop)}) rotate(${-la})">${text(t, 0, 0, size, 'start', extra)}</g>`));
+          hMax = Math.max(hMax, metrics.right*sn+Math.max(size,metrics.ascent)*cs);
+          grow(ox-Math.max(size,metrics.ascent)*sn,yTop-metrics.right*sn-Math.max(size,metrics.ascent)*cs,ox+metrics.right*cs+metrics.descent*sn,yTop+metrics.descent*cs);
         }
       });
       const named = lanes.filter(j => S.lanes[j - 1].name).map(j => measure(S.lanes[j - 1].name, lp));
       if (angle !== 0 && named.length && laneW < lp * 1.15) overlap(L('泳道太窄：即使 90° 泳道名也会重叠，请减小泳道名字号或加宽每道', 'Lanes are too narrow: lane names overlap even at 90°; use a smaller font size for lane names or wider lanes'));
       if (angle === 0 && st.labelAngle !== 'auto' && named.length && Math.max(...named) > laneW * 1.02) overlap(L('水平的泳道名互相重叠：改用"自动"或倾斜角度，或减小字号', 'Horizontal lane names overlap: use "Auto" or a tilted angle, or a smaller font size'));
-      yTop -= angle === 0 ? lp * 1.3 : hMax + lp * 0.35;
+      yTop -= anyTilt ? hMax + lp * .35 : Math.max(lp*1.3,hMax);
     }
     if (hasUnit) {
       const ux=mwRight?W+st.tickLenPt+2.5:-st.tickLenPt-2.5;
@@ -363,11 +377,11 @@
       items.forEach(o => {
         const yy = tierY(o.tier);
         o.parts.forEach(([r0, r1]) => {
-          els.push(line(r0, yy, r1, yy, lw));
-          if (st.groupTicks) { els.push(line(r0, yy, r0, yy + pt * 0.35, lw)); els.push(line(r1, yy, r1, yy + pt * 0.35, lw)); }
+          const colour=FT.color(o.g.color),segment=line(r0,yy,r1,yy,lw)+(st.groupTicks?line(r0,yy,r0,yy+pt*.35,lw)+line(r1,yy,r1,yy+pt*.35,lw):'');
+          els.push(segment.replace(/stroke="#000"/g,`stroke="${colour}"`));
         });
         if (o.ls.length) {
-          els.push(ed(`data-edit="group" data-k="${o.g.k}"`, textLines(o.ls, o.cx, yy - o.size * 0.3, o.size, 'middle', o.g.text ? '' : ph)));
+          els.push(ed(`data-edit="group" data-k="${o.g.k}"`, textLines(FT.lines(FT.label(o.g,'text'),o.ls), o.cx, yy - o.size * 0.3, o.size, 'middle', o.g.text ? ` fill="${FT.color(o.g.color)}"` : ph)));
           grow(o.cx - o.tw / 2, yy - o.th, o.cx + o.tw / 2, yy);
         }
         grow(o.x0, yy - pt, o.x1, yy);
@@ -382,9 +396,9 @@
     if (st.panelLetter && column.id === 'main') { const px = box.x0 - 2, py = box.y0 - 1; els.push(text(st.panelLetter, px, py + 8, 8, 'end', ' font-weight="bold"')); grow(px - measure(st.panelLetter, 8, true), py, px, py + 8); }
 
     const m = 2, vx = box.x0 - m, vy = box.y0 - m, vw = box.x1 - box.x0 + 2 * m, vh = box.y1 - box.y0 + 2 * m;
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${f(vw / MM)}mm" height="${f(vh / MM)}mm" viewBox="${f(vx)} ${f(vy)} ${f(vw)} ${f(vh)}" font-family="Arial, Helvetica, sans-serif" fill="#000">` +
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${f(vw / MM)}mm" height="${f(vh / MM)}mm" viewBox="${f(vx)} ${f(vy)} ${f(vw)} ${f(vh)}" font-family="${esc(FT.fontStack(family))}" fill="#000">` +
       `<rect x="${f(vx)}" y="${f(vy)}" width="${f(vw)}" height="${f(vh)}" fill="#fff"/>` + els.join('') + '</svg>';
-    return { exportSlices, svg, content: els.join(''), markerFit, vx, vy, w: vw, h: vh, warnings, overlaps, angle, rowBoxes, laneX: X, laneW, figW: W, minPt: usedMin === Infinity ? pt : usedMin };
+    return { sourceRegions,noteHits:notes.hits,fontFamily:family,exportSlices, svg, content: els.join(''), markerFit, vx, vy, w: vw, h: vh, warnings, overlaps, angle, rowBoxes, laneX: X, laneW, figW: W, minPt: usedMin === Infinity ? pt : usedMin };
   }
 
   // A column is an independent lane grid. Composition changes position only, never image data.
@@ -414,18 +428,20 @@
       return { ...p, columnBoxes: [{ id: c.id, x0: p.vx, x1: p.vx + p.w, y0: p.vy, y1: p.vy + p.h, laneX: p.laneX }] };
     }
     const top = Math.min(...parts.map(({p}) => p.vy)), bottom = Math.max(...parts.map(({p}) => p.vy + p.h));
-    const gap = (App.S.style.columnGapMm ?? 6) * MM, rowBoxes = [], columnBoxes = [], content = [];
+    const gap = (App.S.style.columnGapMm ?? 6) * MM, rowBoxes = [], columnBoxes = [], content = [],sourceRegions=[],noteHits=[];
     let x = 0;
     parts.forEach(({c, p}) => {
       const dx = x - p.vx;
       content.push(`<g data-layout-column="${c.id}" transform="translate(${f(dx)},0)">${p.content || ''}</g>`);
       columnBoxes.push({ id: c.id, x0: x, x1: x + p.w, y0: top, y1: bottom, laneX: new Map([...p.laneX || []].map(([j, v]) => [j, v + dx])) });
       (p.rowBoxes || []).forEach(r => rowBoxes.push({ ...r, x0: r.x0 + dx, x1: r.x1 + dx }));
+      (p.sourceRegions||[]).forEach(r=>sourceRegions.push({...r,x:r.x+dx}));
+      (p.noteHits||[]).forEach(r=>noteHits.push({...r,x:r.x+dx,region:r.region?{...r.region,x:r.region.x+dx}:undefined}));
       x += p.w + gap;
     });
     const w = x - gap, h = bottom - top;
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${f(w / MM)}mm" height="${f(h / MM)}mm" viewBox="0 ${f(top)} ${f(w)} ${f(h)}" font-family="Arial, Helvetica, sans-serif" fill="#000"><rect x="0" y="${f(top)}" width="${f(w)}" height="${f(h)}" fill="#fff"/>${content.join('')}</svg>`;
-    return { exportSlices:parts.flatMap(o=>o.p.exportSlices||[]), svg, w, h, rowBoxes, columnBoxes, laneX: columnBoxes.find(c => c.id === App.activeColumn)?.laneX || new Map(), laneW: App.S.style.mmPerLane * MM, figW: w,
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${f(w / MM)}mm" height="${f(h / MM)}mm" viewBox="0 ${f(top)} ${f(w)} ${f(h)}" font-family="${esc(FT.fontStack(family))}" fill="#000"><rect x="0" y="${f(top)}" width="${f(w)}" height="${f(h)}" fill="#fff"/>${content.join('')}</svg>`;
+    return { sourceRegions,noteHits,fontFamily:family,exportSlices:parts.flatMap(o=>o.p.exportSlices||[]), svg, w, h, rowBoxes, columnBoxes, laneX: columnBoxes.find(c => c.id === App.activeColumn)?.laneX || new Map(), laneW: App.S.style.mmPerLane * MM, figW: w,
       markerFit: Math.min(...parts.map(o => o.p.markerFit ?? Infinity)), warnings: parts.flatMap(o => o.p.warnings), overlaps: parts.flatMap(o => o.p.overlaps), minPt: Math.min(...parts.map(o => o.p.minPt)), angle: parts[0].p.angle };
   }
 

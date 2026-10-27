@@ -106,16 +106,17 @@
     return Uint8Array.from(out);
   }
   // one strip per ~64 KB of pixels keeps every LZW stream small and readers happy
-  function encodeTiffGray(gray, w, h, dpi, desc, software) {
-    const rps = Math.max(1, Math.floor(65536 / w)), nStrips = Math.ceil(h / rps);
+  function encodeTiffGray(gray, w, h, dpi, desc, software, samples=1) {
+    const stride=w*samples,rps = Math.max(1, Math.floor(65536 / stride)), nStrips = Math.ceil(h / rps);
     const strips = [];
-    for (let s = 0; s < nStrips; s++) strips.push(lzwEncode(gray.subarray(s * rps * w, Math.min(h, (s + 1) * rps) * w)));
+    for (let s = 0; s < nStrips; s++) strips.push(lzwEncode(gray.subarray(s * rps * stride, Math.min(h, (s + 1) * rps) * stride)));
     // TIFF ASCII fields are 7-bit: the summary is JSON, so other characters (Chinese names, ≈) are written as
     // \u escapes and nothing is lost
     const ascii = s => String(s).replace(/[^\x00-\x7f]/g, ch => '\\u' + ch.charCodeAt(0).toString(16).padStart(4, '0'));
     const d = latin1(ascii(desc || '')), sw = latin1(software || 'BlotFigure');
     const tags = 14;
     let off = 8 + 2 + tags * 12 + 4;
+    const bitsOff=off;if(samples===3)off+=6;
     const resOff = off; off += 16;
     const soOff = off; off += 4 * nStrips;
     const sbOff = off; off += 4 * nStrips;
@@ -127,14 +128,15 @@
     dv.setUint16(0, 0x4949); dv.setUint16(2, 42, true); dv.setUint32(4, 8, true);
     let p = 8; dv.setUint16(p, tags, true); p += 2;
     const tag = (t, type, count, val) => { dv.setUint16(p, t, true); dv.setUint16(p + 2, type, true); dv.setUint32(p + 4, count, true); if (type === 3 && count === 1) dv.setUint16(p + 8, val, true); else dv.setUint32(p + 8, val, true); p += 12; };
-    tag(256, 4, 1, w); tag(257, 4, 1, h); tag(258, 3, 1, 8); tag(259, 3, 1, 5); tag(262, 3, 1, 1);
+    tag(256, 4, 1, w); tag(257, 4, 1, h); tag(258, 3, samples, samples===3?bitsOff:8); tag(259, 3, 1, 5); tag(262, 3, 1, samples===3?2:1);
     tag(270, 2, d.length + 1, descOff);
     tag(273, 4, nStrips, nStrips === 1 ? dataOff : soOff);
-    tag(277, 3, 1, 1); tag(278, 4, 1, rps);
+    tag(277, 3, 1, samples); tag(278, 4, 1, rps);
     tag(279, 4, nStrips, nStrips === 1 ? strips[0].length : sbOff);
     tag(282, 5, 1, resOff); tag(283, 5, 1, resOff + 8); tag(296, 3, 1, 2);
     tag(305, 2, sw.length + 1, swOff);
     dv.setUint32(p, 0, true);
+    if(samples===3)for(let k=0;k<3;k++)dv.setUint16(bitsOff+k*2,8,true);
     dv.setUint32(resOff, dpi, true); dv.setUint32(resOff + 4, 1, true); dv.setUint32(resOff + 8, dpi, true); dv.setUint32(resOff + 12, 1, true);
     u8.set(d, descOff); u8.set(sw, swOff);
     let q = dataOff;
@@ -145,10 +147,12 @@
   async function exportTIFF(svg, wPt, hPt, dpi, name, texts) {
     const c = await svgToCanvas(svg, wPt, hPt, dpi);
     const id = c.getContext('2d').getImageData(0, 0, c.width, c.height).data, n = c.width * c.height;
-    const g = new Uint8Array(n);
-    for (let i = 0; i < n; i++) g[i] = Math.round(0.299 * id[i * 4] + 0.587 * id[i * 4 + 1] + 0.114 * id[i * 4 + 2]);
+    // Source blots stay grayscale. RGB output is only selected when annotations introduce colour.
+    let samples=1;for(let i=0;i<n;i++)if(id[i*4]!==id[i*4+1]||id[i*4]!==id[i*4+2]){samples=3;break;}
+    const g = new Uint8Array(n*samples);
+    for (let i = 0; i < n; i++) {if(samples===3)g.set(id.subarray(i*4,i*4+3),i*3);else g[i]=id[i*4];}
     const t = texts || {};
-    download(new Blob([encodeTiffGray(g, c.width, c.height, dpi, t.Description, t.Software)], { type: 'image/tiff' }), name);
+    download(new Blob([encodeTiffGray(g, c.width, c.height, dpi, t.Description, t.Software,samples)], { type: 'image/tiff' }), name);
   }
 
   function exportSVG(svg, name) {
