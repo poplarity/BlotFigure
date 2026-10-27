@@ -33,11 +33,11 @@
 
 详细步骤见[下载与打开图解](docs/getting-started.zh-CN.md)，工具内点 **?** 也可查看帮助。
 
-<img src="docs/screenshot-zh.png" alt="BlotFigure：左边是步骤，中间是膜图，右边是成图" width="900">
+<img src="docs/screenshot-zh.png?v=20261027" alt="BlotFigure 当前桌面界面：成图采用文字和间距修正后的合成示例" width="900">
 
 把成像仪为一次实验存下的图片全部拖进去：BlotFigure 区分曝光图和 Marker 图，按拍摄布局归组（拍摄之间膜挪动过也能认出并对齐），找出切开的膜条和各自的倾斜角度，每个蛋白生成一个框，为每一行挑最合适的曝光（不过曝、信号够），再排成一张带泳道名、分子量刻度和蛋白名的成图。每一步由你确认，点几下标好 Marker，填上名字即可。所有处理都在浏览器里完成，**不上传、不安装**。
 
-<p align="center"><img src="docs/example-figure.png" alt="导出示例" width="520"></p>
+<p align="center"><img src="docs/example-figure.png?v=20261027" alt="合成 WB 示例：蛋白名在左、kDa 在右，条件标注紧凑对齐" width="520"></p>
 
 ## 目录
 

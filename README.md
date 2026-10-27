@@ -33,11 +33,11 @@ That one HTML file is the complete tool. Keep it on your computer or send the sa
 
 Need help? See [the download and opening guide](docs/getting-started.md) or press **?** inside the app.
 
-<img src="docs/screenshot-en.png" alt="BlotFigure: the steps on the left, the membrane in the middle, the finished figure on the right" width="900">
+<img src="docs/screenshot-en.png?v=20261027" alt="BlotFigure: current desktop interface with the corrected synthetic WB layout" width="900">
 
 Drop in everything the imager saved for one experiment. BlotFigure tells exposures from marker pictures, groups matching captures and exposures (also allowing aligned pictures taken after movement), finds the strips of a cut membrane and their tilt, makes one box per protein, picks the best exposure for every row (no saturation, enough signal), and lays the rows out as one figure with lane names, molecular-weight ticks and protein names. You confirm each step, mark the ladder bands with a few clicks and type the names. Everything happens in the browser; **nothing is uploaded, nothing is installed**.
 
-<p align="center"><img src="docs/example-figure.png" alt="Example output" width="520"></p>
+<p align="center"><img src="docs/example-figure.png?v=20261027" alt="Synthetic WB example: protein names on the left, kDa on the right, compact condition labels" width="520"></p>
 
 <img src="docs/gallery-en.png" alt="Photo browser: grouped pictures in the centre and a large inspection view" width="900">
 

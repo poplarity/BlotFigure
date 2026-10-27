@@ -5,14 +5,15 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const showcaseOnly = process.argv.includes('--showcase');
 const browser = await chromium.launch();
 try {
-  const page = await browser.newPage({ viewport: { width: 1600, height: 1000 }, locale: 'en-US' });
+  const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, locale: 'en-US' });
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
   await page.goto(pathToFileURL(path.join(root, 'index.html')).href + '?demo=1&ladder=pr26619&lang=en');
   await page.waitForFunction(() => document.title.startsWith('READY '), null, { timeout: 180000 });
-  await page.evaluate(() => {
+  const prepareShowcase = () => {
     const S = BApp.S;
     const sessions = { Blot1: WBDemo.cutSession(), Blot2: WBDemo.scatterSession() };
     for (const b of S.blots) {
@@ -33,10 +34,15 @@ try {
     fl.forEach((j, k) => { S.lanes[j - 1].name = ['Ctrl', 'siA #1', 'siA #2'][k % 3]; });
     S.groups = [0, 3, 6].filter(i => fl[i + 2]).map((i, k) => ({ from: fl[i], to: fl[i + 2], text: ['0 h', '24 h', '48 h'][k] }));
     S.conditions = [{ name: 'EGF', values: S.lanes.map((_, i) => i % 2 ? '+' : '−') }];
-    S.style.fontPt = 7; S.style.markerPt = 5;
+    // Match the corrected promotional showcase: names left, kDa right and a compact condition table.
+    Object.assign(S.style, { fontPt: 7, markerPt: 5.5, mwSide: 'right', nameSide: 'left', border: true, rowGapPt: 2 });
+    window.docsAllRows = JSON.parse(JSON.stringify(S.rows));
+    S.rows = S.rows.filter(r => r.blot === S.blots[0].id);
+    BApp.viewBlot = S.blots[0].id; BApp.viewImg = S.rows[0].img;
     BApp.commit(); UI.openStep(5);
     BApp.selRow = null; BApp.emit('select');
-  });
+  };
+  await page.evaluate(prepareShowcase);
   await page.waitForTimeout(3500); // transient messages should not obscure the documentation
   await page.mouse.move(1590, 990);
   const info = await page.evaluate(() => {
@@ -46,12 +52,14 @@ try {
   if (errors.length || info.overlaps) throw new Error(JSON.stringify({ errors, ...info }));
   await page.screenshot({ path: path.join(root, 'docs/screenshot-en.png') });
   const png = await page.evaluate(async () => {
-    const f = BRender.build(false), c = await Export.svgToCanvas(f.svg, f.w, f.h, 300);
+    const f = BRender.build(false), c = await Export.svgToCanvas(f.svg, f.w, f.h, 600);
     return c.toDataURL('image/png').split(',')[1];
   });
   fs.writeFileSync(path.join(root, 'docs/example-figure.png'), Buffer.from(png, 'base64'));
+  if (!showcaseOnly) {
   const beforeColumns = await page.evaluate(() => JSON.stringify(BApp.S));
   await page.evaluate(() => {
+    BApp.S.rows.push(...JSON.parse(JSON.stringify(window.docsAllRows.filter(r => r.blot === BApp.S.blots[1].id))));
     const second = BApp.addColumn(); second.title = 'Nuclear fraction';
     BApp.layoutColumns()[0].title = 'Time course';
     BApp.S.rows.filter(r => r.blot === BApp.S.blots[1].id).slice().forEach(r => BApp.moveToColumn(r, second.id));
@@ -65,10 +73,15 @@ try {
   const columnsPng = await page.evaluate(async () => { const f = BRender.build(false), c = await Export.svgToCanvas(f.svg, f.w, f.h, 300); return c.toDataURL('image/png').split(',')[1]; });
   fs.writeFileSync(path.join(root, 'docs/example-columns.png'), Buffer.from(columnsPng, 'base64'));
   await page.evaluate(s => { BApp.S = JSON.parse(s); BApp.activeColumn = 'main'; BApp.commit(); }, beforeColumns);
-  await page.click('#btnLang');
-  await page.waitForTimeout(300);
+  }
+  // Capture each language from a fresh load so all dynamic controls use that language too.
+  await page.goto(pathToFileURL(path.join(root, 'index.html')).href + '?demo=1&ladder=pr26619&lang=zh');
+  await page.waitForFunction(() => document.title.startsWith('READY '), null, { timeout: 180000 });
+  await page.evaluate(prepareShowcase);
+  await page.waitForTimeout(3500);
   await page.mouse.move(1590, 990);
   await page.screenshot({ path: path.join(root, 'docs/screenshot-zh.png') });
+  if (!showcaseOnly) {
   await page.evaluate(()=>UI.openStep(1));
   await page.waitForTimeout(300);
   await page.screenshot({path:path.join(root,'docs/gallery-zh.png')});
@@ -89,5 +102,7 @@ try {
   await page.setViewportSize({width:1024,height:600});
   await page.evaluate(()=>{BApp.selectBoxes([BApp.boxId(BApp.S.rows[0].segs[0])]);BApp.viewImg=BApp.S.rows[0].img;BApp.emit('select');View.fitFull();});
   await page.waitForTimeout(300);await page.screenshot({path:path.join(root,'docs/compact-controls.png')});
+  }
+  if (errors.length) throw new Error(errors.join('\n'));
   console.log('Documentation screenshots (synthetic demo only):', info);
 } finally { await browser.close(); }
