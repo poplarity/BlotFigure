@@ -73,7 +73,9 @@ export async function laneCountChecks(browser,base){
     await check('typing a default immediately enables the batch action without an extra confirmation keystroke',async()=>{
       await page.evaluate(()=>{BApp.setDefaultLaneCount(null);BApp.commit();UI.openStep(3);});
       assert(await page.locator('#applyDefaultLanes').isDisabled());await page.fill('#defaultLanesNew','7');
-      await page.click('#applyDefaultLanes');assert(await page.evaluate(()=>BApp.S.defaultLaneCount===7&&BApp.S.rows.every(r=>r.segs.every(s=>s.lanes.length===7))));
+      await page.evaluate(()=>new Promise(resolve=>{BApp.refresh();requestAnimationFrame(()=>requestAnimationFrame(resolve));}));assert.equal(await page.inputValue('#defaultLanesNew'),'7');
+      const button=await page.locator('#applyDefaultLanes').boundingBox();await page.mouse.move(button.x+button.width/2,button.y+button.height/2);await page.mouse.down();
+      assert.equal(await page.evaluate(()=>document.activeElement.id),'defaultLanesNew');await page.mouse.up();assert(await page.evaluate(()=>BApp.S.defaultLaneCount===7&&BApp.S.rows.every(r=>r.segs.every(s=>s.lanes.length===7))));
     });
     await check('presets, project save/reopen and undo retain default and local counts',async()=>{
       assert(await page.evaluate(async()=>{

@@ -471,10 +471,14 @@
     $(id).addEventListener('input',e=>{if(S())$('applyDefaultLanes').disabled=!(+e.target.value>0)||!S().rows.length;});
     $(id).addEventListener('change',done(e=>{App.setDefaultLaneCount(e.target.value);}));
   });
-  $('applyDefaultLanes').onclick=done(()=>{const n=App.applyDefaultLanes();toast(L(`已统一 ${n} 个框的泳道数（Ctrl+Z 可撤销）`,`Lane counts applied to ${n} boxes (Ctrl+Z to undo)`));});
+  // Keep the draft focused until the click consumes it. A blur/change redraw can move the
+  // button between Firefox's mousedown and mouseup, otherwise losing this explicit action.
+  $('applyDefaultLanes').addEventListener('mousedown',e=>{if(e.button===0)e.preventDefault();});
+  $('applyDefaultLanes').onclick=done(()=>{const input=['defaultLanesBefore','defaultLanesNew'].includes(document.activeElement?.id)?document.activeElement:$('defaultLanesNew');App.setDefaultLaneCount(input.value);const n=App.applyDefaultLanes();toast(L(`已统一 ${n} 个框的泳道数（Ctrl+Z 可撤销）`,`Lane counts applied to ${n} boxes (Ctrl+Z to undo)`));});
   function syncDefaultLanes(){
-    const n=S().defaultLaneCount||'';['defaultLanesBefore','defaultLanesNew'].forEach(id=>$(id).value=n);
-    $('applyDefaultLanes').disabled=!n||!S().rows.length;
+    const n=S().defaultLaneCount||'';['defaultLanesBefore','defaultLanesNew'].forEach(id=>{if(document.activeElement!==$(id))$(id).value=n;});
+    const draft=['defaultLanesBefore','defaultLanesNew'].includes(document.activeElement?.id)?document.activeElement.value:n;
+    $('applyDefaultLanes').disabled=!(+draft>0)||!S().rows.length;
     $('defaultLanesHint').textContent=n?L(`自动识别参考 ${n} 道，清晰区域保留各自数量；新手动框以此起步。仅点击「统一已有框」才强制统一。`,`Detection uses ${n} as a reference; clear regions keep their own counts. New manual boxes start with it. Only Apply count forces existing boxes to match.`):L('留空自动计数；填写后，新加的框按此数量定位。','Leave blank for automatic counting; set a count for newly added boxes.');
   }
   $('dividerLane').onchange=done(e=>{const b=App.blot(App.viewBlot);if(b)b.dividerLane=e.target.value?Math.max(1,Math.min(60,Math.round(+e.target.value)||1)):null;});

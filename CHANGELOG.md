@@ -17,6 +17,7 @@ Desktop typography and source-linked annotations, adapted from GelFigure.
 - 本次不加入原色切换、手机/平板工作台或新的图像处理控制。保持现有 WB 识别、独立曝光/亮度、排序与 Marker 操作。
 
 - 修复单名称字号重置后的继承，以及清除整条分组/条件格式时的颜色复原。
+- 修复输入泳道数后直接点「统一已有框的条数」偶尔丢失点击的问题，保留尚未提交的输入，避免失焦重绘移动按钮。
 
 ### Added / changed
 - Desktop typography with system fonts, per-selection italic/superscript/subscript/colour runs, opt-in lane-name overrides, continuous angles and inline editing undo. Adapted from GelFigure's text model and editable PowerPoint runs.
