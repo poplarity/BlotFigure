@@ -44,6 +44,12 @@ export async function parityChecks(browser,base){
     const t=BApp.template(),expected=JSON.stringify(t);BApp.applyTemplate(t);const fresh=BApp.template();BApp.S.lanes[0].nameRuns[0].text='changed';
     const ok=fresh.lanes[0].nameStyle.angle==='0'&&fresh.groups[0].color==='red'&&JSON.stringify(t)===expected;BApp.applyTemplate(JSON.parse(expected));BApp.commit();return ok;}));
   });
+  await check('Resetting a local name size inherits lane size, and clearing group format resets its line colour',async()=>{
+   await page.evaluate(()=>{BApp.S.style.lanePt=9;BApp.S.lanes[BApp.figLanes()[0]-1].nameStyle={pt:7,angle:'0'};BApp.commit();});
+   await page.locator('#preview g[data-edit="lane"]').first().click();await page.click('#fedReset');assert.equal(await page.textContent('#fedSize'),'9 pt');await page.click('#fedBar [data-fz="+"]');assert.equal(await page.textContent('#fedSize'),'9.5 pt');await page.locator('#floatEd').press('Escape');
+   await page.locator('#preview g[data-edit="group"]').first().click();await page.click('[data-format="clear"]');assert(await page.evaluate(()=>!BApp.S.groups[0].color));await page.locator('#floatTa').press('Escape');
+   await page.evaluate(()=>{BApp.S.style.lanePt=null;BApp.commit();});
+  });
   await check('Editable PPT preserves font, colour and native baseline runs',async()=>{
    const bytes=await page.evaluate(async()=>Array.from(new Uint8Array(await(await PPTX.build()).arrayBuffer())));const entries=readZip(Buffer.from(bytes));
    const xml=Buffer.from(entries.get('ppt/slides/slide1.xml')).toString('utf8');assert(xml.includes('Times New Roman')&&xml.includes('D32F2F')&&xml.includes('baseline="'));

@@ -43,7 +43,7 @@
   controls.addEventListener('click',e=>{const b=e.target.closest('[data-format]');if(!b||!state||state.composing)return;
     const s=state,a=s.box.selectionStart,z=s.box.selectionEnd,n={name:s.obj[s.key]||'',nameRuns:s.obj[s.key+'Runs']};
     NT.write(n,NT.format(NT.runs(n),a,z,b.dataset.format));s.obj[s.key]=n.name;if(n.nameRuns)s.obj[s.key+'Runs']=n.nameRuns;else delete s.obj[s.key+'Runs'];
-    if((a===z||a===0&&z===n.name.length)&&['group','condname'].includes(s.edit.kind)&&['red','autoColor'].includes(b.dataset.format)){if(b.dataset.format==='red')s.obj.color='red';else delete s.obj.color;}
+    if((a===z||a===0&&z===n.name.length)&&['group','condname'].includes(s.edit.kind)&&['red','autoColor','clear'].includes(b.dataset.format)){if(b.dataset.format==='red')s.obj.color='red';else delete s.obj.color;}
     record();refresh();s.box.focus();s.box.setSelectionRange(a,z);
   });
   $('nameOverride').onchange=e=>{if(!state)return;if(e.target.checked)state.obj.nameStyle={pt:App.S.style.lanePt||App.S.style.fontPt,angle:FT.angle(App.S.style.labelAngle)};else delete state.obj.nameStyle;record();refresh();};

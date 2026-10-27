@@ -1203,10 +1203,11 @@
   const edBox = () => (edit && edit.kind === 'group' ? fta : fed);
   const sizeHost = () => (edit.kind === 'lane' ? (textTarget(edit).nameStyle?{o:textTarget(edit).nameStyle,k:'pt'}:{ o: S().style, k: 'lanePt' }) : edit.kind === 'rowname' ? { o: S().style, k: 'namePt' }
     : { o: textTarget(edit), k: 'pt' });
-  const curSize = () => { const h = sizeHost(); return (h.o && h.o[h.k]) || S().style.fontPt; };
+  const inheritedSize=()=>edit?.kind==='lane'&&textTarget(edit).nameStyle?(S().style.lanePt||S().style.fontPt):S().style.fontPt;
+  const curSize = () => { const h = sizeHost(); return (h.o && h.o[h.k]) || inheritedSize(); };
   function setSize(v) {
     const h = sizeHost(); if (!h.o) return;
-    if (v == null || v === S().style.fontPt) { if (h.k === 'pt') delete h.o.pt; else h.o[h.k] = null; }
+    if (v == null || v === inheritedSize()) { if (h.k === 'pt') delete h.o.pt; else h.o[h.k] = null; }
     else h.o[h.k] = clamp(Math.round(v * 2) / 2, 4, 14);
     syncBar(); App.refresh();
   }
