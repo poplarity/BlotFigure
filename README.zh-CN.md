@@ -274,7 +274,7 @@ npm test -- --browser=chromium
 npm run build                 # 生成单文件 dist/BlotFigure.html
 ```
 
-调试参数、测试页和数据模型见 [DEVELOP.md](DEVELOP.md)。
+后续开发与 agent 交接先读 [AGENTS.md](AGENTS.md)，包含当前架构、产品约定、测试与发布流程。调试参数、测试页和历史实现记录见 [DEVELOP.md](DEVELOP.md)。
 
 ## 参与贡献
 

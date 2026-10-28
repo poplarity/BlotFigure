@@ -236,7 +236,7 @@ npm test -- --browser=chromium
 npm run build                 # dist/BlotFigure.html, the single file
 ```
 
-[DEVELOP.md](DEVELOP.md) (in Chinese) lists the debugging URL parameters, the test pages and the data model.
+[AGENTS.md](AGENTS.md) is the developer/agent handover: current architecture, product constraints, tests and release process. [DEVELOP.md](DEVELOP.md) (in Chinese) lists debugging URL parameters, test pages and historical implementation notes.
 
 ## Contributing
 

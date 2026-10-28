@@ -1,6 +1,6 @@
-# Desktop parity work (dev only)
+# Desktop parity work — completed in v0.14.0
 
-User scope, 2026-10-27: implement the retained GelFigure parity features and push to `dev`. The user subsequently confirmed merging into `main`; v0.14.0 is prepared for that release.
+User scope, 2026-10-27: implement the retained GelFigure parity features and push to `dev`. The user subsequently confirmed merging into `main`; v0.14.0 was released on 2026-10-27 at tag `v0.14.0` (`e0cbdb0`). This is a completed scope record, not unfinished work or authorisation to publish future changes. See [AGENTS.md](../AGENTS.md) for the current handover.
 
 Excluded by the user's latest correction: original-colour/gray switching and RGB source-image processing; phone/tablet adaptation; redesigning Marker operations, catalogue previews/favourites, draggable marker panels or other minor Marker UX changes. Marker changes are limited to substantiated serious bugs (the imported-definition ID collision).
 
@@ -15,6 +15,6 @@ Implementation checklist:
 - [x] Compact layout/export checks and existing-core regression. Existing WB numbering stays regional; no forced global well numbering.
 - [x] Offline update history, explicit text feedback, voluntary support/Star and post-export notices.
 - [x] Bilingual docs, single-file build, meaningful browser/export tests.
-- [x] Initial dev push and three-engine PR CI verified. Main merge is now explicitly authorised; deployment and release checks are tracked in GitHub.
+- [x] Dev review, main merge, three-engine CI, Pages deployment and HTML/ZIP release completed; validation links are recorded in AGENTS.md.
 
 This file replaces the earlier broad planning documents for implementation scope.

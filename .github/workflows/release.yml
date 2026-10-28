@@ -19,7 +19,7 @@ jobs:
       - name: Build offline downloads
         run: |
           mkdir -p dist/BlotFigure
-          cp -r index.html css js test tests scripts docs package.json package-lock.json LICENSE README.md README.zh-CN.md CHANGELOG.md CONTRIBUTING.md CITATION.cff SECURITY.md DEVELOP.md dist/BlotFigure/
+          cp -r index.html css js test tests scripts docs package.json package-lock.json LICENSE README.md README.zh-CN.md CHANGELOG.md CONTRIBUTING.md CITATION.cff SECURITY.md DEVELOP.md AGENTS.md CLAUDE.md dist/BlotFigure/
           node scripts/bundle-onefile.mjs   # writes dist/BlotFigure.html
           node scripts/release-notes.mjs "$GITHUB_REF_NAME"
           cd dist && zip -r "BlotFigure-${GITHUB_REF_NAME}.zip" BlotFigure

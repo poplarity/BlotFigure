@@ -32,7 +32,7 @@ Also add a row to [`docs/ladders.md`](docs/ladders.md) with the catalogue number
 
 ## Development
 
-There is no build step. Edit the files and reload `index.html`. [DEVELOP.md](DEVELOP.md) (in Chinese) has the debugging URL parameters, the test pages and the data model.
+There is no build step. Edit the files and reload `index.html`. Read [AGENTS.md](AGENTS.md) for the current architecture, product constraints, handover and release process. [DEVELOP.md](DEVELOP.md) (in Chinese) has debugging URL parameters, test pages and historical implementation notes. `CLAUDE.md` imports the same handover rather than maintaining a separate copy.
 
 - **Keep it dependency-free** and loadable from `file://`: plain scripts, no CDN and no automatic external requests. Explicit text feedback is the sole submission exception; keep the exact endpoint allowance in CSP and attach no project/image data. Tests must mock feedback delivery, never send live messages.
 - **Every interface string is bilingual.** In JavaScript, write `L('中文', 'English')`; in HTML, put the English text in `data-en` (or `data-en-html`, `data-en-title`, `data-en-placeholder`). Text that goes into figures, legends, logs and exported files stays in English.

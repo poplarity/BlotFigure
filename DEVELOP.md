@@ -1,6 +1,8 @@
 # 开发与调试说明
 
-当前 `dev` 对标工作以 [docs/dev-parity-plan.md](docs/dev-parity-plan.md) 为准。新组件：`name-text`/`figure-text` 处理文字片段与字体；`wbformat` 接入原有行内编辑器；`wbnotes`/`wbnote-render`/`wbnote-ui` 处理与蛋白裁切分离的注释；`feedback`、`export-support`、`updates` 由 GelFigure 桌面组件适配。未添加原色显示、手机工作台或 Marker 操作重构。下文较早的数据模型说明以当前代码为准。
+**接手开发先读 [AGENTS.md](AGENTS.md)**：当前架构、维护者约定、测试选择、发布流程和待复现问题以该文档为入口。本文保留调试参数、诊断页和逐版本实现记录；旧段落可能描述已被替换的行为，不能据此恢复拼接、单草稿或每区域 Marker 字号。
+
+GelFigure 对标工作已随 v0.14.0 发布，范围记录见 [docs/dev-parity-plan.md](docs/dev-parity-plan.md)。新组件：`name-text`/`figure-text` 处理文字片段与字体；`wbformat` 接入原有行内编辑器；`wbnotes`/`wbnote-render`/`wbnote-ui` 处理与蛋白裁切分离的注释；`feedback`、`export-support`、`updates` 由 GelFigure 桌面组件适配。未添加原色显示、手机工作台或 Marker 操作重构。
 
 纯前端，无构建、无依赖。改完 JS/CSS 刷新浏览器即可看到效果。
 
@@ -62,10 +64,7 @@ node scripts/docs-screenshots.mjs              # 用合成示例重做中英文�
 
 界面语言：`js/i18n.js`（与 GelFigure 相同）。JS 里写 `L('中文', 'English')`（调用时求值，切换语言后重新渲染即生效，不要在载入时就算好）；HTML 里把英文放在 `data-en` / `data-en-html` / `data-en-title` / `data-en-placeholder`。切换时先把带 `data-en` 的元素恢复成静态文字，再调用 `I18N.onChange` 的回调重新渲染脚本写的内容。成图、图注、日志、CSV、文件名一律英文；国内厂家的 Marker 型号 `name` 是英文（进图注），`zh` 是中文界面显示的名字。偏好存在 `PrefStorage`（`js/storage.js`：存储不可用时退回内存，开始页和第 5 步显示提示）。
 
-发布新版本：
-1. 改版本号：`js/wbapp.js` 的 `App.VERSION`、`package.json` / `package-lock.json`、`CITATION.cff`（和日期）；`README.md`、`README.zh-CN.md`、`docs/getting-started*.md`、`index.html`（开始页的离线版链接）里的下载链接。
-2. `CHANGELOG.md` 加 `## [x.y.z] - 日期` 一节（发布说明从这里取，没有这一节发布会失败）。
-3. 提交、推送 main（网站随之更新），再打标签 `git tag vx.y.z` 并推送标签：`.github/workflows/release.yml` 生成 `BlotFigure-vx.y.z.html` 和源码 ZIP，建 Release。
+发布流程统一维护在 [AGENTS.md](AGENTS.md)：开发推送 `dev`，维护者确认合并/发布后才更新 `main` 与标签；还需同步 `js/releases.js` 并检查实际站点、发布附件与目标提交的 CI。纯文档更新不升版本、不触发新的更新提示。
 
 ## 测试页（test/）
 
@@ -92,7 +91,7 @@ msedge --headless=new --disable-gpu --user-data-dir=$env:TEMP\wb_dbg --allow-fil
 
 注意：无界面模式下 `alert()` 会卡住；`File.arrayBuffer()` 也会卡，所以调试入口都用 `{name, buffer}` 载入。`--virtual-time-budget` 下时钟是虚拟的：`performance.now()` 量不出耗时，gzip 流（保存项目）也走不完，这类检查（`proj`、`perf`）用 Playwright 在真实时间里跑，例如借 GelFigure 的 `node_modules`：`chromium.launch({ args: ['--allow-file-access-from-files'] })`，打开带参数的页面，等标题变成 `READY`。每次运行用一个新的 `--user-data-dir`：页面在 `localStorage` 里记着上次选的 Marker 型号（`blotfig.ladder`）、看过引导（`blotfig.tour`），沿用旧目录会改变结果。
 
-## 数据模型（每个框有自己的泳道）
+## 数据模型（历史基础，结合后续版本与 AGENTS 阅读）
 
 - 5 步：`S.step` 是做到第几步（存在状态里，撤销跟着走；老项目没有它，打开时当作 5），`App.curStep` 是界面上打开的那一步。第 1 步确认每张膜的 Marker 图（`App.setMarkerImage`：任何一张都可以，曝光图会改成 Marker 类型；换了就按它重新找膜条）；第 2 步只看、改膜条（`'pieces'` 模式），这时还没有行；"下一步"先应用改过的膜条，再 `App.makeBoxes()` 给还没有行的膜生成行（`App.rowsFromAnalysis`），每个框 `App.levelBox` 摆正；第 4 步是 `'marks'` 模式。`App.addFiles` 不再生成行，`App.reanalyze` 只在 `S.step >= 3` 且一行都没有时（或 `{fresh: true}`）才生成。`wbui.js` 的 `openStep` / `nextStep` / `renderSteps` / `updateCoach` 管步骤的展开、完成和顶栏提示。
 - 膜（blot）里有若干膜条（`blot.pieces`），每条膜条有自己的坐标系（以膜条中心为原点，u 沿泳道方向，v 向下）。分析给每条膜条一套泳道格点（第 m 道在 `u0 + m*pitch`，`roles[m]` 为 `sample` / `ladder` / `skip`，样品道从 `col0` 列起，`App.pieceSlots`）和 Marker 白光图上 Ladder 所在的位置 `ladderUs`；这些只用来给新框定初始泳道和列号。
@@ -133,7 +132,7 @@ msedge --headless=new --disable-gpu --user-data-dir=$env:TEMP\wb_dbg --allow-fil
 - `js/tiff.js` `engine.js`：与 GelFigure 共用，改动时注意两边同步（`tiff.js` 已同步到 GelFigure 0.6.5：按文件内容判断格式，8 位图片给出提示）
 - `js/export.js`：从 GelFigure 0.6.5 移植（PNG 元数据、LZW TIFF、下载），去掉了凝胶专用的部分
 
-## 已知待办
+## 历史待办（逐项复现后再判断，当前接手事项见 AGENTS）
 
 - 白光图的自动区分只在两套样例上验证过（iBright 的 14 张、合成示例）；别的成像仪导出的图认错时请收集样例。
 - iBright 文件名里没有曝光时间，图注里的曝光时间要手填。
