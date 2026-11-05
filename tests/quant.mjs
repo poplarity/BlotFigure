@@ -127,25 +127,60 @@ export async function quantChecks(browser, base) {
     check('a stain (dark bands on a light membrane) is inverted; a chemiluminescence frame is refused',
       tot.stain && Math.abs(tot.peak - 0.5) < 1e-6 && tot.chemiRefused, JSON.stringify(tot));
 
-    // ---- 9. the panel, opened with real clicks ----
+    // ---- 9. the workspace, opened with real clicks ----
     await page.goto(`${base}/index.html?demo=1&ladder=pr26619&draft=1&lang=en`);
     await page.waitForFunction(() => document.title.startsWith('READY '), null, { timeout: 240000 });
     // name a row as a loading control, so the suggested-control path is the one exercised
     await page.evaluate(() => { const r = BApp.S.rows.find(x => !x.hidden); r.name = 'GAPDH'; BApp.commit(); });
+    // the export-menu item is a shortcut to the same workspace, not a second dialog
     await page.click('#btnExportMenu');
     await page.click('#btnQuant');
-    await page.waitForSelector('#quantDlg:not(.hidden)', { timeout: 10000 });
-    const panel = await page.evaluate(() => ({
-      method: document.getElementById('qMethod').value,
-      control: document.getElementById('qControl').value,
-      rows: document.querySelectorAll('#qControl option').length,
-      lin: document.querySelectorAll('#qLin .ql-item').length,
-      dilDisabled: document.getElementById('qDil').disabled,
-      warn: document.getElementById('qWarn').innerText.trim()
+    await page.waitForSelector('body.quant-mode', { timeout: 10000 });
+    const fromMenu = await page.evaluate(() => ({
+      mode: document.body.classList.contains('quant-mode'),
+      dlgGone: !document.getElementById('quantDlg'),
+      panel: !document.getElementById('quantPanel').classList.contains('hidden'),
+      table: !document.getElementById('quantData').classList.contains('hidden'),
+      curve: !!document.querySelector('.q-ov .q-hl.sel')
     }));
-    check('the panel opens on the figure with a suggested control and one linearity line per row',
-      panel.method === 'control' && !!panel.control && panel.rows >= 2 && panel.lin >= panel.rows && !panel.dilDisabled,
+    await page.click('#qBack');
+    const wentBack = await page.evaluate(() => !document.body.classList.contains('quant-mode'));
+    check('the export-menu entry opens the workspace itself, and "back to the figure" leaves it',
+      fromMenu.mode && fromMenu.dlgGone && fromMenu.panel && fromMenu.table && fromMenu.curve && wentBack,
+      JSON.stringify({ fromMenu, wentBack }));
+    // the primary entry is the step-5 card: the figure is settled, then the numbers are optional
+    if (!(await page.isVisible('#qCard'))) await page.click('#secNames .sec-head');
+    await page.click('#btnQuantOpen');
+    await page.waitForSelector('body.quant-mode', { timeout: 10000 });
+    const panel = await page.evaluate(() => ({
+      method: (document.querySelector('#qMethodBox input:checked') || {}).value,
+      control: document.getElementById('qControl') ? document.getElementById('qControl').value : null,
+      suggested: (BApp.suggestControl && BApp.suggestControl()) || null,
+      source: BApp.quantSettings().controlSource,
+      rows: document.querySelectorAll('#qControl option').length,
+      lin: document.querySelectorAll('#qLin .qlin').length,
+      dilDisabled: document.getElementById('qDil').disabled
+    }));
+    check('the workspace opens from the step-5 card: four methods, one linearity line per row, and a suggested control the export records as suggested',
+      panel.method === 'control' && !!panel.suggested && panel.control === panel.suggested && panel.source === 'suggested'
+        && panel.rows >= 2 && panel.lin >= panel.rows - 1 && !panel.dilDisabled,
       JSON.stringify(panel));
+    // choosing the control is the user's decision, and the export records that it was a decision
+    const otherControl = await page.evaluate(() => {
+      const b = BApp.quantData()[0], cur = BApp.quantSettings().controlRow;
+      const me = b.rows.find(x => x.row.id === cur);
+      const x = b.rows.find(y => y.row.id !== cur && (!me || y.blot === me.blot));
+      return x ? x.row.id : '';
+    });
+    await page.selectOption('#qControl', otherControl);
+    const afterControl = await page.evaluate(() => {
+      const b = BApp.quantData()[0];
+      return { method: b.settings.method, source: BApp.quantSettings().controlSource,
+        withNorm: b.rows.filter(x => x.norm).length };
+    });
+    check('choosing the control records it as chosen, and the ratios follow',
+      afterControl.method === 'control' && afterControl.source === 'chosen' && afterControl.withNorm > 0,
+      JSON.stringify(afterControl));
     // capture the methods paragraph instead of copying it to the real clipboard
     await page.evaluate(() => {
       window.__clip = null;
@@ -159,20 +194,93 @@ export async function quantChecks(browser, base) {
     });
 
     // ---- 10. each normalisation method means what it says ----
-    await page.selectOption('#qMethod', 'sum');
+    await page.locator('#qMethodBox input[value="sum"]').check();
     const sumState = await page.evaluate(() => {
       const b = BApp.quantData()[0], rows = b.rows.filter(x => x.norm);
       return { nRows: rows.length, sum: rows.map(x => { const v = x.norm.filter(y => y != null); return v.reduce((a, c) => a + c, 0); }) };
     });
-    await page.selectOption('#qMethod', 'none');
+    await page.locator('#qMethodBox input[value="none"]').check();
     const noneState = await page.evaluate(() => {
       const b = BApp.quantData()[0];
       return { norm: b.rows.filter(x => x.norm).length, warn: b.warnings.map(w => w.code) };
     });
-    await page.selectOption('#qMethod', 'control');
+    // with nothing dividing the volumes the toggle has nothing to show and says so
+    const noneToggle = await page.evaluate(() => document.querySelector('#qViewSeg button[data-v="norm"]').disabled);
+    await page.locator('#qMethodBox input[value="control"]').check();
     check('the lane-sum method makes every lane a fraction of that row\'s total, and "none" gives no ratio',
-      sumState.nRows > 0 && sumState.sum.every(s => s > 0.99 && s <= 1 + 1e-6) && noneState.norm === 0,
-      JSON.stringify({ sumState, noneState }));
+      sumState.nRows > 0 && sumState.sum.every(s => s > 0.99 && s <= 1 + 1e-6) && noneState.norm === 0 && noneToggle,
+      JSON.stringify({ sumState, noneState, noneToggle }));
+    // the two views read the same numbers the CSV calls "rel. lane 1": the first quantifiable lane is 1
+    await page.click('#qViewSeg button[data-v="norm"]');
+    const normView = await page.evaluate(() => {
+      const rows = [...document.querySelectorAll('#qTableWrap tbody tr')];
+      return rows.map(tr => ({ row: tr.dataset.row, first: (tr.querySelector('td.qnc .qcell span') || {}).textContent }));
+    });
+    await page.click('#qViewSeg button[data-v="volume"]');
+    check('the normalised view divides by the first quantifiable lane, exactly as the CSV does',
+      normView.filter(x => x.first != null).length >= 2
+        && normView.filter(x => x.first != null).every(x => x.first === '1.00'), JSON.stringify(normView));
+    // the chart under the table reads the same view, so one number never means two things
+    const normRow = await page.evaluate(() => {
+      const b = BApp.quantData()[0];
+      const x = b.rows.find(r => r.norm && r.norm.some(v => v != null));
+      return x ? x.row.id : null;
+    });
+    await page.click(`#qTableWrap tbody tr[data-row="${normRow}"]`);
+    await page.click('#qViewSeg button[data-v="norm"]');
+    const detailNorm = await page.evaluate(() => [...document.querySelectorAll('#qDetail .qd-sub')].pop().textContent);
+    await page.click('#qViewSeg button[data-v="volume"]');
+    const detailVol = await page.evaluate(() => [...document.querySelectorAll('#qDetail .qd-sub')].pop().textContent);
+    check('the detail chart follows the volume / normalised toggle',
+      /Normalised/.test(detailNorm) && /Volume/.test(detailVol), JSON.stringify({ detailNorm, detailVol }));
+
+    // ---- 10b. the table and the figure are two views of one selection ----
+    const selId = () => page.evaluate(() => (document.querySelector('#qTableWrap tbody tr.sel') || { dataset: {} }).dataset.row);
+    const ids = await page.evaluate(() => [...document.querySelectorAll('#qTableWrap tbody tr')].map(tr => tr.dataset.row));
+    await page.click(`#qTableWrap tbody tr[data-row="${ids[0]}"]`);
+    const fromTable = await selId();
+    const band = await page.locator(`#preview svg image[data-row="${ids[1]}"]`).first().boundingBox();
+    await page.mouse.click(band.x + band.width / 2, band.y + band.height / 2);
+    const fromFigure = await selId();
+    check('clicking a row selects it, and clicking its band on the figure selects the same row',
+      ids.length >= 2 && fromTable === ids[0] && fromFigure === ids[1],
+      JSON.stringify({ ids, fromTable, fromFigure }));
+    // the row menu can put another exposure under the same row — and that is one undo away
+    const other = page.locator('#qTableWrap tbody tr[data-row="' + ids[1] + '"] .qmenu');
+    const before = await page.evaluate(id => ({ img: BApp.row(id).img, auto: BApp.row(id).auto }), ids[1]);
+    await other.click();
+    const alt = page.locator('#popover [data-ex]:not(.primary)').first();
+    const canSwitch = await alt.count() > 0;
+    if (canSwitch) await alt.click();
+    const switched = await page.evaluate(id => BApp.row(id).img, ids[1]);
+    if (canSwitch) { await page.click('#btnUndo'); }
+    const restored = await page.evaluate(id => ({ img: BApp.row(id).img, auto: BApp.row(id).auto }), ids[1]);
+    check('the row menu switches that row\'s exposure, and undo puts the previous one back',
+      canSwitch && switched !== before.img && restored.img === before.img && restored.auto === before.auto,
+      JSON.stringify({ before, switched, canSwitch, restored }));
+    // Esc is the same exit as the back button
+    await page.keyboard.press('Escape');
+    const escLeft = await page.evaluate(() => !document.body.classList.contains('quant-mode'));
+    check('Escape leaves the workspace without touching the figure', escLeft);
+    await page.click('#btnQuantOpen');
+    await page.waitForSelector('body.quant-mode', { timeout: 10000 });
+    // the table can be pasted straight into Excel: TSV, header first, same numbers as the screen
+    await page.evaluate(() => { window.__clip = null; });
+    await page.click('#qCopy');
+    const tsv = await takeClip();
+    check('"copy table" copies TSV with a header row and one line per protein',
+      !!tsv && tsv.split('\n')[0].split('\t')[0] === 'Protein' && tsv.split('\n').length > 2 && tsv.includes('\t'),
+      (tsv || '').slice(0, 160));
+    // on a narrow window the settings column becomes a drawer; clicking away (or Esc) folds it again
+    await page.setViewportSize({ width: 1100, height: 900 });
+    const drawerPos = await page.evaluate(() => getComputedStyle(document.getElementById('quantPanel')).position);
+    await page.click('#qSetBtn');
+    const drawerOpen = await page.evaluate(() => document.body.classList.contains('q-set-open'));
+    await page.click('#quantData .col-title');
+    const drawerShut = await page.evaluate(() => !document.body.classList.contains('q-set-open'));
+    await page.setViewportSize({ width: 1600, height: 960 });
+    check('on a small window the settings column becomes a drawer the figure header can open, and clicking away closes it',
+      drawerPos === 'absolute' && drawerOpen && drawerShut, JSON.stringify({ drawerPos, drawerOpen, drawerShut }));
 
     // ---- 11. a control far weaker than what it normalises is called out ----
     const weak = await page.evaluate(() => {
@@ -191,7 +299,7 @@ export async function quantChecks(browser, base) {
       let codes = [];
       try { codes = C.quantData()[0].warnings.filter(w => w.code === 'weak-control'); }
       finally { C.quantLaneSpec = origSpec; WB.quantify = origQ; }
-      C.setQuant({ method: 'control', controlRow: null });
+      C.setQuant({ method: 'control', controlRow: ctrl.id });   // leave the workspace on a usable control
       return { skip: false, n: codes.length, frac: codes.length ? codes[0].frac : null, row: codes.length ? (codes[0].row.name || '') : '' };
     });
     check('a control far weaker than the band it normalises raises a warning instead of a clean ratio',
@@ -246,7 +354,7 @@ export async function quantChecks(browser, base) {
     check('a painted total-protein stain normalises the lanes in proportion to what was loaded',
       totalOk, JSON.stringify(total).slice(0, 400));
     // the methods text has to describe the stain integration it actually used, not the band profile
-    await page.click('#qMethods');
+    await page.click('#qMethodsBtn');
     const totalMethods = await takeClip();
     check('the methods paragraph describes total-protein integration instead of reusing the band-window sentence',
       !!totalMethods && /total protein/i.test(totalMethods) && /full width of each lane/.test(totalMethods),
@@ -273,7 +381,7 @@ export async function quantChecks(browser, base) {
       JSON.stringify(parsed && { software: parsed.software, method: parsed.method, cols: parsed.columns.length }));
 
     await page.evaluate(() => { window.__clip = null; });
-    await page.click('#qMethods');
+    await page.click('#qMethodsBtn');
     const methods = await takeClip();
     check('the methods paragraph names the software, the normalisation and says no test was applied',
       !!methods && /BlotFigure \d/.test(methods) && /normalised/i.test(methods) && /No significance test/.test(methods),

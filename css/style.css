@@ -238,18 +238,114 @@ body.dragging #dropHint.hidden { display: flex !important; z-index: 5; }
 /* ---------- export check, draft, resolution, text-size bar (as GelFigure) ---------- */
 .pf { width: 560px; }
 /* quantification panel: method, warning list, the linearity table */
-.quant { width: 560px; }
-.quant h4 { margin: 16px 0 4px; font-size: 12.5px; }
-.qrow { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
-.qrow label { flex: none; width: 132px; font-size: 12.5px; color: var(--muted); }
+/* ---------- the quantification workspace ----------
+ * Not a sixth step: while it is open the five steps on the left are swapped for the quantification column, the
+ * membrane view is hidden and the figure takes the middle. The numbers get a column of their own, so the user
+ * reads a decision on the left, the figure in the middle and its consequence on the right. */
+#quantPanel { width: 330px; flex: none; background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; }
+body.quant-mode #panel, body.quant-mode #rawCol { display: none !important; }
+body.quant-mode #figureToolbar, body.quant-mode #warnings { display: none !important; }   /* both edit the figure */
+body.quant-mode #app { position: relative; }
+body.quant-mode #preview { padding-left: 24px; }   /* no row tags to make room for */
+#quantData { width: 460px; flex: none; background: #fff; }
+.q-only { display: none; }
+body.quant-mode .q-only { display: inline-flex; }
+body.quant-mode .n-only { display: none; }
+#qSetBtn { display: none !important; }
+body.quant-mode #figCol .col-head { gap: 9px; }
+
+.qhead { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+  background: var(--panel); border-bottom: 1px solid var(--line); }
+.qhead-title { font-weight: 700; font-size: 13px; }
+.qbody { padding: 2px 12px 22px; }
+.qsec { padding: 13px 0; border-bottom: 1px solid var(--line-2); }
+.qsec:last-child { border-bottom: none; }
+.qsec-h { display: flex; align-items: center; gap: 7px; font-weight: 600; font-size: 12.5px; margin-bottom: 8px; }
+.qnum { width: 17px; height: 17px; flex: none; border-radius: 50%; background: var(--accent-bg); color: var(--accent-dk);
+  display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; }
+.qopts { display: grid; gap: 4px; }
+.qopt { display: flex; align-items: flex-start; gap: 8px; padding: 6px 8px; border: 1px solid transparent;
+  border-radius: var(--r-sm); cursor: pointer; }
+.qopt:hover { background: #f5f7fa; }
+.qopt.on { border-color: #cfe0ff; background: var(--accent-bg); }
+.qopt input { margin: 3px 0 0; accent-color: var(--accent); flex: none; }
+.qopt b { display: block; font-weight: 600; font-size: 12.5px; }
+.qopt small { display: block; color: var(--muted); font-size: 11.5px; line-height: 1.45; }
+.qdep { margin-top: 9px; }
+.qdep select { width: 100%; }
+.qrow { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.qrow label { flex: none; font-size: 12.3px; color: var(--muted); }
 .qrow select, .qrow input { flex: 1; min-width: 0; }
-.qwarn { margin: 6px 0; font-size: 12.3px; line-height: 1.55; }
-.qwarn .w { color: var(--warn); margin: 3px 0; }
-.qwarn .ok { color: var(--ok); }
-.ql-item { display: flex; gap: 10px; font-size: 12.3px; padding: 4px 0; border-bottom: 1px solid var(--line-2); }
-.ql-item .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ql-item .good { color: var(--ok); } .ql-item .bad { color: var(--warn); }
-.ql-item .none { color: var(--muted); }
+
+/* one line per protein: a verdict is per row, so a single "check" button would have nothing to report */
+.qlin-list { display: grid; gap: 3px; }
+.qlin { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: none; background: none;
+  padding: 5px 6px; border-radius: var(--r-sm); cursor: pointer; font-size: 12.3px; }
+.qlin:hover { background: #f5f7fa; }
+.qlin.sel { background: var(--accent-bg); }
+.qlin .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.qlin .good { color: var(--ok); } .qlin .bad { color: var(--warn); } .qlin .none { color: var(--faint); }
+
+/* ---------- the numbers column ---------- */
+.qwarnbar { flex: none; max-height: 32%; overflow: auto; padding: 8px 14px; background: var(--warn-bg);
+  border-bottom: 1px solid #f0dfc4; color: var(--warn); font-size: 12.2px; line-height: 1.5; }
+.qwarnbar .w { margin: 2px 0; }
+.qtablewrap { flex: 0 1 auto; overflow: auto; padding: 8px 12px 2px; }
+.qtable { border-collapse: separate; border-spacing: 0; font-variant-numeric: tabular-nums; }
+.qtable caption { text-align: left; font-size: 11.5px; color: var(--muted); font-weight: 600; padding: 2px 0 5px; }
+.qtable th, .qtable td { padding: 3px 3px; text-align: right; white-space: nowrap; font-size: 11.5px; }
+.qtable thead th { color: var(--faint); font-weight: 600; font-size: 11px; background: #fff; border-bottom: 1px solid var(--line); }
+.qtable th.qrowh, .qtable td.qrowh { position: sticky; left: 0; z-index: 2; background: #fff; text-align: left; font-weight: 500; }
+.qtable thead th.qrowh { z-index: 3; }
+.qtable tbody tr { cursor: pointer; }
+.qtable tbody tr:hover td { background: #f7f9fc; }
+.qtable tbody tr.sel td, .qtable tbody tr.sel td.qrowh { background: var(--accent-bg); }
+.qtable td.qnc { min-width: 30px; position: relative; padding-bottom: 5px; }
+.qcell { display: block; }
+/* the bar is the cell's own bottom edge, not another column: nine lanes still fit without scrolling */
+.qbar { position: absolute; left: 3px; right: 3px; bottom: 1px; height: 2px; border-radius: 1px; background: var(--line-2); overflow: hidden; }
+.qbar i { display: block; height: 100%; background: var(--accent); }
+.qtable td.sat { color: var(--danger); }
+.qtable td.na { color: var(--faint); }
+.qname { display: inline-block; max-width: 78px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+.qchip { display: inline-block; margin-left: 3px; padding: 0 3px; border-radius: 4px; font-size: 10.5px; }
+.qchip.ok { color: var(--ok); background: var(--ok-bg); }
+.qchip.bad { color: var(--warn); background: var(--warn-bg); }
+.qchip.none { color: var(--faint); background: #f1f3f6; }
+.qmenu { border: none; background: none; cursor: pointer; color: var(--faint); padding: 0 2px; font-size: 12px; }
+.qmenu:hover { color: var(--accent); }
+
+/* ---------- the selected row, under the table ---------- */
+.qdetail { flex: 1; min-height: 0; overflow: auto; background: #fff; border-top: 1px solid var(--line); padding: 10px 14px 18px; }
+.qdetail:empty { display: none; }
+.qd-h { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.qd-h b { font-size: 13px; }
+.qd-sub { color: var(--faint); font-size: 11.5px; }
+.qchart { display: block; width: 100%; height: 118px; }
+.qstat { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; font-variant-numeric: tabular-nums; }
+.qstat th, .qstat td { padding: 3px 6px; text-align: right; border-bottom: 1px solid var(--line-2); }
+.qstat th:first-child, .qstat td:first-child { text-align: left; color: var(--muted); }
+.qstat thead th { color: var(--faint); font-size: 11px; }
+.qd-line { font-size: 11.8px; color: var(--muted); margin-top: 7px; line-height: 1.5; }
+.qinfoline { font-size: 12.2px; margin-top: 6px; }
+.qinfoline .ok { color: var(--ok); } .qinfoline .w { color: var(--warn); }
+
+/* the card at the end of step 5: the way in */
+.qcard { margin-top: 16px; padding: 12px 14px; border: 1px solid #d7e3f7; border-radius: var(--r);
+  background: linear-gradient(#f7faff, #fff); }
+.qcard-h { display: flex; align-items: center; gap: 7px; font-weight: 700; font-size: 13px; }
+.qcard-i { color: var(--accent); }
+.qcard .hint { margin: 6px 0 10px; }
+
+@media (max-width: 1250px) { #quantPanel { width: 290px !important; } #quantData { width: 400px; } }
+/* below this the left column would squeeze the figure: it becomes a drawer over it (the numbers never move) */
+@media (max-width: 1120px) {
+  #quantPanel { position: absolute; left: 0; top: 0; bottom: 0; z-index: 45; width: 300px !important;
+    box-shadow: 12px 0 34px rgba(16,24,40,.18); transform: translateX(-104%); transition: transform .16s; }
+  body.q-set-open #quantPanel { transform: none; }
+  body.quant-mode #qSetBtn { display: inline-flex !important; }
+  #quantData { width: min(420px, 46vw); min-width: 320px; }
+}
 .pf-item { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--line-2); font-size: 12.8px; }
 .pf-item .lv { flex: none; width: 44px; font-size: 11px; font-weight: 700; border-radius: 4px; text-align: center; padding: 1px 0; }
 .pf-item .lv.block { background: #fdecee; color: var(--danger); }
@@ -406,6 +502,10 @@ body.dragging #dropHint.hidden { display: flex !important; z-index: 5; }
 #preview.arranging, #preview.arranging * { cursor: grabbing !important; user-select: none; }
 /* arranging the figure: piece tags left of the rows, where a dragged row goes */
 .prev-ov { position: absolute; inset: 0; pointer-events: none; }
+/* the quantification workspace marks the row being read, and the lane under the pointer, on the figure */
+.q-hl { position: absolute; border: 1px dashed rgba(47,111,235,.30); border-radius: 3px; }
+.q-hl.sel { border: 1.5px solid var(--accent); background: rgba(47,111,235,.07); }
+.q-hl.lane { border: 1.5px solid #1f57c3; background: rgba(47,111,235,.18); }
 .rowtag { position: absolute; transform: translate(-100%, -50%); pointer-events: auto; cursor: grab; font-size: 10.5px; font-weight: 700; color: #6b7685;
   background: #eef1f5; border: 1px solid #dde2e8; border-radius: 5px; padding: 1px 5px; white-space: nowrap; user-select: none; }
 .rowtag:hover { color: var(--accent); border-color: #9db8ef; background: #fff; }

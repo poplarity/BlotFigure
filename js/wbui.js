@@ -266,6 +266,12 @@
     if ((e.key === 'Backspace' || e.key === 'Delete') && S() && App.boxSelection().length && !App.mode && (e.target === $('previewBox') || e.target === document.body)) { e.preventDefault(); deleteSelectedBoxes(); return; }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? App.redo() : App.undo(); }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); App.redo(); }
+    if (e.key === 'Escape' && inQuant()) {
+      if (!$('helpDlg').classList.contains('hidden')) { $('helpDlg').classList.add('hidden'); return; }
+      if (popOpen) { closePop(); return; }
+      if (document.body.classList.contains('q-set-open')) { document.body.classList.remove('q-set-open'); return; }
+      qClose(); return;                               // (the workspace is one more mode to leave)
+    }
     if(e.key==='Escape' && App.selectedBoxes.size){App.selectBoxes([]);App.emit('select');e.preventDefault();return;}
     if (e.key === 'Escape') {
       if (!$('helpDlg').classList.contains('hidden')) { $('helpDlg').classList.add('hidden'); return; }
@@ -339,93 +345,395 @@
     try { await navigator.clipboard.writeText(t); toast(L('图注文字已复制', 'Legend text copied')); } catch (e) { prompt(L('复制下面的图注文字：', 'Copy the legend text below:'), t); }
   };
   $('btnRaw').onclick = () => { if (S()) exportRaw(); };
-  /* ---------- the quantification panel ---------- */
-  // the row the dilution series belongs to: the one selected on the figure, else the first visible one
-  function quantRow() {
-    const r = App.row(App.selRow);
-    return (r && !r.hidden && r.segs && r.segs.length) ? r : (App.S.rows.find(x => !x.hidden) || null);
-  }
-  function renderQuant() {
+  /* ---------- the quantification workspace ----------
+   * An optional workspace, not a sixth step: the five steps produce the figure, and this reads numbers out of
+   * the finished figure. The panel, the table, the CSV, the JSON and the methods paragraph are all built from
+   * App.quantData(), so what the user reads on screen and what lands in the supplement cannot drift apart. */
+  const qState = { row: null, lane: null, view: 'volume' };
+  let qRaf = 0, qSnap = null;
+  const inQuant = () => document.body.classList.contains('quant-mode');
+  const qUnnamed = () => L('（未命名）', '(unnamed)');
+  const qNm = r => (r && r.name) || qUnnamed();
+  const qIsEn = () => !!(G.I18N && G.I18N.lang === 'en');
+  const qFmt = v => {
+    if (v == null || !isFinite(v)) return '—';
+    const a = Math.abs(v);
+    if (a >= 100) return v.toFixed(0);
+    if (a >= 1) return v.toFixed(2);
+    if (a >= 0.01) return v.toFixed(3);
+    return v.toExponential(1);
+  };
+  const qUsable = f => !!(f && f.worst && f.worst.r2 != null);
+  const qWord = f => !qUsable(f) ? L('点数不足', 'not enough points')
+    : (f.verdict === 'proportional' ? L('成正比', 'proportional') : L('偏离', 'deviates'));
+  const qMark = f => !qUsable(f) ? '·' : (f.verdict === 'proportional' ? '✓' : '⚠');
+  const qTone = f => !qUsable(f) ? 'none' : (f.verdict === 'proportional' ? 'ok' : 'bad');
+  // the CSV calls these "rel. lane 1"; the table uses the same divisor, or the two numbers would disagree
+  const qRel = x => {
+    if (!x.norm) return null;
+    const r0 = x.norm.find(v => v != null) || 1;
+    return x.norm.map(v => (v == null ? null : v / r0));
+  };
+
+  function qOpen() {
     if (!S()) return;
-    const { blocks, lin } = qAll(), s = App.quantSettings();
-    $('qMethod').value = s.method;
-    $('qCtrlRow').classList.toggle('hidden', s.method !== 'control');
-    $('qTotalRow').classList.toggle('hidden', s.method !== 'total');
-    // control: every visible row, the suggested one preselected
-    const rows = App.S.rows.filter(r => !r.hidden);
-    $('qControl').innerHTML = rows.map(r => `<option value="${esc(r.id)}">${esc(r.name || L('（未命名）', '(unnamed)'))}</option>`).join('') || `<option value="">—</option>`;
-    if (s.controlRow) $('qControl').value = s.controlRow;
-    // total-protein picture: any picture of any image group (it must be a stain; the warning says so if not)
-    const seen = new Set(), opts = [];
-    App.S.blots.forEach(b => (b.images || []).forEach(id => {
-      const rec = App.images.get(id);
-      if (!rec || seen.has(id)) return;
-      seen.add(id); opts.push(`<option value="${esc(id)}">${esc(rec.name)} · ${esc(App.blotNameEn(b))}</option>`);
-    }));
-    $('qTotal').innerHTML = `<option value="">${L('（未选择）', '(none)')}</option>` + opts.join('');
-    if (s.totalImage) $('qTotal').value = s.totalImage;
-    // warnings (codes from App.quantBlock, plus the linearity verdicts)
-    const en = !!(G.I18N && G.I18N.lang === 'en'), ws = [];
-    blocks.forEach((b, i) => qWarnings(b, lin[i]).forEach(w => ws.push(qWarnText(w, en))));
-    $('qWarn').innerHTML = ws.length ? [...new Set(ws)].map(t => `<div class="w">⚠ ${esc(t)}</div>`).join('')
-      : `<div class="ok">${L('没有阻断性问题。', 'No blocking problems.')}</div>`;
-    // linearity, one line per row
-    $('qLin').innerHTML = lin.flat().map(o => {
-      const f = o.fit, w = f.worst, nm = esc(o.row.name || L('（未命名）', '(unnamed)'));
-      // a lane needs three usable points, not three exposures: a saturated exposure drops out of the fit
-      if (!w) {
-        const best = Math.max(0, ...f.fits.map(x => x.n));
-        const why = f.reason === 'factors'
-          ? L('几张曝光的时长相同或未知，无法比较', 'the exposures share one (or an unknown) exposure time')
-          : L(`只有 ${best} 个可用点，至少要 3 个`, `only ${best} usable point${best === 1 ? '' : 's'} — 3 needed`);
-        return `<div class="ql-item"><span class="nm">${nm}</span><span class="none">${why}</span></div>`;
-      }
-      const cls = f.verdict === 'proportional' ? 'good' : 'bad';
-      const word = f.verdict === 'proportional' ? L('成正比', 'proportional') : L('偏离', 'deviates');
-      return `<div class="ql-item"><span class="nm">${nm}</span><span class="${cls}">${word} · R² ${w.r2.toFixed(3)} · ${L('残差', 'residual')} ${(w.maxDev * 100).toFixed(0)}% · n=${w.n}</span></div>`;
-    }).join('') || `<p class="hint">${L('没有可检验的行', 'No rows to check')}</p>`;
-    // dilution series of the row in hand
-    const r = quantRow(), dil = (s.dilution[r && r.id] || []);
-    $('qDilLabel').textContent = L(`上样比例（${(r && r.name) || '当前行'}）`, `Fractions (${(r && r.name) || 'current row'})`);
-    $('qDil').value = dil.join(', ');
-    $('qDil').disabled = !r;
-    renderDilution(r, dil);
+    if (!App.S.rows.some(r => !r.hidden)) { toast(L('还没有可定量的行', 'No rows to quantify yet')); return; }
+    if (App.mode) App.setMode(null);
+    if (edit) closeEd(true);
+    document.body.classList.remove('q-set-open');
+    document.body.classList.add('quant-mode');
+    $('quantPanel').classList.remove('hidden');
+    $('quantData').classList.remove('hidden');
+    updatePreview();                 // the stage got wider: the figure has to be re-fitted, not just re-marked
+    qRender();
+    updateCoach();
   }
-  function renderDilution(r, nums) {
+  function qClose() {
+    if (!inQuant()) return;
+    document.body.classList.remove('quant-mode', 'q-set-open');
+    $('quantPanel').classList.add('hidden');
+    $('quantData').classList.add('hidden');
+    qState.lane = null;
+    prev.querySelectorAll('.q-ov').forEach(n => n.remove());
+    updatePreview();
+    updateCoach();
+  }
+  // a change lands in the table on the next frame, so a burst of edits recomputes once
+  function qSchedule() {
+    if (!inQuant() || qRaf) return;
+    qRaf = requestAnimationFrame(() => { qRaf = 0; if (inQuant()) qRender(); });
+  }
+  function qSelect(id) {
+    if (!id || qState.row === id) return;
+    qState.row = id; qState.lane = null;
+    qRender();
+  }
+
+  function qRender() {
+    if (!inQuant() || !S()) return;
+    const blocks = App.quantData(), lin = blocks.map(b => qLinearity(b));
+    const fitById = new Map();
+    lin.forEach(arr => arr.forEach(o => fitById.set(o.row.id, o.fit)));
+    const flat = [];
+    blocks.forEach((b, bi) => b.rows.forEach(x => flat.push({ b, bi, x })));
+    if (!qState.row || !flat.some(o => o.x.row.id === qState.row)) qState.row = flat.length ? flat[0].x.row.id : null;
+    if (qState.view === 'norm' && blocks.length && blocks[0].settings.method === 'none') qState.view = 'volume';
+    qSnap = { blocks, lin, fitById, flat };
+    qPanel(blocks, flat, fitById);
+    qTable(blocks, flat, fitById);
+    qDetail(flat, fitById);
+    drawQuantOverlay(lastFig);
+    updateCoach();          // the line reads the data just computed instead of computing it again
+  }
+
+  const qMethods = () => [
+    ['control', L('内参蛋白', 'Loading control'), L('同一条膜上的一个蛋白，逐道相除', 'One protein on the same membrane, divided lane by lane')],
+    ['total', L('总蛋白', 'Total protein'), L('Ponceau / 考马斯 / stain-free 图逐道积分', 'Ponceau / Coomassie / stain-free, integrated lane by lane')],
+    ['sum', L('各道总和', 'Sum of lanes'), L('每行除以本行各道之和', 'Each row divided by its own lane sum')],
+    ['none', L('不归一化', 'No normalisation'), L('只给体积，不给比值', 'Volumes only, no ratios')]
+  ];
+
+  function qPanel(blocks, flat, fitById) {
+    const s = App.quantSettings();
+    // four options, each with one line of why: a dropdown would hide the reason a choice matters
+    $('qMethodBox').innerHTML = qMethods().map(([v, t, h]) =>
+      `<label class="qopt${s.method === v ? ' on' : ''}"><input type="radio" name="qm" value="${v}"${s.method === v ? ' checked' : ''}>` +
+      `<span><b>${t}</b><small>${h}</small></span></label>`).join('');
+    // the one field the chosen method needs
+    const dep = $('qDep');
+    let html = '';
+    if (s.method === 'control') {
+      const sug = App.suggestControl();
+      html = `<div class="qrow"><label for="qControl">${L('内参行', 'Control row')}</label><select id="qControl">`
+        + `<option value="">${L('（未指定）', '(not chosen)')}</option>`
+        + flat.map(({ x }) => `<option value="${esc(x.row.id)}">${esc(qNm(x.row))}${x.row.id === sug ? L('（建议）', ' (suggested)') : ''}</option>`).join('')
+        + `</select></div>`
+        + (s.controlRow ? '' : `<p class="hint">${L('名称像内参的只是“建议”，不会自动生效；请在上面选定。', 'A name that looks like a loading control is only a suggestion; choose it above to use it.')}</p>`);
+    } else if (s.method === 'total') {
+      const seen = new Set(), opts = [];
+      App.S.blots.forEach(b => (b.images || []).forEach(id => {
+        const rec = App.images.get(id);
+        if (!rec || seen.has(id)) return;
+        seen.add(id); opts.push(`<option value="${esc(id)}">${esc(rec.name)} · ${esc(App.blotNameEn(b))}</option>`);
+      }));
+      html = `<div class="qrow"><label for="qTotal">${L('总蛋白图', 'Total-protein picture')}</label>`
+        + `<select id="qTotal"><option value="">${L('（未选择）', '(none)')}</option>${opts.join('')}</select></div>`;
+    }
+    dep.classList.toggle('hidden', !html);
+    dep.innerHTML = html;
+    if (s.method === 'control') {
+      const sel = $('qControl');
+      if (s.controlRow) sel.value = s.controlRow;
+      sel.onchange = e => { App.setQuant({ controlRow: e.target.value || null }); qRender(); };
+    }
+    if (s.method === 'total') {
+      const sel = $('qTotal');
+      if (s.totalImage) sel.value = s.totalImage;
+      sel.onchange = e => { App.setQuant({ totalImage: e.target.value || null }); qRender(); };
+    }
+    // one line per protein: the verdict is per row, so a single "check" button could only report the worst case
+    $('qLin').innerHTML = flat.map(({ x }) => {
+      const f = fitById.get(x.row.id), w = f && f.worst;
+      const detail = !w
+        ? (f && f.reason === 'factors' ? L('曝光时长相同或未知', 'one exposure time')
+          : L(`只有 ${f ? Math.max(0, ...f.fits.map(y => y.n)) : 0} 个可用点`, `only ${f ? Math.max(0, ...f.fits.map(y => y.n)) : 0} usable`))
+        : `R² ${w.r2.toFixed(3)} · ${L('残差', 'residual')} ${(w.maxDev * 100).toFixed(0)}%`;
+      return `<button class="qlin${qState.row === x.row.id ? ' sel' : ''}" data-row="${esc(x.row.id)}">`
+        + `<span class="nm">${esc(qNm(x.row))}</span><span class="${qTone(f)}">${qWord(f)}</span>`
+        + `<span class="none">${esc(detail)}</span></button>`;
+    }).join('') || `<p class="hint">${L('没有可检验的行', 'No rows to check')}</p>`;
+    // conditions: the rows the figure already labels, not a second editor
+    const cur = flat.find(o => o.x.row.id === qState.row);
+    const groups = cur ? (App.columnData(cur.b.id).groups || []) : [];
+    $('qCond').innerHTML = (groups.length
+      ? `<p class="hint">${L('条件来自第 5 步的条件行：', 'Conditions come from the condition rows of step 5: ')}`
+        + groups.map(g => `${esc(g.text || '')}（${Math.min(g.from, g.to)}–${Math.max(g.from, g.to)}）`).join(' · ') + `</p>`
+      : `<p class="hint">${L('成图还没有条件行。第 5 步加一个条件行，就能按重复统计。', 'No condition rows yet. Add one in step 5 to get replicate statistics.')}</p>`)
+      + `<button class="btn sm ghost" id="qCondEdit">${groups.length ? L('去编辑条件行', 'Edit the condition rows') : L('去第 5 步加条件行', 'Add one in step 5')}</button>`;
+    $('qCondEdit').onclick = () => { qClose(); openStep(5); setTimeout(() => flash('btnAddCond'), 80); };
+    // the dilution series of the row in hand (the row menu opens the same input)
+    const row = cur && cur.x.row, dil = (s.dilution[row && row.id] || []);
+    $('qDilLabel').textContent = L(`上样比例（${row ? qNm(row) : '当前行'}）`, `Fractions (${row ? qNm(row) : 'current row'})`);
+    $('qDil').value = dil.join(', ');
+    $('qDil').disabled = !row;
+    qDilOut(row, dil);
+  }
+  function qDilOut(r, nums) {
     const out = r && nums && nums.length ? App.quantDilution(r, nums) : null;
     if (!out || !out.fit || out.fit.r2 == null) {
       $('qDilOut').innerHTML = out && out.fit && out.fit.n < 3 && nums && nums.length
-        ? `<div class="w">${L('至少要 3 个可定量的浓度点才做回归。', 'At least 3 quantifiable points are needed for a fit.')}</div>` : '';
+        ? `<span class="w">${L('至少要 3 个可定量的浓度点才做回归。', 'At least 3 quantifiable points are needed for a fit.')}</span>` : '';
       return;
     }
     const ok = out.verdict === 'proportional';
-    $('qDilOut').innerHTML = `<div class="${ok ? 'ok' : 'w'}">${ok ? L('与上样量成正比', 'proportional to the amount loaded') : L('偏离正比', 'deviates from proportionality')} · R² ${out.fit.r2.toFixed(3)} · ${L('残差', 'residual')} ${(out.fit.maxDev * 100).toFixed(0)}% · n=${out.fit.n}</div>`;
+    $('qDilOut').innerHTML = `<span class="${ok ? 'ok' : 'w'}">${ok ? L('与上样量成正比', 'proportional to the amount loaded') : L('偏离正比', 'deviates from proportionality')}</span>`
+      + ` · R² ${out.fit.r2.toFixed(3)} · ${L('残差', 'residual')} ${(out.fit.maxDev * 100).toFixed(0)}% · n=${out.fit.n}`;
   }
-  function openQuant() { if (!S()) return; renderQuant(); $('quantDlg').classList.remove('hidden'); }
-  const closeQuant = () => $('quantDlg').classList.add('hidden');
-  $('btnQuant').onclick = () => { if (S()) openQuant(); };
-  $('qClose').onclick = closeQuant;
-  $('qMethod').onchange = e => { App.setQuant({ method: e.target.value }); renderQuant(); };
-  $('qControl').onchange = e => { App.setQuant({ controlRow: e.target.value || null }); renderQuant(); };
-  $('qTotal').onchange = e => { App.setQuant({ totalImage: e.target.value || null }); renderQuant(); };
+
+  function qTable(blocks, flat, fitById) {
+    const s = App.quantSettings(), view = qState.view, multi = App.layoutColumns().length > 1;
+    $('qTableWrap').innerHTML = blocks.map(b => {
+      const lanes = b.lanes.map(j => App.columnData(b.id).lanes[j - 1] || {});
+      const head = `<tr><th class="qrowh">${L('蛋白', 'Protein')}</th>`
+        + b.lanes.map((j, i) => `<th title="${esc(lanes[i].name || '')}">${i + 1}</th>`).join('') + `</tr>`;
+      const body = b.rows.map(x => {
+        const f = fitById.get(x.row.id), rel = qRel(x);
+        // a row with no denominator still gets its cells, so switching to "normalised" cannot break the table
+        const vals = view === 'norm' ? (rel || x.d.map(() => null)) : x.d.map(v => (v ? v.volume : null));
+        const mx = Math.max(1e-9, ...vals.map(v => (v == null ? 0 : Math.abs(v))));
+        const cells = x.d.map((v, i) => {
+          const lane = b.lanes[i];
+          if (view === 'volume' && v && !v.quantifiable) {
+            return `<td class="sat" data-lane="${lane}" title="${v.saturated ? L('过曝：只给下界', 'Saturated: this is a lower bound') : L('不可定量', 'Not quantifiable')}">${v.saturated ? 'SAT' : 'n/q'}</td>`;
+          }
+          const val = vals[i];
+          if (val == null) return `<td class="na" data-lane="${lane}">—</td>`;
+          const w = Math.max(2, Math.round(Math.abs(val) / mx * 100));
+          return `<td class="qnc" data-lane="${lane}"><span class="qcell"><span>${qFmt(val)}</span>`
+            + `<span class="qbar"><i style="width:${w}%"></i></span></span></td>`;
+        }).join('');
+        return `<tr data-row="${esc(x.row.id)}" class="${qState.row === x.row.id ? 'sel' : ''}">`
+          + `<td class="qrowh"><span class="qname" title="${esc(qNm(x.row))}${App.S.blots.length > 1 && x.blot ? ' · ' + esc(App.blotName(x.blot)) : ''}">${esc(qNm(x.row))}</span>`
+          + `<i class="qchip ${qTone(f)}" title="${esc(qWord(f))}">${qMark(f)}</i>`
+          + `<button class="qmenu" data-row="${esc(x.row.id)}" title="${L('这一行的设置', 'Settings for this row')}" aria-label="${L('这一行的设置', 'Settings for this row')}">⋯</button>`
+          + `</td>` + cells + `</tr>`;
+      }).join('');
+      return `<table class="qtable" data-block="${esc(b.id)}">`
+        + (multi ? `<caption>${esc((b.column && (b.column.title || b.column.id)) || b.id)}</caption>` : '')
+        + `<thead>${head}</thead><tbody>${body}</tbody></table>`;
+    }).join('') || `<p class="hint">${L('还没有可定量的行', 'No rows to quantify yet')}</p>`;
+    // the view toggle: there is nothing to show in "normalised" when nothing divides the volumes
+    $('qViewSeg').querySelectorAll('button').forEach(btn => {
+      btn.classList.toggle('on', btn.dataset.v === view);
+      btn.disabled = btn.dataset.v === 'norm' && s.method === 'none';
+      btn.title = btn.disabled ? L('先选一种归一化方式', 'Choose a normalisation method first') : '';
+    });
+    // a warning that applies to every row belongs above the table; the rest sits on its own row
+    const gl = [];
+    blocks.forEach(b => b.warnings.forEach(w => { if (!w.row) gl.push(qWarnText(w, qIsEn())); }));
+    const bar = $('qWarnBar');
+    bar.classList.toggle('hidden', !gl.length);
+    bar.innerHTML = [...new Set(gl)].map(t => `<div class="w">⚠ ${esc(t)}</div>`).join('');
+  }
+
+  function qDetail(flat, fitById) {
+    const host = $('qDetail');
+    const cur = flat.find(o => o.x.row.id === qState.row);
+    if (!cur) { host.innerHTML = ''; return; }
+    const { b, x } = cur, f = fitById.get(x.row.id);
+    // the chart reads the same view as the table: a number on screen has one meaning, not two
+    const rel = qRel(x), showNorm = qState.view === 'norm' && !!rel;
+    const vals = showNorm ? rel : x.d.map(v => (v && v.quantifiable ? v.volume : null));
+    const n = vals.length, mx = Math.max(1e-9, ...vals.map(v => (v == null ? 0 : Math.abs(v))));
+    const W = 320, H = 118, pB = 18, pT = 10, pL = 4;
+    const step = (W - pL * 2) / Math.max(1, n), bw = Math.max(6, Math.min(30, step - 6)), base = H - pB;
+    const cols = ['#2f6feb', '#8b5cf6', '#0e9f6e', '#d97706'];
+    const tone = i => {
+      const j = b.lanes[i], list = x.conditions || [];
+      const k = list.findIndex(c => j >= c.from && j <= c.to);
+      return k >= 0 ? cols[k % cols.length] : '#9aa2ad';
+    };
+    const bars = vals.map((v, i) => {
+      const h = v == null ? 0 : Math.max(1, Math.abs(v) / mx * (base - pT));
+      const xx = pL + i * step + (step - bw) / 2;
+      return `<g data-lane="${b.lanes[i]}">`
+        + `<rect x="${xx.toFixed(1)}" y="${(base - h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="${tone(i)}" opacity="${qState.lane == null || qState.lane === b.lanes[i] ? .9 : .45}"/>`
+        + `<text x="${(xx + bw / 2).toFixed(1)}" y="${H - 5}" text-anchor="middle" font-size="9" fill="#9aa2ad">${i + 1}</text></g>`;
+    }).join('');
+    const conds = (x.conditions || []).filter(c => c.n);
+    const stats = conds.length ? `<table class="qstat"><thead><tr><th>${L('条件', 'Condition')}</th><th>n</th><th>${L('均值', 'Mean')}</th><th>SD</th><th>CV</th></tr></thead><tbody>`
+      + conds.map(c => `<tr><td>${esc(c.text || `${L('第', 'lanes ')}${c.from}–${c.to}`)}</td><td>${c.n}</td><td>${qFmt(c.mean)}</td>`
+        + `<td>${c.sd == null ? '—' : qFmt(c.sd)}</td><td>${c.cv == null ? '—' : (c.cv * 100).toFixed(1) + '%'}</td></tr>`).join('')
+      + `</tbody></table>` : '';
+    const lin = f ? `<p class="qd-line">${L('线性', 'Linearity')}：${qWord(f)}${f.worst ? ` · R² ${f.worst.r2.toFixed(3)} · ${L('残差', 'residual')} ${(f.worst.maxDev * 100).toFixed(0)}% · n=${f.worst.n}` : ''}</p>` : '';
+    const mine = b.warnings.filter(w => w.row && w.row.id === x.row.id).map(w => qWarnText(w, qIsEn()));
+    host.innerHTML = `<div class="qd-h"><b>${esc(qNm(x.row))}</b><span class="qd-sub">${esc(x.blot ? App.blotNameEn(x.blot) : '')}${x.rec ? ' · ' + esc(App.expoLabel(x.rec)) : ''}</span></div>`
+      + `<p class="qd-sub">${showNorm ? L('归一化值（相对第 1 个可定量道）', 'Normalised (relative to the first quantifiable lane)') : L('体积', 'Volume')}</p>`
+      + `<svg class="qchart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${esc(L('各道数值', 'Values by lane'))}">${bars}</svg>`
+      + stats + lin
+      + mine.map(t => `<p class="qd-line" style="color:var(--warn)">⚠ ${esc(t)}</p>`).join('');
+  }
+
+  /* the figure marks the row being read: a box round it, and the lane under the pointer inside it.
+   * The integration window itself is NOT drawn here — it lives in the source picture's coordinates, and a
+   * window drawn in the wrong place would be worse than none: the panel reports its width in pixels instead. */
+  function drawQuantOverlay(f) {
+    prev.querySelectorAll('.q-ov').forEach(n => n.remove());
+    if (!inQuant() || !S() || !f || !f.rowBoxes) return;
+    const svg = prev.querySelector('svg'), m = svg && svg.getScreenCTM && svg.getScreenCTM();
+    if (!m) return;
+    const pr = prev.getBoundingClientRect(), p = svg.createSVGPoint();
+    const at = (x, y) => { p.x = x; p.y = y; const q = p.matrixTransform(m); return { x: q.x - pr.left, y: q.y - pr.top }; };
+    const ov = document.createElement('div'); ov.className = 'prev-ov q-ov';
+    f.rowBoxes.forEach(rb => {
+      const a = at(rb.x0 ?? 0, rb.y), b = at(rb.x1 ?? f.figW, rb.y + rb.h);
+      const el = document.createElement('div');
+      el.className = 'q-hl' + (rb.id === qState.row ? ' sel' : '');
+      el.style.cssText = `left:${a.x}px;top:${a.y}px;width:${Math.max(0, b.x - a.x)}px;height:${Math.max(0, b.y - a.y)}px`;
+      ov.appendChild(el);
+    });
+    const row = App.row(qState.row);
+    const cb = row && (f.columnBoxes || []).find(c => c.id === App.rowColumn(row));
+    if (row && cb && cb.laneX && cb.laneX.has(qState.lane)) {
+      const rb = f.rowBoxes.find(r => r.id === row.id);
+      const cx = cb.laneX.get(qState.lane), hw = (f.laneW || 0) / 2;
+      if (rb) {
+        const a = at(cx - hw, rb.y), b = at(cx + hw, rb.y + rb.h);
+        const el = document.createElement('div');
+        el.className = 'q-hl lane';
+        el.style.cssText = `left:${a.x}px;top:${a.y}px;width:${Math.max(0, b.x - a.x)}px;height:${Math.max(0, b.y - a.y)}px`;
+        ov.appendChild(el);
+      }
+    }
+    prev.appendChild(ov);
+  }
+
+  /* the row's own settings: a dilution series, another exposure, and what the volumes were measured from */
+  function qRowMenu(id, rect) {
+    const row = App.row(id); if (!row) return;
+    qState.row = id;
+    const s = App.quantSettings(), dil = (s.dilution[id] || []).join(', ');
+    const ex = App.rowExpo(row), best = App.bestExpo(row);
+    const cur = App.quantData().flatMap(b => b.rows).find(x => x.row.id === id);
+    const sv = cur && cur.d.find(v => v);   // one measured lane is enough to say how they were measured
+    pop.innerHTML = `<h4>${esc(qNm(row))}</h4>`
+      + `<div class="qrow"><label for="qmDil">${L('稀释比例', 'Dilution')}</label><input id="qmDil" type="text" value="${esc(dil)}" placeholder="1, 0.5, 0.25"></div>`
+      + `<p class="hint">${L('按泳道顺序填写已知上样比例。这项才检验信号与蛋白量是否成正比。', 'In lane order. This is the check that signal is proportional to protein amount.')}</p>`
+      + `<div class="actions"><button class="btn sm primary" id="qmOk">${L('确定', 'OK')}</button></div>`
+      + `<h4 style="margin-top:14px">${L('曝光', 'Exposure')}</h4>`
+      + `<div class="qexpo">${ex.map(e => { const rec = App.images.get(e.id); return `<button class="btn sm${e.id === row.img ? ' primary' : ''}" data-ex="${esc(e.id)}">${esc(App.expoLabel(rec))}${e.id === best ? ' ★' : ''}${e.satFrac > 0.002 ? ' ⚠' : ''}</button>`; }).join('') || `<span class="hint">${L('这一行没有可用的曝光', 'No exposures for this row')}</span>`}</div>`
+      + (sv ? `<p class="hint" style="margin-top:10px">${L('这一行怎么算的', 'How this row was measured')}：${L('积分宽', 'width')} ${Math.round(sv.widthPx)} px · ${L('背景', 'background')} ${sv.background.toFixed(4)} · SNR ${sv.snr.toFixed(0)}${sv.excludedFrac > 0.002 ? ` · ${L('排除过曝', 'excluded')} ${(sv.excludedFrac * 100).toFixed(1)}%` : ''}${cur.rec && cur.rec.bits != null ? ` · ${cur.rec.bits}-bit` : ''}</p>` : '');
+    placePopNear(rect);
+    $('qmOk').onclick = () => {
+      const nums = $('qmDil').value.split(/[,\s;]+/).filter(Boolean).map(Number);
+      const next = Object.assign({}, App.quantSettings().dilution);
+      if (nums.length && nums.every(n => isFinite(n) && n > 0)) next[id] = nums; else delete next[id];
+      closePop(); App.setQuant({ dilution: next }); qRender();
+    };
+    pop.querySelectorAll('[data-ex]').forEach(btn => btn.onclick = () => {
+      row.img = btn.dataset.ex; row.auto = btn.dataset.ex === best;
+      App.viewBlot = row.blot; App.viewImg = row.img;
+      closePop(); App.commit(); qRender();
+    });
+  }
+
+  function qCopyTable() {
+    const blocks = App.quantData(), view = qState.view, lines = [];
+    blocks.forEach(b => {
+      const names = b.lanes.map((j, i) => (App.columnData(b.id).lanes[j - 1] || {}).name || `lane ${i + 1}`);
+      lines.push([L('蛋白', 'Protein'), ...names].join('\t'));
+      b.rows.forEach(x => {
+        const rel = qRel(x);
+        const vals = view === 'norm'
+          ? (rel ? rel.map(v => (v == null ? '' : v.toFixed(3))) : x.d.map(() => ''))
+          : x.d.map(v => (!v ? '' : (v.quantifiable ? v.volume.toFixed(2) : (v.saturated ? 'SAT' : 'n/q'))));
+        lines.push([qName(x.row), ...vals].join('\t'));
+      });
+      lines.push('');
+    });
+    const t = lines.join('\n');
+    const done = () => toast(L('表格已复制（可直接粘进 Excel / Prism）', 'Table copied (paste straight into Excel or Prism)'));
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(done, () => prompt(L('复制下面的表格：', 'Copy the table below:'), t));
+    else prompt(L('复制下面的表格：', 'Copy the table below:'), t);
+  }
+
+  /* ---------- bindings ---------- */
+  $('qBack').onclick = qClose;
+  $('btnQuant').onclick = () => qOpen();
+  $('btnQuantOpen').onclick = () => qOpen();
+  $('qMethodBox').addEventListener('change', e => {
+    const v = e.target && e.target.value;
+    if (v) { App.setQuant({ method: v }); qRender(); }
+  });
+  $('qLin').addEventListener('click', e => { const b = e.target.closest('.qlin'); if (b) qSelect(b.dataset.row); });
+  $('qViewSeg').addEventListener('click', e => {
+    const btn = e.target.closest('button');
+    if (!btn || btn.disabled) return;
+    qState.view = btn.dataset.v; qRender();
+  });
+  $('qTableWrap').addEventListener('click', e => {
+    const menu = e.target.closest('.qmenu');
+    if (menu) { e.stopPropagation(); qRowMenu(menu.dataset.row, menu.getBoundingClientRect()); return; }
+    const tr = e.target.closest('tr[data-row]');
+    if (tr) qSelect(tr.dataset.row);
+  });
+  // hovering a cell marks that lane on the figure; nothing is recomputed
+  $('qTableWrap').addEventListener('mouseover', e => {
+    const td = e.target.closest('td[data-lane]');
+    if (!td) return;
+    const lane = +td.dataset.lane;
+    if (qState.lane === lane) return;
+    qState.lane = lane; drawQuantOverlay(lastFig);
+  });
+  $('qTableWrap').addEventListener('mouseleave', () => { if (qState.lane != null) { qState.lane = null; drawQuantOverlay(lastFig); } });
   $('qDil').onchange = () => {
-    const r = quantRow(); if (!r) return;
+    const r = App.row(qState.row); if (!r) return;
     const nums = $('qDil').value.split(/[,\s;]+/).filter(Boolean).map(Number);
     const dil = Object.assign({}, App.quantSettings().dilution);
     if (nums.length && nums.every(n => isFinite(n) && n > 0)) dil[r.id] = nums; else delete dil[r.id];
     App.setQuant({ dilution: dil });
-    renderDilution(r, dil[r.id] || []);
+    qRender();
   };
-  if (G.I18N && G.I18N.onChange) G.I18N.onChange(() => { if (!$('quantDlg').classList.contains('hidden')) renderQuant(); });
   $('qCsv').onclick = () => exportQuant();
   $('qJson').onclick = () => exportQuantJson();
-  $('qMethods').onclick = async () => {
+  $('qCopy').onclick = qCopyTable;
+  $('qCopyTop').onclick = qCopyTable;
+  $('qSetBtn').onclick = () => document.body.classList.toggle('q-set-open');
+  // a drawer that covers the button that opened it needs a way back: a click anywhere outside it (or Esc)
+  // collapses it, the same "click away to dismiss" the popovers use
+  document.addEventListener('click', e => {
+    if (!document.body.classList.contains('q-set-open')) return;
+    if (e.target.closest('#quantPanel') || e.target.closest('#qSetBtn')) return;
+    document.body.classList.remove('q-set-open');
+  });
+  $('qMethodsBtn').onclick = async () => {
     const { blocks, lin } = qAll();
     if (!blocks.length) { toast(L('还没有可定量的行', 'No rows to quantify yet')); return; }
     const t = quantMethods(blocks, lin);
     try { await navigator.clipboard.writeText(t); toast(L('方法段落已复制（英文）', 'Methods paragraph copied (English)')); }
     catch (e) { prompt(L('复制下面的方法段落：', 'Copy the methods paragraph below:'), t); }
   };
+  if (G.I18N && G.I18N.onChange) G.I18N.onChange(() => { if (inQuant()) qRender(); });
 
   /* ---------- 1 membranes & pictures ---------- */
   function thumbCanvas(rec) {
@@ -1273,6 +1581,8 @@
     svg.style.width = (f.w * k) + 'px'; svg.style.height = (f.h * k) + 'px';
     prevScale = k;
     drawRowTags(f);
+    drawQuantOverlay(f);
+    if (inQuant()) qSchedule();     // a change lands in the table on the next frame
     $('figSize').textContent = `${(f.w / App.MM).toFixed(1)} × ${(f.h / App.MM).toFixed(1)} mm`;
     if (!App.dragging) {
       const ck = App.checks();
@@ -1503,6 +1813,13 @@
   });
   prev.addEventListener('click', e => {
     if (!S() || swallowClick) return;
+    // in the quantification workspace a click on the figure means "read this row", exactly as in step 5:
+    // no text editing, no popovers — the same gesture, one meaning
+    if (inQuant()) {
+      const rowEl = e.target.closest('[data-row]');
+      if (rowEl) { e.preventDefault(); qSelect(rowEl.dataset.row); }
+      return;
+    }
     const img = e.target.closest('image[data-row]');
     if (img && App.mode === 'arrow') { placeArrow(img.dataset.row, e.clientY); return; }
     if (img) {
@@ -1555,6 +1872,7 @@
     return best;
   }
   function drawRowTags(f) {
+    if (inQuant()) return;          // the workspace marks rows itself, and does not reorder them
     const svg = prev.querySelector('svg'); if (!svg) return;
     const ov = document.createElement('div'); ov.className = 'prev-ov'; prev.appendChild(ov);
     const left = svg.getBoundingClientRect().left - prev.getBoundingClientRect().left;
@@ -1592,6 +1910,7 @@
       : L('已加箭头：第 4 步标好 Marker 后自动显示分子量', 'Arrow added: its size shows once the marker is marked in step 4'), 3600);
   }
   prev.addEventListener('mousedown', e => {
+    if (inQuant()) return;          // the figure is read-only here: no dragging rows or boxes
     if (e.button !== 0 || !S() || App.mode === 'arrow' || App.mode === 'bracket') return;
     const tag = e.target.closest('.rowtag'), img = !tag && e.target.closest('image[data-row]');
     if (!tag && !img) return;
@@ -1812,6 +2131,34 @@
     const st = S(), n = App.curStep || st.step, vis = st.rows.filter(r => !r.hidden), fl = App.figLanes();
     let msg, ok = false;
     coachAct = null;
+    // the workspace gets the same line: what to do next, in the order the left column is numbered
+    if (inQuant()) {
+      const snap = qSnap || (() => {
+        const blocks = App.quantData(), lin = blocks.map(b => qLinearity(b)), fitById = new Map();
+        lin.forEach(a => a.forEach(o => fitById.set(o.row.id, o.fit)));
+        return { blocks, lin, fitById };
+      })();
+      const bad = [...snap.fitById.entries()].filter(([, f]) => qUsable(f) && f.verdict === 'deviates');
+      const blocked = snap.blocks.some(b => b.warnings.some(w => ['no-control', 'control-missing', 'no-total', 'total-not-stain'].includes(w.code)));
+      const qs2 = App.quantSettings();
+      let act = null, done = false;
+      if (bad.length) {
+        msg = L(`定量：<b>${esc(qNm(App.row(bad[0][0])))}</b> 的信号不成正比 —— 先看左边第 ② 节，再决定要不要报倍数`,
+          `Quantification: <b>${esc(qNm(App.row(bad[0][0])))}</b> is not proportional — read section ② on the left before reporting fold changes`);
+        act = () => flash('qLin');
+      } else if (blocked || (qs2.method === 'control' && !qs2.controlRow)) {
+        msg = L('定量：<b>选一个内参</b>（或总蛋白图），右边才会出比值', 'Quantification: <b>choose a control</b> (or a total-protein picture) to get ratios');
+        act = () => { const el = $('qDep').querySelector('select'); if (el) { el.focus(); flash(el); } };
+      } else {
+        msg = L('定量：①②③ 都齐了 —— 数字在右边，导出在左下', 'Quantification: ①②③ done — the numbers are on the right, the exports bottom left');
+        done = true; act = () => flash('qCsv');
+      }
+      $('coachText').innerHTML = msg + (act && !done ? ' <span class="coach-go">→</span>' : '');
+      $('coach').classList.toggle('done', done); $('coach').classList.toggle('act', !!act);
+      coachAct = act;                 // the arrow is clickable here too, not decoration
+      $('imgCount').textContent = L(`${App.images.size} 张图 · 添加`, `${pl(App.images.size, 'picture')} · add`);
+      return;
+    }
     const bound = App.boundRows();
     if (n >= 3 && bound.length) {
       msg = L(`有 ${bound.length} 处<b>旧版绑定</b>：点这里解除后，分别选择曝光和亮度`, `${bound.length} <b>legacy combined rows</b>: click to detach and edit exposure and levels separately`);

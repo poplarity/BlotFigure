@@ -52,7 +52,7 @@
         <div class="menu-sep"></div>
         <button id="btnRaw"><span data-en="Uncropped originals (supplement)">未裁切原图（补充材料）</span><small data-en="Every exposure and marker picture used, with the crop boxes, lanes and proteins marked">每张用到的曝光图 + Marker 图，标出裁切框、泳道与蛋白</small></button>
         <button id="btnLog"><span data-en="Processing log (JSON)">处理日志 JSON</span><small data-en="Each original's fingerprint (SHA-256), alignment, every row's box and exposure, all parameters">每张原图的指纹（SHA-256）、对齐、每行的框与曝光、全部参数</small></button>
-        <button id="btnQuant"><span data-en="Quantification…">定量分析…</span><small data-en="Volumes, linearity check, choice of normalisation, CSV and JSON">体积、线性检验、归一化方式、CSV 与 JSON</small></button>
+        <button id="btnQuant"><span data-en="Quantification workspace…">定量分析工作台…</span><small data-en="Opens the workspace: band volumes, linearity, normalisation, replicate statistics and exports">打开工作台：条带体积、线性检验、归一化、重复统计与导出</small></button>
         <button id="btnLegend" data-en="Copy legend text">复制图注文字</button>
         <div class="menu-sep"></div>
         <label class="menu-check"><input type="checkbox" id="preflightOn" checked> <span data-en="Check before export">导出前检查</span></label>
@@ -204,9 +204,55 @@
             <button class="btn sm ghost" id="btnResetLayout" data-en="Reset layout">重置版式</button>
           </details>
           <p class="hint" data-en-html="When it looks right, click <b>Export PNG</b> (top right); for the supplement use &quot;Uncropped originals&quot; in the export menu.">好了就点右上角<b>导出 PNG</b>；补充材料用导出菜单里的"未裁切原图"。</p>
+          <!-- quantification is optional and reads the finished figure: a card here, not a sixth step -->
+          <div class="qcard" id="qCard">
+            <div class="qcard-h"><span class="qcard-i">▦</span><span data-en="Need the numbers too?">还要出数？</span></div>
+            <p class="hint" data-en="The figure is settled. Measure band volumes, normalise by a loading control or total protein, and see replicate mean ± SD — live, in a workspace of its own.">成图已经定稿。可以量条带体积、按内参或总蛋白归一化、看重复的 mean ± SD——在一个独立的工作区里实时显示。</p>
+            <button class="btn primary" id="btnQuantOpen" data-en="Open the quantification workspace →">打开定量工作台 →</button>
+          </div>
         </div>
       </section>
       <div id="legendHints" class="legend"></div>
+    </div>
+  </aside>
+
+  <!-- the quantification workspace: the left column of the five steps is swapped for this one while it is
+       open, so the decisions stay in the same place the user already looks for settings -->
+  <aside id="quantPanel" class="hidden" aria-label="定量分析" data-en-aria-label="Quantification">
+    <div class="qhead">
+      <button class="btn sm ghost" id="qBack" data-en="← Back to the figure">← 返回成图</button>
+      <span class="qhead-title" data-en="Quantification">定量分析</span>
+    </div>
+    <div class="qbody">
+      <section class="qsec">
+        <div class="qsec-h"><span class="qnum">1</span><span data-en="Normalisation">归一化</span></div>
+        <div class="qopts" id="qMethodBox"></div>
+        <div class="qdep hidden" id="qDep"></div>
+      </section>
+      <section class="qsec">
+        <div class="qsec-h"><span class="qnum">2</span><span data-en="Linearity">线性检验</span></div>
+        <div id="qLin" class="qlin-list"></div>
+        <details class="adv" id="qDilBox">
+          <summary data-en="Dilution series (optional)">稀释序列（可选）</summary>
+          <p class="hint" data-en="If you loaded a dilution series of one sample, type the fraction loaded in each lane, in lane order. This is the check that signal is proportional to protein amount.">若上样了同一份样品的梯度稀释，按泳道顺序填写每道的上样比例。这项才检验信号与蛋白量是否成正比。</p>
+          <div class="qrow"><label id="qDilLabel" for="qDil" data-en="Fractions">上样比例</label><input id="qDil" type="text" placeholder="1, 0.5, 0.25"></div>
+          <div id="qDilOut" class="qinfoline"></div>
+        </details>
+      </section>
+      <section class="qsec">
+        <div class="qsec-h"><span class="qnum">3</span><span data-en="Replicates">重复与统计</span></div>
+        <div id="qCond"></div>
+      </section>
+      <section class="qsec">
+        <div class="qsec-h"><span class="qnum">4</span><span data-en="Export">导出</span></div>
+        <div class="qbtns">
+          <button class="btn sm" id="qMethodsBtn" data-en="Methods">方法段落</button>
+          <button class="btn sm" id="qCsv" data-en="CSV">CSV</button>
+          <button class="btn sm" id="qJson" data-en="JSON">JSON</button>
+          <button class="btn sm" id="qCopy" data-en="Copy table">复制表格</button>
+        </div>
+        <p class="hint" data-en="Every number on screen comes from the same calculation as the CSV, so they cannot disagree. No significance test is applied here.">屏幕上的数与 CSV 出自同一次计算，不会对不上。这里不做显著性检验。</p>
+      </section>
     </div>
   </aside>
 
@@ -236,7 +282,7 @@
       </div>
     </section>
     <section class="pane-col" id="figCol">
-      <div class="col-head"><span class="col-title" data-en="Figure">成图</span><span class="col-sub" data-en="Click text to edit · click a band to select its row · drag bands up/down to reorder, left/right to align lanes">点文字直接编辑 · 点条带选中该行 · 上下拖条带排顺序、左右拖对齐泳道</span><span class="flex"></span><span class="zoomlabel" id="figSize"></span></div>
+      <div class="col-head"><button class="btn sm ghost q-only" id="qSetBtn" data-en="⚙ Settings">⚙ 设置</button><span class="col-title" data-en="Figure">成图</span><span class="col-sub n-only" data-en="Click text to edit · click a band to select its row · drag bands up/down to reorder, left/right to align lanes">点文字直接编辑 · 点条带选中该行 · 上下拖条带排顺序、左右拖对齐泳道</span><span class="col-sub q-only" data-en="Click a band to select its row in the table">点条带选中表格里对应的那一行</span><span class="flex"></span><span class="zoomlabel" id="figSize"></span></div>
       <div id="previewBox"><div id="preview"></div>
         <div id="figEmpty" class="fig-empty">
           <div class="fe-card">
@@ -253,6 +299,21 @@
         </div>
         <div id="modeBanner" class="mode-banner hidden"><span id="modeText"></span><button id="modeCancel" data-en="Cancel (Esc)">取消 (Esc)</button></div>
       </div>
+    </section>
+    <!-- the numbers column of the quantification workspace -->
+    <section class="pane-col hidden" id="quantData">
+      <div class="col-head">
+        <span class="col-title" data-en="Numbers">数据</span>
+        <div class="seg" id="qViewSeg">
+          <button data-v="volume" class="on" data-en="Volume">体积</button>
+          <button data-v="norm" data-en="Normalised">归一化</button>
+        </div>
+        <span class="flex"></span>
+        <button class="btn sm ghost" id="qCopyTop" data-en="Copy">复制</button>
+      </div>
+      <div id="qWarnBar" class="qwarnbar hidden"></div>
+      <div class="qtablewrap" id="qTableWrap"></div>
+      <div class="qdetail" id="qDetail"></div>
     </section>
   </main>
 </div>
@@ -337,35 +398,6 @@
     <span class="flex"></span>
     <button class="btn" id="pfBack" data-en="Go back and fix">返回修改</button>
     <button class="btn primary" id="pfGo" data-en="Export anyway">仍然导出</button>
-  </div>
-</div></div>
-
-<div id="quantDlg" class="dlg hidden"><div class="dlg-body quant" role="dialog" aria-modal="true" aria-labelledby="qTitle">
-  <button class="dlg-x" id="qClose" aria-label="Close">×</button>
-  <h3 id="qTitle" data-en="Quantification">定量分析</h3>
-  <p class="hint" data-en="Volumes come from the exposure the figure shows. A ratio is only as good as its normalisation, so check proportionality before dividing.">体积来自成图所用的那次曝光。比值的可信度取决于归一化，相除之前先确认信号与上样量成正比。</p>
-  <div class="qrow"><label for="qMethod" data-en="Normalise by">归一化方式</label>
-    <select id="qMethod">
-      <option value="control" data-en="A loading control">内参蛋白</option>
-      <option value="total" data-en="Total protein (stain)">总蛋白（染色）</option>
-      <option value="sum" data-en="The sum of all lanes">泳道总和</option>
-      <option value="none" data-en="Nothing — raw volumes">不归一化（原始体积）</option>
-    </select></div>
-  <div class="qrow" id="qCtrlRow"><label for="qControl" data-en="Control row">内参行</label><select id="qControl"></select></div>
-  <div class="qrow" id="qTotalRow"><label for="qTotal" data-en="Total-protein picture">总蛋白图</label><select id="qTotal"></select></div>
-  <div id="qWarn" class="qwarn"></div>
-  <h4 data-en="Linearity across exposures">各次曝光的线性</h4>
-  <p class="hint" data-en="The same band read at several exposures must scale with the exposure factor. This checks the detector, not that signal is proportional to protein amount.">同一条带在多次曝光下应随曝光倍数成比例。这检验的是检测器，不代表信号与蛋白量成正比。</p>
-  <div id="qLin"></div>
-  <h4 data-en="Dilution series (optional)">稀释系列（可选）</h4>
-  <p class="hint" data-en="If you loaded a dilution series of one sample, type the fraction loaded in each lane, in lane order. This is the check that signal is proportional to protein amount.">若上样了同一份样品的梯度稀释，按泳道顺序填写每道的上样比例。这项才检验信号与蛋白量是否成正比。</p>
-  <div class="qrow"><label id="qDilLabel" for="qDil" data-en="Fractions">上样比例</label><input id="qDil" type="text" placeholder="1, 0.5, 0.25"></div>
-  <div id="qDilOut" class="qwarn"></div>
-  <div class="pf-actions">
-    <button class="btn" id="qMethods" data-en="Copy methods">复制方法段</button>
-    <span class="flex"></span>
-    <button class="btn" id="qJson" data-en="Export JSON">导出 JSON</button>
-    <button class="btn primary" id="qCsv" data-en="Export CSV">导出 CSV</button>
   </div>
 </div></div>
 

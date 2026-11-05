@@ -163,21 +163,21 @@ export async function layoutChecks(browser, base) {
       }));
     });
     await check('multi-column PNG, uncropped originals and CSV export every column',async()=>{
-      const out=await page.evaluate(async()=>{
-        const downloads=[], original=Export.download;
-        Export.download=(blob,name)=>downloads.push({blob,name});
-        try {
-          // btnQuant opens the quantification panel now; the CSV comes from its own button, and the panel has
-          // to be closed again or it covers the row menu the next check clicks
-          document.getElementById('btnQuant').click(); document.getElementById('qCsv').click();
-          document.getElementById('qClose').click(); document.getElementById('btnRaw').click();
-          const start=performance.now();while(downloads.length<2 && performance.now()-start<10000) await new Promise(r=>setTimeout(r,20));
+      await page.evaluate(()=>{window.__dl=[];window.__origDl=Export.download;Export.download=(blob,name)=>window.__dl.push({blob,name});});
+      try {
+        await page.click('#btnExportMenu'); await page.click('#btnQuant');
+        await page.waitForSelector('body.quant-mode',{timeout:10000});
+        await page.click('#qCsv'); await page.click('#qBack');
+        await page.click('#btnExportMenu'); await page.click('#btnRaw');
+        const out=await page.evaluate(async()=>{
+          const downloads=window.__dl, start=performance.now();
+          while(downloads.length<2 && performance.now()-start<10000) await new Promise(r=>setTimeout(r,20));
           const csv=await downloads.find(x=>x.name.endsWith('.csv'))?.blob.text();
           const f=BRender.build(false),c=await Export.svgToCanvas(f.svg,f.w,f.h,150);
           return {csv,raw:downloads.some(x=>x.name==='uncropped_originals.png' && x.blob.size>1000),png:c.width>100&&c.height>10,cols:f.columnBoxes.length};
-        } finally {Export.download=original;}
-      });
-      assert(out.raw&&out.png&&out.cols===2);assert.match(out.csv,/layout column,main/);assert.match(out.csv,/Drug response/);assert.match(out.csv,/20 nM|lane|protein/);
+        });
+        assert(out.raw&&out.png&&out.cols===2);assert.match(out.csv,/layout column,main/);assert.match(out.csv,/Drug response/);assert.match(out.csv,/20 nM|lane|protein/);
+      } finally { await page.evaluate(()=>{Export.download=window.__origDl;}); }
     });
     await check('region menu moves without merging; the empty first column can be removed',async()=>{
       const id=await page.evaluate(()=>{BApp.activeColumn=layoutColumn;BApp.commit();return layoutRow;});
