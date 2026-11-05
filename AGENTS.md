@@ -4,9 +4,9 @@
 
 The maintainer communicates in Chinese. This is the authoritative handover for coding agents; keep the existing WB workflow and independent protein regions. Develop and push to `dev`; merge into `main` and release only when the maintainer asks. Current user instructions take precedence over this snapshot.
 
-## 接手快照 — 2026-10-29
+## 接手快照 — 2026-11-05
 
-- **已发布 v0.14.0**，标签 [`v0.14.0`](https://github.com/poplarity/BlotFigure/tree/v0.14.0) 对应 `e0cbdb0`，发布时间 2026-10-27。网站、单文件 HTML 和源码 ZIP 已发布。不要把已完成的 GelFigure 对标工作再当作待开发事项。
+- **已发布版本仍为 v0.14.0**（标签 [`v0.14.0`](https://github.com/poplarity/BlotFigure/tree/v0.14.0)，`e0cbdb0`，2026-10-27）。`dev` 上已有一套**未发布的定量分析功能**（P0–P3，见 [docs/quantification-plan.md](docs/quantification-plan.md) §6）：`WB.quantify` 重写、线性检验（多曝光 / 稀释序列）、四种归一化方式（内参 / 总蛋白 / 道和 / 不归一化）、弱内参告警、条件 n/mean/SD/CV、CSV/JSON/英文方法段落，以及导出菜单里的「定量分析…」面板。合并 `main`、升版本号、打标签都必须等维护者明确说「合并 / 发布」。
 - 发布提交的 [main CI](https://github.com/poplarity/BlotFigure/actions/runs/40478213062) 已完成且成功，三种浏览器通过；[Pages](https://github.com/poplarity/BlotFigure/actions/runs/40478213101) 和 [Release](https://github.com/poplarity/BlotFigure/actions/runs/40478213511) 发布成功。可编辑 PPT 另经 Windows PowerPoint 验证。这是历史验证记录，不代表未来提交已通过检查。
 - 本次交接编辑前，远程 `main` / `dev` 均为 `75d3389`：它只更新首页展示图和截图脚本，应用仍为 v0.14.0。本轮交接文档在 `dev` 提交；开始新任务时重新检查真实分支和工作区，不能把这个 SHA 当作永久最新状态。
 - 正式站点：[poplarity.github.io/BlotFigure](https://poplarity.github.io/BlotFigure/)；源码：[poplarity/BlotFigure](https://github.com/poplarity/BlotFigure)；[发布附件](https://github.com/poplarity/BlotFigure/releases/tag/v0.14.0)。`main` 推送会部署网站；`dev` 推送只触发 CI，不更新正式站点。
@@ -138,6 +138,7 @@ Linux 缺浏览器系统库时用 `npx playwright install --with-deps chromium f
 | `workspace` | `tests/workspace014.mjs`：小电脑窗口、多选/Backspace/IME、参考数 2–6、同图 8/4/6、自定义 Marker 持久化。 |
 | `parity` | v0.14 文字格式/字号继承、颜色、来源注释/放大、可编辑 PPT、RGB 标注 TIFF、导入型号冲突。 |
 | `community` | 更新提示/历史、主动反馈（mock）、支持入口、导出提醒、离线与网络边界。 |
+| `quant` | `tests/quant.mjs`：`WB.quantify` 体积/背景/饱和/位深、`totalSignal` 染色极性、`linearFit` 判别力、定量面板与归一化四方式、弱内参告警、条件 n/mean/SD/CV、CSV/JSON/方法段落。 |
 | `test/boxlanes.html`, `test/ladderlane.html`, `test/register.html`, `test/engine.html` | 完整 runner 包含的算法检查；其他诊断页见 DEVELOP。实际应用的手动 Marker 流程不能仅用旧算法诊断页替代。 |
 
 发布前跑完整三内核；修改导出时额外检查实际产物，不只验证“有下载”。可选 Windows PowerPoint 验证器是 `scripts/check-pptx.ps1`，调用时 `-Folder` 与 `-Names` 必须对应本次真实生成的 PPT，默认文件名可能不存在；不能将空报告当作成功。Office 另存文件可能带机器身份元数据，只放忽略目录、不公开。
@@ -172,6 +173,7 @@ CI 在 `main` / `dev` 推送和 PR 运行 Node 22 + 三内核。检查 workflow 
 - **待确认范围：** 旧截图过程中英文顶栏在较窄宽度有拥挤现象；v0.14 已有小屏控件回归。区分主顶栏与成图工具栏，实际复现后定位，不能因 1920 宽截图正常就宣称所有窗口都无溢出。
 - `DEVELOP.md` 的“已知待办”与逐版本模型是历史记录，部分已被后续版本解决（拼接、单草稿、区域 Marker 字号、按参考数切块等）。先核对当前代码和本文，再决定是否仍为问题。
 - 自动分类/配准/识别受复合参考图、弱带、不规则摆膜影响。保留用户纠正与显式重新识别入口，不宣传每张图都自动正确；无曝光时间时不能还原真实拍摄时长。
+- **定量的验证边界：** 体积、背景、饱和与位深已在真实 8-bit TIFF 上核对；多曝光线性检验只有合成序列（仓库不含真实多曝光样本）。A 模式检验的是**检测器随曝光时间是否线性**，不能证明信号与蛋白量成正比——后者要靠用户填写的稀释序列（B 模式）。措辞见 `docs/quantification-plan.md` §6.2。
 - 字体是本地系统字体，不保证每台电脑完全相同；PPT 可恢复裁切的是完整**处理后**图像；缓存跨设备不自动同步。
 
 与维护者沟通用简明中文，先说结果、验证和剩余限制。复现用户报告后区分真实 bug 与难发现的操作，两者都可能需要改善体验；不要把“用户没找到入口”当作无需处理的理由。

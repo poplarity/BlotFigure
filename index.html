@@ -52,7 +52,7 @@
         <div class="menu-sep"></div>
         <button id="btnRaw"><span data-en="Uncropped originals (supplement)">未裁切原图（补充材料）</span><small data-en="Every exposure and marker picture used, with the crop boxes, lanes and proteins marked">每张用到的曝光图 + Marker 图，标出裁切框、泳道与蛋白</small></button>
         <button id="btnLog"><span data-en="Processing log (JSON)">处理日志 JSON</span><small data-en="Each original's fingerprint (SHA-256), alignment, every row's box and exposure, all parameters">每张原图的指纹（SHA-256）、对齐、每行的框与曝光、全部参数</small></button>
-        <button id="btnQuant"><span data-en="Densitometry (CSV)">灰度定量 CSV</span><small data-en="Integrated on the chosen exposure, normalised to the loading control on the same membrane">按所选曝光积分，归一化到同膜内参</small></button>
+        <button id="btnQuant"><span data-en="Quantification…">定量分析…</span><small data-en="Volumes, linearity check, choice of normalisation, CSV and JSON">体积、线性检验、归一化方式、CSV 与 JSON</small></button>
         <button id="btnLegend" data-en="Copy legend text">复制图注文字</button>
         <div class="menu-sep"></div>
         <label class="menu-check"><input type="checkbox" id="preflightOn" checked> <span data-en="Check before export">导出前检查</span></label>
@@ -337,6 +337,35 @@
     <span class="flex"></span>
     <button class="btn" id="pfBack" data-en="Go back and fix">返回修改</button>
     <button class="btn primary" id="pfGo" data-en="Export anyway">仍然导出</button>
+  </div>
+</div></div>
+
+<div id="quantDlg" class="dlg hidden"><div class="dlg-body quant" role="dialog" aria-modal="true" aria-labelledby="qTitle">
+  <button class="dlg-x" id="qClose" aria-label="Close">×</button>
+  <h3 id="qTitle" data-en="Quantification">定量分析</h3>
+  <p class="hint" data-en="Volumes come from the exposure the figure shows. A ratio is only as good as its normalisation, so check proportionality before dividing.">体积来自成图所用的那次曝光。比值的可信度取决于归一化，相除之前先确认信号与上样量成正比。</p>
+  <div class="qrow"><label for="qMethod" data-en="Normalise by">归一化方式</label>
+    <select id="qMethod">
+      <option value="control" data-en="A loading control">内参蛋白</option>
+      <option value="total" data-en="Total protein (stain)">总蛋白（染色）</option>
+      <option value="sum" data-en="The sum of all lanes">泳道总和</option>
+      <option value="none" data-en="Nothing — raw volumes">不归一化（原始体积）</option>
+    </select></div>
+  <div class="qrow" id="qCtrlRow"><label for="qControl" data-en="Control row">内参行</label><select id="qControl"></select></div>
+  <div class="qrow" id="qTotalRow"><label for="qTotal" data-en="Total-protein picture">总蛋白图</label><select id="qTotal"></select></div>
+  <div id="qWarn" class="qwarn"></div>
+  <h4 data-en="Linearity across exposures">各次曝光的线性</h4>
+  <p class="hint" data-en="The same band read at several exposures must scale with the exposure factor. This checks the detector, not that signal is proportional to protein amount.">同一条带在多次曝光下应随曝光倍数成比例。这检验的是检测器，不代表信号与蛋白量成正比。</p>
+  <div id="qLin"></div>
+  <h4 data-en="Dilution series (optional)">稀释系列（可选）</h4>
+  <p class="hint" data-en="If you loaded a dilution series of one sample, type the fraction loaded in each lane, in lane order. This is the check that signal is proportional to protein amount.">若上样了同一份样品的梯度稀释，按泳道顺序填写每道的上样比例。这项才检验信号与蛋白量是否成正比。</p>
+  <div class="qrow"><label id="qDilLabel" for="qDil" data-en="Fractions">上样比例</label><input id="qDil" type="text" placeholder="1, 0.5, 0.25"></div>
+  <div id="qDilOut" class="qwarn"></div>
+  <div class="pf-actions">
+    <button class="btn" id="qMethods" data-en="Copy methods">复制方法段</button>
+    <span class="flex"></span>
+    <button class="btn" id="qJson" data-en="Export JSON">导出 JSON</button>
+    <button class="btn primary" id="qCsv" data-en="Export CSV">导出 CSV</button>
   </div>
 </div></div>
 

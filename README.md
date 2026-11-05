@@ -165,7 +165,7 @@ Exposures are recognised by their file names (`Chemi`, `ECL`, `_30s`, `2min` …
 | SVG | Vector text and lines; edit in Illustrator or Inkscape. |
 | Uncropped originals | Every exposure and marker picture used, as taken (not aligned or rotated), with each box, its lanes' figure columns and the protein names drawn where the bands really are. For the supplementary information. |
 | Processing log (JSON) | Each source's SHA-256, alignment, every row's boxes, lanes, exposure, levels and tilt, all layout parameters, legend notes. |
-| Densitometry (CSV) | Band volumes minus local background on the exposure shown, normalised to the loading control on the same membrane; saturated values flagged `SAT`. |
+| Quantification (CSV / JSON / methods paragraph) | Band volumes minus local background on the exposure shown, with saturated values flagged `SAT`. Normalise by a loading control on the same membrane, by total protein (Ponceau / Coomassie / stain-free), by the lane sum, or not at all. Includes a linearity check across exposures, an optional dilution-series fit, n / mean ± SD / CV for the lane ranges the figure labels, and a methods paragraph that states every parameter. |
 | Legend text | Suggested legend notes: membranes, inversion, ladder, exposure of every row, cut lanes, symbols. |
 
 The **Layout** section shows the **effective resolution** of the bands themselves (picture pixels per lane ÷ printed lane width). If it is below 300 dpi, BlotFigure tells you the widest lane that keeps 300 dpi and offers to apply it. The total figure width can be set directly to a journal column (85 / 120 / 180 mm).
@@ -196,7 +196,7 @@ When the downloaded HTML is opened directly from disk, some browsers disable Ind
 ## Known limitations
 
 - Detection has been developed on real chemiluminescence blots and on synthetic membranes. If detection fails on your pictures, please [open an issue](https://github.com/poplarity/BlotFigure/issues/new/choose) (only with pictures you may share).
-- Densitometry is for orientation; quantify on at least three independent experiments with a dedicated tool for publication.
+- Quantification is not a publication guarantee: volume, background, saturation and detector linearity are checked, but "signal proportional to protein amount" can only come from a dilution series you declare or from independent experiments. No p-values are produced and no loading control is chosen for you. Quantify at least three independent experiments and do the statistics in your analysis software.
 - Bio-Rad `.scn` / `.1sc` and other proprietary formats must be exported to TIFF first. BigTIFF and palette TIFFs are not supported. 16-bit PNGs are read as 8-bit by browsers.
 - No phone or tablet layout yet.
 

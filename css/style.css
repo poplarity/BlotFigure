@@ -69,6 +69,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .btn.sm { padding: 4px 9px; font-size: 12.3px; }
 .btn.big { padding: 9px 14px; font-size: 13.5px; }
 input[type=number], input[type=text], select, textarea { border: 1px solid #d3d8de; border-radius: var(--r-sm); padding: 5px 8px; background: #fff; width: 100%; transition: .12s; }
+/* A native popup button is ~8px shorter in Safari than in Chromium, so a select no longer lines up with the
+   28px inputs and buttons beside it. Draw the control ourselves instead (same chevron as #dpiTop). */
+select:not(#dpiTop) { -webkit-appearance: none; appearance: none; height: 28px; padding: 0 24px 0 8px; cursor: pointer;
+  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%237a8799' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 8px center; }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
 input[type=range] { flex: 1; min-width: 80px; width: 100%; -webkit-appearance: none; height: 4px; border-radius: 3px; background: #dfe3e8; outline: none; box-shadow: none; }
 input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%; background: #fff; border: 1.5px solid var(--accent); box-shadow: 0 1px 3px rgba(0,0,0,.2); cursor: pointer; }
@@ -140,7 +144,7 @@ body.dragging #dropHint.hidden { display: flex !important; z-index: 5; }
 .inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .inline-label { color: var(--muted); font-size: 12px; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .range-row { color: var(--muted); font-size: 12.5px; flex-wrap: nowrap; }
-.range-row select { width: auto; min-width: 60px; padding: 4px 6px; }
+.range-row select { width: auto; min-width: 60px; }
 .hint { color: var(--faint); font-size: 11.5px; margin: 6px 0 0; line-height: 1.55; }
 .hint code, .lead code { background: #f1f3f6; padding: 1px 4px; border-radius: 4px; }
 .adv { margin-top: 8px; }
@@ -233,6 +237,19 @@ body.dragging #dropHint.hidden { display: flex !important; z-index: 5; }
 
 /* ---------- export check, draft, resolution, text-size bar (as GelFigure) ---------- */
 .pf { width: 560px; }
+/* quantification panel: method, warning list, the linearity table */
+.quant { width: 560px; }
+.quant h4 { margin: 16px 0 4px; font-size: 12.5px; }
+.qrow { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+.qrow label { flex: none; width: 132px; font-size: 12.5px; color: var(--muted); }
+.qrow select, .qrow input { flex: 1; min-width: 0; }
+.qwarn { margin: 6px 0; font-size: 12.3px; line-height: 1.55; }
+.qwarn .w { color: var(--warn); margin: 3px 0; }
+.qwarn .ok { color: var(--ok); }
+.ql-item { display: flex; gap: 10px; font-size: 12.3px; padding: 4px 0; border-bottom: 1px solid var(--line-2); }
+.ql-item .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ql-item .good { color: var(--ok); } .ql-item .bad { color: var(--warn); }
+.ql-item .none { color: var(--muted); }
 .pf-item { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--line-2); font-size: 12.8px; }
 .pf-item .lv { flex: none; width: 44px; font-size: 11px; font-weight: 700; border-radius: 4px; text-align: center; padding: 1px 0; }
 .pf-item .lv.block { background: #fdecee; color: var(--danger); }

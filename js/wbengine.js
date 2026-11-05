@@ -180,6 +180,22 @@
     return { sig, bright, clip: clipped ? mx : Infinity, max: mx };
   }
 
+  /* signal image for a total-protein stain (Ponceau, Coomassie, stain-free): a light membrane with darker
+   * bands, so the signal is 1 - pixel — the opposite polarity to a chemiluminescence frame.
+   * A dark picture is a chemi exposure, not a stain, and is refused (null) rather than silently inverted. */
+  function totalSignal(img) {
+    // detectBright is true when the BANDS are the bright features. A stain has dark bands on a light
+    // membrane, so a true here means a chemiluminescence frame (or a scan whose bands glow) — refused
+    // rather than silently inverted.
+    if (E.detectBright(img)) return null;
+    const n = img.data.length, sig = new Float32Array(n);
+    for (let i = 0; i < n; i++) sig[i] = 1 - img.data[i];
+    let mx = 0; for (let i = 0; i < n; i++) if (sig[i] > mx) mx = sig[i];
+    let cnt = 0; for (let i = 0; i < n; i++) if (sig[i] >= mx - 1e-6) cnt++;
+    const clipped = cnt >= Math.max(6, n * 2e-6) && mx > 0.2;   // a saturated stain lane holds too much protein
+    return { sig, bright: false, clip: clipped ? mx : Infinity, max: mx };
+  }
+
   /* ---------- session grouping ---------- */
   function stem(name) {
     return String(name).toLowerCase().replace(/\.[a-z]+$/, '').replace(/(\d+(\.\d+)?)\s*(ms|msec|s|sec|secs|seconds|min|mins|m)(?![a-z])/g, '')
@@ -1666,25 +1682,125 @@
     return { black, white };
   }
 
-  /* densitometry: lane volume above local background, in the chosen image.
-   * lanes: [{F, uc, hw, vTop, vBot, b0, b1} | null] (null = no lane in that column) */
-  function densitometry(img, cs, lanes) {
+  /* ---------- quantification (densitometry) ----------
+   * The volume of one lane's band above a local background, in the picture the figure shows.
+   * lanes: [{F, uc, hw, vTop, vBot, b0, b1, pitch, bits} | null]  (null = no lane in that column)
+   *   F      that lane's frame (image px <- lane u,v)
+   *   hw     half the window searched: the band plus its flanks, stopping short of the next lane
+   *   b0,b1  the rows the band occupies; the columns beside the band give the background
+   *   fullLane  integrate the whole lane width instead of following a band profile (total protein)
+   * Returns per lane {volume, background, bgNoise, snr, widthPx, excludedFrac, saturated, grade, quantifiable}.
+   *
+   * Four choices differ from a plain box integration, and each one matters for publication:
+   * - The integration width comes from the band's own profile (where it falls to 35% of its peak), not from a
+   *   fixed fraction of the lane spacing: a narrow band then stops collecting background, a broad one is not
+   *   cut off.
+   * - The background is the lane's own flanks (median + MAD), not one scalar for the whole box.
+   * - The sum is NOT clamped at zero. Clamping biases faint lanes upwards, because every pixel that reads
+   *   below the background is pushed to it.
+   * - Saturated pixels are left out and counted. They are a lower bound, not a measurement; keeping them in
+   *   makes a clipped band look merely strong instead of unusable.
+   * An 8-bit source is flagged separately: only 8 bits per channel reached us (an 8-bit acquisition or an
+   * 8-bit export), so its volumes are only comparable within one membrane. */
+  const gradeOf = bits => (bits != null && bits <= 8 ? 'display-8bit' : 'ok');
+  function quantify(img, cs, lanes) {
+    const S = { w: img.w, h: img.h, data: cs.sig };
     return lanes.map(L => {
       if (!L) return null;
-      const vals = [], bgs = []; let sat = 0;
-      for (let v = L.vTop; v <= L.vBot; v += 1) for (let u = L.uc - L.hw; u <= L.uc + L.hw; u += 1) {
-        const [x, y] = toImg(L.F, u, v);
-        const xi = Math.round(x), yi = Math.round(y);
-        if (xi < 0 || yi < 0 || xi >= img.w || yi >= img.h) continue;
-        const val = cs.sig[yi * img.w + xi];
-        if (v >= L.b0 - 2 && v <= L.b1 + 2) { vals.push(val); if (val >= cs.clip - 1e-6) sat++; } else bgs.push(val);
+      const pitch = L.pitch > 0 ? L.pitch : 0;
+      const hw = L.hw > 0 ? L.hw : (pitch ? pitch * 0.55 : 24);
+      const step = Math.max(1, (2 * hw) / 300, (L.vBot - L.vTop) / 400);
+      const win = sampleWindow(S, L.F, L.uc - hw, L.uc + hw, L.vTop, L.vBot, step);
+      const { w, h, data } = win, u0 = win.u0;
+      const jb0 = Math.max(0, Math.round((L.b0 - L.vTop) / step)), jb1 = Math.min(h - 1, Math.round((L.b1 - L.vTop) / step));
+      if (jb1 <= jb0 || w < 4) return { volume: 0, background: 0, bgNoise: 0, snr: 0, widthPx: 0, excludedFrac: 0, saturated: false, grade: gradeOf(L.bits), quantifiable: false };
+
+      const xc = Math.min(w - 1, Math.max(0, Math.round((L.uc - u0) / step)));
+      let xl, xr, half;
+      if (L.fullLane) {
+        // a whole lane (total protein): protein runs down the entire strip, so there is no band profile to
+        // follow — the region is the lane's own width, and the background comes from the gaps beside it
+        half = Math.max(2, Math.round((pitch ? pitch * 0.28 : hw * 0.5) / step));
+        xl = Math.max(0, xc - half); xr = Math.min(w - 1, xc + half);
+      } else {
+        // where the band actually is, horizontally: the strongest row of each column, over the band's rows
+        const prof = new Float32Array(w);
+        for (let x = 0; x < w; x++) { let mx = -Infinity; for (let y = jb0; y <= jb1; y++) { const v = data[y * w + x]; if (v > mx) mx = v; } prof[x] = mx; }
+        const q = gaussSmooth(prof, Math.max(0.7, w / 90));
+        const base = percentiles(q, [10])[0];
+        // the peak nearest the lane's centre (a band can sit slightly off its nominal lane)
+        const reach = Math.max(1, Math.round((pitch ? pitch * 0.22 : hw * 0.45) / step));
+        let xp = xc, pv = q[xc];
+        for (let x = Math.max(0, xc - reach); x <= Math.min(w - 1, xc + reach); x++) if (q[x] > pv) { pv = q[x]; xp = x; }
+        const thr = base + (pv - base) * 0.35;
+        let a = xp, b = xp;
+        while (a > 0 && q[a - 1] > thr) a--;
+        while (b < w - 1 && q[b + 1] > thr) b++;
+        // keep it inside sane bounds: never most of the lane spacing, never a sliver
+        const hMin = Math.max(2, Math.round((pitch ? pitch * 0.08 : hw * 0.2) / step));
+        const hMax = Math.max(hMin + 1, Math.round((pitch ? pitch * 0.5 : hw * 0.95) / step));
+        half = Math.min(hMax, Math.max(hMin, Math.max(xp - a, b - xp)));
+        xl = Math.max(0, xp - half); xr = Math.min(w - 1, xp + half);
       }
-      bgs.sort((a, b) => a - b);
-      const bg = bgs.length ? bgs[bgs.length >> 1] : 0;
-      let vol = 0; vals.forEach(v => { vol += Math.max(0, v - bg); });
-      return { volume: vol, saturated: sat > 0 };
+
+      // background: the columns just beside the band, at the band's own rows
+      const gap = Math.max(1, Math.round((pitch ? pitch * 0.06 : hw * 0.08) / step));
+      const wing = Math.max(2, Math.round(half * 0.6));
+      const bgs = [];
+      for (let x = Math.max(0, xl - gap - wing); x <= xl - gap; x++) for (let y = jb0; y <= jb1; y++) bgs.push(data[y * w + x]);
+      for (let x = xr + gap; x <= Math.min(w - 1, xr + gap + wing); x++) for (let y = jb0; y <= jb1; y++) bgs.push(data[y * w + x]);
+      let bg, bgNoise;
+      if (bgs.length >= 12) {
+        bgs.sort((a, b) => a - b); bg = bgs[bgs.length >> 1];
+        const dev = bgs.map(v => Math.abs(v - bg)).sort((a, b) => a - b); bgNoise = 1.4826 * dev[dev.length >> 1];
+      } else {
+        // too narrow for flanks (a tight box): fall back to the rows above and below the band
+        const f = [];
+        for (let x = xl; x <= xr; x++) for (let y = 0; y < h; y++) if (y < jb0 - 2 || y > jb1 + 2) f.push(data[y * w + x]);
+        f.sort((a, b) => a - b); bg = f.length ? f[f.length >> 1] : 0;
+        const dev = f.map(v => Math.abs(v - bg)).sort((a, b) => a - b); bgNoise = f.length ? 1.4826 * dev[dev.length >> 1] : 0;
+      }
+
+      let vol = 0, excl = 0, tot = 0, peak = -Infinity;
+      const clip = cs.clip;
+      for (let y = jb0; y <= jb1; y++) for (let x = xl; x <= xr; x++) {
+        const v = data[y * w + x]; tot++;
+        if (clip !== Infinity && v >= clip - 1e-6) { excl++; continue; }
+        vol += v - bg; if (v > peak) peak = v;
+      }
+      const excludedFrac = tot ? excl / tot : 0;
+      return {
+        volume: vol * step * step,   // samples cover step x step image px each; keeps volumes comparable
+        background: bg, bgNoise, snr: bgNoise > 0 && isFinite(peak) ? (peak - bg) / bgNoise : 0,
+        widthPx: (xr - xl + 1) * step, excludedFrac, saturated: excl > 0,
+        grade: gradeOf(L.bits), quantifiable: tot > 0 && excludedFrac <= 0.02
+      };
     });
   }
+
+  /* Proportionality of a series (exposures of one band, or a dilution series): v = k·x through the origin.
+   * points: [{x, y}] — x is the exposure factor or the loaded fraction.
+   * r2 is the UNCENTRED coefficient (1 − Σr²/Σy²): it asks "how much of the signal is explained by
+   * proportionality to x", which is the question here. A centred r2 would call any two points perfect, and
+   * would still be high for a series that bends but keeps its order.
+   * Returns {n, k, r2, maxDev} — maxDev is the largest residual as a fraction of the strongest point, and
+   * n counts the points actually used (fewer than 3 and nothing is claimed). */
+  function linearFit(points) {
+    const p = (points || []).filter(q => q && isFinite(q.x) && isFinite(q.y) && q.x > 0);
+    if (p.length < 3) return { n: p.length, k: null, r2: null, maxDev: null };
+    let sxy = 0, sxx = 0, syy = 0;
+    p.forEach(q => { sxy += q.x * q.y; sxx += q.x * q.x; syy += q.y * q.y; });
+    const k = sxx ? sxy / sxx : 0;
+    let ssr = 0; p.forEach(q => { const r = q.y - k * q.x; ssr += r * r; });
+    const top = Math.max(...p.map(q => Math.abs(q.y)));
+    const maxDev = top ? Math.max(...p.map(q => Math.abs(q.y - k * q.x))) / top : 0;
+    return { n: p.length, k, r2: syy ? 1 - ssr / syy : 1, maxDev };
+  }
+  /* the pass rule is a convention, not a law: a series that is proportional to within 2% and leaves less than
+   * 10% of its strongest point unexplained passes; anything else is reported as a deviation, never as "fine" */
+  const LINEAR_R2 = 0.98, LINEAR_DEV = 0.1;
+  const linearVerdict = fit => fit.r2 == null ? 'not enough points'
+    : (fit.r2 >= LINEAR_R2 && fit.maxDev <= LINEAR_DEV ? 'proportional' : 'deviates');
 
   /* ---------- the same membrane photographed again after it was moved: rigid registration ----------
    * A transform T = {a, tx, ty} (degrees, full-resolution px) takes a point p of the reference picture to the
@@ -1991,6 +2107,6 @@
     exposureFromName, classify, chemiSignal, groupSessions, stem, findStrips, stripFrame, inStrip,
     pitchFromGaps, latticeOrigin, pieceLattice, assignColumns, calibrateLadder, calibrate, fitSeries, piecesInPlace, kdaAt, vAt, kdaAtK, vAtK,
     analyzeSession, detectRows, regionsFromSignal, findLadderInStrip, findLadders, detectBoxLanes, bandInBox,
-    evalExposure, chooseExposure, exposureScore, isCleanExposure, autoLevels, densitometry
+    evalExposure, chooseExposure, exposureScore, isCleanExposure, autoLevels, quantify, totalSignal, linearFit, linearVerdict
   };
 })(window);

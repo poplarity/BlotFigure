@@ -148,7 +148,16 @@
   App.defaultStyle = defaultStyle;
   /* step: how far the user has come (1 Marker picture confirmed → 2 pieces confirmed → 3 boxes → 4 marker →
    * 5 names); each step works on what the one before established */
-  const newState = () => ({ step: 1, defaultLaneCount: null, blots: [], rows: [], lanes: [], range: [1, 1], hiCol: 0, levels: {}, align: {}, conditions: [], groups: [], arrows: [], brackets: [], layoutColumns: [{ id: 'main', title: '', titleSide: 'top' }], style: defaultStyle() });
+  /* ---------- quantification settings ----------
+   * Added after 0.14: an older project has no `quant`, so every reader goes through App.quantSettings().
+   *   method      'control' (a loading control on the same membrane) | 'total' (a stain of the same strips)
+   *               | 'sum' (Degasperi's sum method) | 'none' (raw volumes only)
+   *   controlRow  the row used as the control — explicit, because a name regex is a guess
+   *   totalImage  the Ponceau / Coomassie / stain-free picture (must sit in the same image group)
+   *   dilution    { rowId: [fraction of the sample loaded, per lane] } for the dilution-series check
+   * Nothing here changes a picture; it only says what a ratio means. */
+  const defaultQuant = () => ({ version: 1, method: 'control', controlRow: null, totalImage: null, dilution: {} });
+  const newState = () => ({ step: 1, defaultLaneCount: null, blots: [], rows: [], lanes: [], range: [1, 1], hiCol: 0, levels: {}, align: {}, conditions: [], groups: [], arrows: [], brackets: [], layoutColumns: [{ id: 'main', title: '', titleSide: 'top' }], style: defaultStyle(), quant: defaultQuant() });
 
   /* ---------- events / undo ---------- */
   // Selection is transient UI state, never part of a saved project or image processing.
@@ -1809,6 +1818,153 @@
 
   /* ---------- checks shown as warnings / legend text ---------- */
   App.isLoading = row => G.ProteinLadders.LOADING_RE.test(row.name || '');
+
+  /* ---------- quantification: one pass over the figure, shared by the panel and every export ----------
+   * The numbers are the same ones the figure shows: the chosen exposure, the boxes as drawn. Settings only
+   * decide what the ratio is divided by; when that is not sound the ratio is left empty and a warning says
+   * why, rather than a number that looks fine and is not. */
+  App.quantSettings = function () {
+    const q = (App.S && App.S.quant) || {}, d = defaultQuant();
+    const method = ['control', 'total', 'sum', 'none'].includes(q.method) ? q.method : d.method;
+    // the name regex only proposes; the export records whether the control was chosen or merely suggested
+    const chosen = q.controlRow || null;
+    const controlRow = chosen || (method === 'control' ? App.suggestControl() : null);
+    return {
+      version: 1, method, controlRow, controlSource: chosen ? 'chosen' : (controlRow ? 'suggested' : 'none'),
+      totalImage: q.totalImage || null,
+      dilution: q.dilution && typeof q.dilution === 'object' ? q.dilution : {}
+    };
+  };
+  App.setQuant = function (patch) {
+    const cur = App.quantSettings(), next = Object.assign({}, cur, patch || {});
+    App.S.quant = next; App.commit();
+  };
+  // what the tool SUGGESTS as the control; the decision itself is the user's (App.setQuant({controlRow}))
+  App.suggestControl = function () {
+    const vis = App.S.rows.filter(r => !r.hidden);
+    return (vis.find(App.isLoading) || {}).id || null;
+  };
+  /* one lane's geometry, in the box's own frame (a tilted box is read along its tilt, as in the figure) */
+  App.quantLaneSpec = function (row, s, rec) {
+    if (!s || !s.pc) return null;
+    const pitch = App.segPitch(s.sg) || 0;
+    return { F: App.segFrame(s.pc, s.sg), uc: s.u, pitch, bits: rec ? rec.bits : null,
+      hw: pitch > 0 ? pitch * 0.55 : Math.max(8, (s.sg.x1 - s.sg.x0) / 12),
+      vTop: s.sg.vc - App.boxAbove(row, s.sg), vBot: s.sg.vc + App.boxBelow(row, s.sg),
+      b0: s.sg.vc + s.sg.b0, b1: s.sg.vc + s.sg.b1 };
+  };
+  /* a total-protein stain belongs to a strip, not to one protein: its lane runs the height of the piece */
+  App.quantTotalLaneSpec = function (s) {
+    if (!s || !s.pc) return null;
+    const pitch = App.segPitch(s.sg) || 0, pc = s.pc, half = pc.h / 2 * 0.98;
+    return { F: App.segFrame(pc, s.sg), uc: s.u, pitch, bits: null, fullLane: true,
+      hw: pitch > 0 ? pitch * 0.48 : Math.max(8, pc.w / 22),
+      vTop: -half, vBot: half, b0: -half, b1: half };
+  };
+  /* every row of one layout column: volumes, what divides them, and the warnings that stop a ratio */
+  App.quantBlock = function (columnId) {
+    const st = App.columnData(columnId), C = App.columns(columnId), fl = C.vis;
+    const qs = App.quantSettings(), warn = [];
+    const rows = C.rows.map((r, ri) => {
+      const rec = App.images.get(r.img), segs = C.src[ri] || [];
+      const specs = segs.map(s => App.quantLaneSpec(r, s, rec));
+      const d = rec && rec.cs ? WB.quantify(rec.img, rec.cs, specs) : specs.map(() => null);
+      return { row: r, blot: App.blot(r.blot), rec, specs, d, total: null, denom: null, norm: null };
+    });
+    // the total-protein picture: it has to be a light stain in the same image group, or there is no total
+    if (qs.method === 'total') {
+      const tr = qs.totalImage ? App.images.get(qs.totalImage) : null;
+      let why = !tr ? 'no-total' : null;
+      if (tr) {
+        const tsig = WB.totalSignal(tr.img);
+        if (!tsig) why = 'total-not-stain';
+        else {
+          // one warning per row, named: on a figure with two membranes only the rows of the stained one can
+          // be normalised by it, and the others need to know why they carry no ratio
+          rows.forEach((x, ri) => {
+            const blot = x.blot;
+            if (!blot || !(blot.images || []).includes(qs.totalImage)) { warn.push({ code: 'total-not-in-group', row: x.row }); return; }
+            // the total lane starts from the SOURCE lanes, not from the band specs: a stain has no band profile
+            // to follow, so quantTotalLaneSpec reads the segment (its piece and lane grid), not a lane spec
+            x.total = WB.quantify(tr.img, tsig, (C.src[ri] || []).map(s => App.quantTotalLaneSpec(s)));
+          });
+        }
+      }
+      if (why) warn.push({ code: why });
+    }
+    // denominators: a lane's own control lane, that lane's total protein, or the row's sum
+    const ctrl = qs.method === 'control' && qs.controlRow ? rows.find(x => x.row.id === qs.controlRow) : null;
+    if (qs.method === 'control' && !ctrl) warn.push({ code: qs.controlRow ? 'control-missing' : 'no-control' });
+    rows.forEach(x => {
+      if (qs.method === 'control' && ctrl && ctrl !== x && ctrl.blot === x.blot) x.denom = ctrl.d.map(v => (v && v.quantifiable && v.volume > 0 ? v.volume : null));
+      else if (qs.method === 'total' && x.total) x.denom = x.total.map(v => (v && v.quantifiable && v.volume > 0 ? v.volume : null));
+      else if (qs.method === 'sum') {
+        const tot = x.d.reduce((a, v) => a + (v && v.quantifiable && v.volume > 0 ? v.volume : 0), 0);
+        if (tot > 0) x.denom = x.d.map(() => tot); else warn.push({ code: 'sum-zero', row: x.row });
+      }
+      if (x.denom) x.norm = x.d.map((v, i) => (v && v.quantifiable && x.denom[i] > 0 ? v.volume / x.denom[i] : null));
+    });
+    // a normalization point much weaker than what it normalizes raises the CV (Degasperi 2014) — say so
+    if (qs.method === 'control' && ctrl) rows.forEach(x => {
+      if (x === ctrl || !x.denom || ctrl.blot !== x.blot) return;
+      const top = Math.max(0, ...x.d.map(v => (v && v.quantifiable ? v.volume : 0)));
+      x.denom.forEach((dv, i) => { if (dv != null && top > 0 && dv < top * 0.1) warn.push({ code: 'weak-control', row: x.row, lane: i, frac: dv / top }); });
+    });
+    // 8-bit sources are comparable only within one membrane; the export says it per lane as well
+    const seen8 = new Set();
+    rows.forEach(x => { if (x.rec && x.rec.bits != null && x.rec.bits <= 8 && !seen8.has(x.blot)) { seen8.add(x.blot); warn.push({ code: 'eight-bit', blot: x.blot }); } });
+    // conditions: the lane ranges the figure already labels, as replicates
+    const groups = st.groups || [];
+    if (groups.length) rows.forEach(x => {
+      x.conditions = groups.map(g => {
+        const from = Math.min(g.from, g.to), to = Math.max(g.from, g.to), vals = [];
+        for (let j = from; j <= to; j++) {
+          const k = fl.indexOf(j);
+          const v = k >= 0 && x.norm ? x.norm[k] : null;
+          if (v != null) vals.push(v);
+        }
+        const n = vals.length, mean = n ? vals.reduce((a, b) => a + b, 0) / n : null;
+        const sd = n > 1 ? Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1)) : null;
+        return { text: g.text || '', from, to, values: vals, n, mean, sd, cv: mean && sd != null ? sd / mean : null };
+      });
+    });
+    return { id: columnId, column: App.layoutColumns().find(c => c.id === columnId) || null, lanes: fl, settings: qs, rows, warnings: warn };
+  };
+  App.quantData = function () {
+    return App.layoutColumns().map(c => App.quantBlock(c.id)).filter(b => b.rows.length);
+  };
+  /* linearity across the exposures of one row: the same band read at several exposure factors must scale with
+   * the factor. This checks the DETECTOR, not that signal is proportional to protein amount. */
+  App.quantLinearity = function (row) {
+    const C = App.columns(App.rowColumn(row)), idx = C.rows.indexOf(row);
+    if (idx < 0 || !row.img) return null;
+    const ex = App.rowExpo(row).filter(e => e && isFinite(e.factor));
+    const specs = (C.src[idx] || []).map(s => App.quantLaneSpec(row, s, App.images.get(row.img)));
+    // three exposures that all carry factor 1 are three pictures of one exposure time, not a series
+    if (new Set(ex.map(e => e.factor)).size < 3) return { mode: 'exposure', exposures: ex.length, fits: specs.map(() => ({ n: 0, r2: null })), worst: null, reason: 'factors', verdict: 'not enough points' };
+    const series = specs.map(() => []);
+    ex.forEach(e => {
+      const rec = App.images.get(e.id);
+      if (!rec || !rec.cs) return;
+      WB.quantify(rec.img, rec.cs, specs).forEach((v, i) => { if (v && v.quantifiable) series[i].push({ x: e.factor, y: v.volume }); });
+    });
+    const fits = series.map(pts => WB.linearFit(pts));
+    const usable = fits.filter(f => f.r2 != null);
+    const worst = usable.length ? usable.reduce((a, b) => (b.r2 < a.r2 ? b : a)) : null;
+    return { mode: 'exposure', exposures: ex.length, fits, worst, verdict: WB.linearVerdict(worst || { r2: null }) };
+  };
+  /* a declared dilution series: volume must scale with the fraction loaded */
+  App.quantDilution = function (row, fractions) {
+    const C = App.columns(App.rowColumn(row)), idx = C.rows.indexOf(row);
+    if (idx < 0) return null;
+    const rec = App.images.get(row.img);
+    const specs = (C.src[idx] || []).map(s => App.quantLaneSpec(row, s, rec));
+    const d = rec && rec.cs ? WB.quantify(rec.img, rec.cs, specs) : [];
+    const pts = [];
+    (fractions || []).forEach((f, i) => { const v = d[i]; if (f > 0 && v && v.quantifiable) pts.push({ x: f, y: v.volume }); });
+    const fit = WB.linearFit(pts);
+    return { mode: 'dilution', fit, verdict: WB.linearVerdict(fit), x: pts.map(p => p.x), y: pts.map(p => p.y) };
+  };
   App.checks = function () {
     const S = App.S, warn = [], legend = [];
     const vis = S.rows.filter(r => !r.hidden);
@@ -1986,6 +2142,17 @@
       arrows: (S.arrows || []).map(a => ({ row: (App.row(a.row) || {}).name || null, symbol: a.sym, side: a.side, text: a.text || null, size: a.sym === '◀' ? (a.sizeText || App.arrowSize(a) || null) : null, userSize: a.sizeText || null })),
       brackets: (S.brackets || []).map(k => ({ fromRow: (App.row(k.r0) || {}).name || null, toRow: (App.row(k.r1) || {}).name || null, fromFrac: k.f0, toFrac: k.f1, side: k.side, vertical: !!k.vertical, line: !!k.line, text: k.text || null })),
       groups: S.groups, conditions: S.conditions, style: S.style,notes:S.notes||[],textFormats:S.rows.map(r=>({row:r.id,nameRuns:r.nameRuns,nameColor:r.nameColor})),
+      quantification: {
+        software: 'BlotFigure ' + App.VERSION,
+        method: 'lane volume above a per-lane local background, on the exposure shown in the figure',
+        integrationWidth: 'the band profile at 35% of its peak, mirrored about the peak; the half-width is held to 0.08–0.50 of the lane spacing, so neighbouring lanes can meet but never overlap',
+        background: 'median of the columns beside the band, MAD as its noise; the rows above and below only when the box is too tight for flanks',
+        clampedAtZero: false,
+        saturatedPixels: 'left out of the sum; above 2% of the band the lane is a lower bound and no ratio is reported',
+        eightBitSource: 'marked display-8bit: volumes are comparable only within one membrane',
+        ratios: 'target / same-membrane loading control, then divided by lane 1',
+        laneDetail: 'per lane volume, background, width and saturation are in the exported blot_quantification.csv'
+      },
       legendHints: ck.legend
     };
   };

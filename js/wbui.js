@@ -339,7 +339,93 @@
     try { await navigator.clipboard.writeText(t); toast(L('图注文字已复制', 'Legend text copied')); } catch (e) { prompt(L('复制下面的图注文字：', 'Copy the legend text below:'), t); }
   };
   $('btnRaw').onclick = () => { if (S()) exportRaw(); };
-  $('btnQuant').onclick = () => { if (S()) exportQuant(); };
+  /* ---------- the quantification panel ---------- */
+  // the row the dilution series belongs to: the one selected on the figure, else the first visible one
+  function quantRow() {
+    const r = App.row(App.selRow);
+    return (r && !r.hidden && r.segs && r.segs.length) ? r : (App.S.rows.find(x => !x.hidden) || null);
+  }
+  function renderQuant() {
+    if (!S()) return;
+    const { blocks, lin } = qAll(), s = App.quantSettings();
+    $('qMethod').value = s.method;
+    $('qCtrlRow').classList.toggle('hidden', s.method !== 'control');
+    $('qTotalRow').classList.toggle('hidden', s.method !== 'total');
+    // control: every visible row, the suggested one preselected
+    const rows = App.S.rows.filter(r => !r.hidden);
+    $('qControl').innerHTML = rows.map(r => `<option value="${esc(r.id)}">${esc(r.name || L('（未命名）', '(unnamed)'))}</option>`).join('') || `<option value="">—</option>`;
+    if (s.controlRow) $('qControl').value = s.controlRow;
+    // total-protein picture: any picture of any image group (it must be a stain; the warning says so if not)
+    const seen = new Set(), opts = [];
+    App.S.blots.forEach(b => (b.images || []).forEach(id => {
+      const rec = App.images.get(id);
+      if (!rec || seen.has(id)) return;
+      seen.add(id); opts.push(`<option value="${esc(id)}">${esc(rec.name)} · ${esc(App.blotNameEn(b))}</option>`);
+    }));
+    $('qTotal').innerHTML = `<option value="">${L('（未选择）', '(none)')}</option>` + opts.join('');
+    if (s.totalImage) $('qTotal').value = s.totalImage;
+    // warnings (codes from App.quantBlock, plus the linearity verdicts)
+    const en = !!(G.I18N && G.I18N.lang === 'en'), ws = [];
+    blocks.forEach((b, i) => qWarnings(b, lin[i]).forEach(w => ws.push(qWarnText(w, en))));
+    $('qWarn').innerHTML = ws.length ? [...new Set(ws)].map(t => `<div class="w">⚠ ${esc(t)}</div>`).join('')
+      : `<div class="ok">${L('没有阻断性问题。', 'No blocking problems.')}</div>`;
+    // linearity, one line per row
+    $('qLin').innerHTML = lin.flat().map(o => {
+      const f = o.fit, w = f.worst, nm = esc(o.row.name || L('（未命名）', '(unnamed)'));
+      // a lane needs three usable points, not three exposures: a saturated exposure drops out of the fit
+      if (!w) {
+        const best = Math.max(0, ...f.fits.map(x => x.n));
+        const why = f.reason === 'factors'
+          ? L('几张曝光的时长相同或未知，无法比较', 'the exposures share one (or an unknown) exposure time')
+          : L(`只有 ${best} 个可用点，至少要 3 个`, `only ${best} usable point${best === 1 ? '' : 's'} — 3 needed`);
+        return `<div class="ql-item"><span class="nm">${nm}</span><span class="none">${why}</span></div>`;
+      }
+      const cls = f.verdict === 'proportional' ? 'good' : 'bad';
+      const word = f.verdict === 'proportional' ? L('成正比', 'proportional') : L('偏离', 'deviates');
+      return `<div class="ql-item"><span class="nm">${nm}</span><span class="${cls}">${word} · R² ${w.r2.toFixed(3)} · ${L('残差', 'residual')} ${(w.maxDev * 100).toFixed(0)}% · n=${w.n}</span></div>`;
+    }).join('') || `<p class="hint">${L('没有可检验的行', 'No rows to check')}</p>`;
+    // dilution series of the row in hand
+    const r = quantRow(), dil = (s.dilution[r && r.id] || []);
+    $('qDilLabel').textContent = L(`上样比例（${(r && r.name) || '当前行'}）`, `Fractions (${(r && r.name) || 'current row'})`);
+    $('qDil').value = dil.join(', ');
+    $('qDil').disabled = !r;
+    renderDilution(r, dil);
+  }
+  function renderDilution(r, nums) {
+    const out = r && nums && nums.length ? App.quantDilution(r, nums) : null;
+    if (!out || !out.fit || out.fit.r2 == null) {
+      $('qDilOut').innerHTML = out && out.fit && out.fit.n < 3 && nums && nums.length
+        ? `<div class="w">${L('至少要 3 个可定量的浓度点才做回归。', 'At least 3 quantifiable points are needed for a fit.')}</div>` : '';
+      return;
+    }
+    const ok = out.verdict === 'proportional';
+    $('qDilOut').innerHTML = `<div class="${ok ? 'ok' : 'w'}">${ok ? L('与上样量成正比', 'proportional to the amount loaded') : L('偏离正比', 'deviates from proportionality')} · R² ${out.fit.r2.toFixed(3)} · ${L('残差', 'residual')} ${(out.fit.maxDev * 100).toFixed(0)}% · n=${out.fit.n}</div>`;
+  }
+  function openQuant() { if (!S()) return; renderQuant(); $('quantDlg').classList.remove('hidden'); }
+  const closeQuant = () => $('quantDlg').classList.add('hidden');
+  $('btnQuant').onclick = () => { if (S()) openQuant(); };
+  $('qClose').onclick = closeQuant;
+  $('qMethod').onchange = e => { App.setQuant({ method: e.target.value }); renderQuant(); };
+  $('qControl').onchange = e => { App.setQuant({ controlRow: e.target.value || null }); renderQuant(); };
+  $('qTotal').onchange = e => { App.setQuant({ totalImage: e.target.value || null }); renderQuant(); };
+  $('qDil').onchange = () => {
+    const r = quantRow(); if (!r) return;
+    const nums = $('qDil').value.split(/[,\s;]+/).filter(Boolean).map(Number);
+    const dil = Object.assign({}, App.quantSettings().dilution);
+    if (nums.length && nums.every(n => isFinite(n) && n > 0)) dil[r.id] = nums; else delete dil[r.id];
+    App.setQuant({ dilution: dil });
+    renderDilution(r, dil[r.id] || []);
+  };
+  if (G.I18N && G.I18N.onChange) G.I18N.onChange(() => { if (!$('quantDlg').classList.contains('hidden')) renderQuant(); });
+  $('qCsv').onclick = () => exportQuant();
+  $('qJson').onclick = () => exportQuantJson();
+  $('qMethods').onclick = async () => {
+    const { blocks, lin } = qAll();
+    if (!blocks.length) { toast(L('还没有可定量的行', 'No rows to quantify yet')); return; }
+    const t = quantMethods(blocks, lin);
+    try { await navigator.clipboard.writeText(t); toast(L('方法段落已复制（英文）', 'Methods paragraph copied (English)')); }
+    catch (e) { prompt(L('复制下面的方法段落：', 'Copy the methods paragraph below:'), t); }
+  };
 
   /* ---------- 1 membranes & pictures ---------- */
   function thumbCanvas(rec) {
@@ -1918,34 +2004,201 @@
     c.toBlob(bl => G.Export.download(bl, 'uncropped_originals.png'), 'image/png');
     toast(L(`已导出未裁切原图（${pages.length} 张）`, `Exported the uncropped originals (${pl(pages.length, 'picture')})`));
   }
+  /* ---------- quantification: the panel, and the three things it exports ----------
+   * The panel, the CSV, the JSON and the methods paragraph are all built from App.quantData(), so what the
+   * user reads on screen and what lands in the supplement cannot drift apart. */
+  const qName = r => (r && r.name) || '?';
+  const qVol = v => !v ? '' : v.volume.toFixed(2) + (v.quantifiable ? '' : (v.saturated ? ' (SAT)' : ' (n/q)'));
+  const qDenomLabel = (blk, x) => {
+    const s = blk.settings;
+    if (s.method === 'control') { const c = blk.rows.find(y => y.row.id === s.controlRow); return c ? qName(c.row) : 'control'; }
+    if (s.method === 'total') return 'total protein';
+    if (s.method === 'sum') return 'lane sum';
+    return '';
+  };
+  const qLaneNames = blk => blk.lanes.map(j => (App.columnData(blk.id).lanes[j - 1] || {}).name || 'lane ' + j);
+  const qMembrane = x => (x.blot ? App.blotNameEn(x.blot) : '?');
+  const qExpo = x => (x.rec ? App.expoLabel(x.rec) : '');
+
+  /* warnings travel as codes so the panel can speak the interface language and the export stays English */
+  function qWarnText(w, en) {
+    const nm = w.row ? qName(w.row) : '', bl = w.blot ? App.blotNameEn(w.blot) : '';
+    switch (w.code) {
+      case 'no-control': return en ? 'No loading control is chosen, so no ratios are reported.' : '还没有指定内参，因此不给比值。';
+      case 'control-missing': return en ? 'The chosen control row is not part of this figure.' : '指定的内参行不在当前成图里。';
+      case 'no-total': return en ? 'No total-protein picture is chosen, so no ratios are reported.' : '还没有选择总蛋白图，因此不给比值。';
+      case 'total-not-stain': return en ? 'The chosen picture has bright bands on a dark background — that is a chemiluminescence frame, not a stain. Choose the Ponceau / Coomassie / stain-free photo.'
+        : '所选图是暗背景亮条带（化学发光），不是染色图。请选 Ponceau / 考马斯 / stain-free 照片。';
+      case 'total-not-in-group': return en ? `${nm}: the chosen total-protein picture is on another membrane, so this row has no total to divide by. Choose that membrane's own stain.`
+        : `${nm}：所选总蛋白图在另一张膜上，这一行没有可除的总蛋白。请选同一张膜的染色图。`;
+      case 'weak-control': return en
+        ? `${nm}: the control in lane ${w.lane + 1} is only ${(w.frac * 100).toFixed(0)}% of the band it normalises. Normalising on a weak lane raises the CV — use a stronger control, or total protein.`
+        : `${nm}：第 ${w.lane + 1} 道的内参只有它归一化条带的 ${(w.frac * 100).toFixed(0)}%。用弱带做归一化点会抬高 CV，请换更强的内参或改用总蛋白。`;
+      case 'sum-zero': return en ? `${nm}: every lane is empty, so there is no sum to normalise by.` : `${nm}：所有道都为空，没有可用来归一化的总和。`;
+      case 'eight-bit': return en ? `${bl || 'A membrane'} came from an 8-bit source: its volumes are comparable only within that membrane.`
+        : `${bl || '某张膜'}来自 8-bit 源：体积只能在同一张膜内比较。`;
+      case 'linearity': return en
+        ? `${nm}: the signal is not proportional across exposures (R² ${w.r2 == null ? '—' : w.r2.toFixed(3)}, largest residual ${(w.dev * 100).toFixed(0)}%). These volumes are outside the detector's linear range — do not report them as fold changes.`
+        : `${nm}：各次曝光的信号不成正比（R² ${w.r2 == null ? '—' : w.r2.toFixed(3)}，最大残差 ${(w.dev * 100).toFixed(0)}%）。这些体积已超出检测器线性范围，不要当作倍数变化报告。`;
+      default: return en ? String(w.code) : String(w.code);
+    }
+  }
+  // linearity is the expensive part: one pass per block, reused by the panel and the exports
+  function qLinearity(blk) {
+    return blk.rows.map(x => ({ row: x.row, fit: App.quantLinearity(x.row) })).filter(o => o.fit);
+  }
+  function qWarnings(blk, lin) {
+    const out = blk.warnings.slice();
+    (lin || []).forEach(o => {
+      const deviates = o.fit.verdict === 'deviates' && o.fit.worst;
+      if (deviates) out.push({ code: 'linearity', row: o.row, r2: o.fit.worst.r2, dev: o.fit.worst.maxDev });
+    });
+    return out;
+  }
+
+  function quantCsv(blocks, linByBlock) {
+    const lines = [], detail = [], norm = [], lins = [], cond = [], warns = [];
+    blocks.forEach((blk, bi) => {
+      const st = App.columnData(blk.id), names = qLaneNames(blk), s = blk.settings;
+      if (blocks.length > 1) lines.push(['layout column', blk.id, (blk.column && blk.column.title) || '']);
+      lines.push(['protein', 'membrane', 'exposure'].concat(names));
+      blk.rows.forEach(x => lines.push([qName(x.row), qMembrane(x), qExpo(x)].concat(x.d.map(qVol))));
+      blk.rows.forEach(x => {
+        if (!x.norm) return;
+        const r0 = x.norm.find(v => v != null) || 1;
+        lines.push([`${qName(x.row)}/${qDenomLabel(blk, x)} (rel. lane 1)`, qMembrane(x), ''].concat(x.norm.map(v => (v == null ? '' : (v / r0).toFixed(3)))));
+      });
+      lines.push([]);
+      blk.rows.forEach(x => x.d.forEach((v, i) => {
+        if (!v) return;
+        detail.push([qName(x.row), qMembrane(x), qExpo(x), names[i], v.volume.toFixed(2), v.background.toFixed(5), v.bgNoise.toFixed(5), v.snr.toFixed(1), Math.round(v.widthPx), v.excludedFrac.toFixed(4), x.rec && x.rec.bits != null ? x.rec.bits : '', v.quantifiable ? 'yes' : 'no', v.grade]);
+      }));
+      // what divided the volume, so the division can be redone without this tool
+      if (s.method !== 'none') blk.rows.forEach(x => {
+        if (!x.denom) return;
+        x.denom.forEach((dv, i) => { if (dv != null) norm.push([qName(x.row), qMembrane(x), names[i], qDenomLabel(blk, x), dv.toFixed(4), x.norm && x.norm[i] != null ? x.norm[i].toFixed(5) : '']); });
+      });
+      (linByBlock[bi] || []).forEach(o => {
+        const f = o.fit, w = f.worst || (f.fit && f.fit.r2 != null ? f.fit : null);
+        const verdict = f.reason === 'factors' ? 'not enough points (exposure times unknown)' : f.verdict;
+        lins.push([qName(o.row), f.mode, f.mode === 'dilution' ? 1 : f.exposures, w ? w.n : '', w ? w.r2.toFixed(4) : '', w ? w.maxDev.toFixed(4) : '', verdict]);
+      });
+      blk.rows.forEach(x => (x.conditions || []).forEach(c => {
+        if (!c.n) return;
+        cond.push([qName(x.row), qMembrane(x), c.text || `lanes ${c.from}-${c.to}`, c.n, c.mean.toFixed(5), c.sd == null ? '' : c.sd.toFixed(5), c.cv == null ? '' : c.cv.toFixed(4)]);
+      }));
+      qWarnings(blk, linByBlock[bi]).forEach(w => warns.push([qWarnText(w, true)]));
+    });
+    lines.push(['# normalisation: what each volume was divided by']);
+    lines.push(['protein', 'membrane', 'lane', 'basis', 'denominator', 'normalised']);
+    lines.push(...norm);
+    lines.push([]);
+    lines.push(['# lane detail: how each volume was measured']);
+    lines.push(['protein', 'membrane', 'exposure', 'lane', 'volume', 'background', 'bg_noise', 'snr', 'width_px', 'excluded_frac', 'bit_depth', 'quantifiable', 'source_grade']);
+    lines.push(...detail);
+    lines.push([]);
+    lines.push(['# linearity: does the signal scale with what was loaded (or with exposure)?']);
+    lines.push(['protein', 'mode', 'exposures', 'n_lanes', 'r2', 'max_dev', 'verdict']);
+    lines.push(...lins);
+    lines.push([]);
+    if (cond.length) {
+      lines.push(['# conditions: the lane ranges the figure labels, as replicates (no test is applied)']);
+      lines.push(['protein', 'membrane', 'condition', 'n', 'mean', 'sd', 'cv']);
+      lines.push(...cond);
+      lines.push([]);
+    }
+    if (warns.length) {
+      lines.push(['# warnings']);
+      warns.forEach(w => lines.push(w));
+      lines.push([]);
+    }
+    lines.push(['Volumes = sum of (signal - local background) over the band, on the exposure shown in the figure.']);
+    lines.push(['Background = median of the columns beside the band; width_px = the integration window: the band profile at 35% of its peak, mirrored about the peak and held to 0.16-1.00 of the lane spacing (not a fixed fraction).']);
+    lines.push(['SAT = more than 2% of the band is clipped; those pixels are left out of the sum, so the volume is a lower bound and no ratio is given. n/q = too few pixels to measure; no ratio either.']);
+    lines.push(['source_grade display-8bit = the source carries only 8 bits per channel (an 8-bit acquisition or export); use these volumes only as relative values within one membrane.']);
+    lines.push(['Normalisation divides by a control on the same membrane (or by total protein, or by the lane sum) and then by lane 1. It does not make a saturated or non-proportional signal valid.']);
+    lines.push(['No p-values are reported: n, mean, SD and CV are given so the statistics can be done in the analysis software, where the design is known.']);
+    return lines.map(l => l.map(v => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v)).join(',')).join('\r\n');
+  }
+
+  function quantJson(blocks, linByBlock) {
+    const s = App.quantSettings();
+    return {
+      software: 'BlotFigure ' + App.VERSION,
+      generatedAt: new Date().toISOString(),
+      method: s.method,
+      control: s.controlRow ? { row: (App.row(s.controlRow) || {}).name || null, source: s.controlSource } : null,
+      totalProteinImage: s.totalImage ? ((App.images.get(s.totalImage) || {}).name || null) : null,
+      parameters: App.processingLog().quantification,
+      columns: blocks.map((blk, bi) => ({
+        id: blk.id,
+        title: (blk.column && blk.column.title) || '',
+        lanes: qLaneNames(blk),
+        rows: blk.rows.map(x => ({
+          protein: x.row.name || null,
+          membrane: qMembrane(x),
+          exposure: qExpo(x),
+          volumes: x.d.map(v => (v ? { volume: v.volume, background: v.background, bgNoise: v.bgNoise, snr: v.snr, widthPx: v.widthPx, excludedFrac: v.excludedFrac, saturated: v.saturated, grade: v.grade, quantifiable: v.quantifiable } : null)),
+          denominator: x.denom || null,
+          normalised: x.norm || null,
+          conditions: (x.conditions || []).map(c => ({ condition: c.text || `lanes ${c.from}-${c.to}`, from: c.from, to: c.to, n: c.n, mean: c.mean, sd: c.sd, cv: c.cv, values: c.values }))
+        })),
+        linearity: (linByBlock[bi] || []).map(o => ({ protein: o.row.name || null, mode: o.fit.mode, exposures: o.fit.exposures || null, worst: o.fit.worst || o.fit.fit, verdict: o.fit.verdict })),
+        warnings: qWarnings(blk, linByBlock[bi]).map(w => qWarnText(w, true))
+      }))
+    };
+  }
+
+  /* the Methods sentence set a reviewer will ask for — English, because the manuscript is */
+  function quantMethods(blocks, linByBlock) {
+    const s = App.quantSettings(), v = App.VERSION;
+    const bits = [];
+    bits.push(`Band intensities were quantified in BlotFigure ${v} on the exposure shown in each panel. Each band was integrated over a window taken from its own profile (full width at 35% of the peak, mirrored about the peak and limited to 0.16–1.00 of the lane spacing), above a background estimated from the columns flanking that band (median; MAD as its noise). Saturated pixels were excluded from the sum; a lane with more than 2% clipped pixels is reported as a lower bound and no ratio is given.`);
+    const eight = blocks.some(b => b.rows.some(x => x.rec && x.rec.bits != null && x.rec.bits <= 8));
+    if (eight) bits.push('Some membranes were recorded at 8 bits per channel; their volumes are therefore compared only within the same membrane.');
+    if (s.method === 'control') {
+      const c = App.row(s.controlRow);
+      if (c) bits.push(`Signals were normalised to ${c.name || 'the loading control'} on the same membrane${s.controlSource === 'suggested' ? ' (chosen by protein name)' : ''}, and are expressed relative to lane 1.`);
+    } else if (s.method === 'total') {
+      const t = App.images.get(s.totalImage);
+      bits.push(`Signals were normalised to total protein in the same lanes${t ? ` (${t.name})` : ''}, and are expressed relative to lane 1.`);
+      // a stain has no band to follow: say how it was integrated, or the window sentence above would be wrong
+      bits.push('Total protein was integrated over the full width of each lane, above the background of the gaps between lanes.');
+    } else if (s.method === 'sum') {
+      bits.push('Signals were normalised to the sum of all lanes on the same membrane, and are expressed relative to lane 1.');
+    } else {
+      bits.push('Volumes are reported without normalisation.');
+    }
+    const lines = (linByBlock || []).flat();
+    const okNames = lines.filter(o => o.fit.verdict === 'proportional').map(o => o.row.name).filter(Boolean);
+    const badNames = lines.filter(o => o.fit.verdict === 'deviates').map(o => o.row.name).filter(Boolean);
+    if (okNames.length) bits.push(`Signal was proportional to exposure time across the available exposures for ${okNames.join(', ')}${badNames.length ? `, but not for ${badNames.join(', ')}` : ''} (linear regression through the origin; R² ≥ 0.98 and residuals ≤ 10% of the strongest point).`);
+    else if (badNames.length) bits.push(`Signal was not proportional to exposure time for ${badNames.join(', ')} (linear regression through the origin; R² ≥ 0.98 and residuals ≤ 10% of the strongest point); the affected ratios should be read with caution.`);
+    const conds = [];
+    (blocks || []).forEach(b => b.rows.forEach(x => (x.conditions || []).forEach(c => { if (c.n) conds.push(`${x.row.name || 'unnamed'} ${c.text || `lanes ${c.from}-${c.to}`}: n = ${c.n}`); })));
+    if (conds.length) bits.push(`Replicates are reported as mean ± SD with CV (${conds.join('; ')}).`);
+    bits.push('No significance test was applied by the software.');
+    return bits.join(' ');
+  }
+
+  // one pass over every column, shared by the panel and the exports
+  function qAll() {
+    const blocks = App.quantData(), lin = blocks.map(b => qLinearity(b));
+    return { blocks, lin };
+  }
+
   function exportQuant() {
-    const lines = [];
-    App.layoutColumns().forEach(column => {
-    const st = App.columnData(column.id), C = App.columns(column.id), fl = C.vis;
-    if (!C.rows.length) return;
-    if (App.layoutColumns().length > 1) lines.push(['layout column', column.id, columnName(column)]);
-    const data = C.rows.map((r, ri) => {
-      const b = App.blot(r.blot), rec = App.images.get(r.img);
-      // (in the box's own frame: a tilted box is read along its tilt, as in the figure)
-      const lanes = C.src[ri].map(s => s && s.pc && { F: App.segFrame(s.pc, s.sg), uc: s.u, hw: App.segPitch(s.sg) * 0.33,
-        vTop: s.sg.vc - App.boxAbove(r, s.sg), vBot: s.sg.vc + App.boxBelow(r, s.sg), b0: s.sg.vc + s.sg.b0, b1: s.sg.vc + s.sg.b1 });
-      return { r, b, rec, d: WB.densitometry(rec.img, rec.cs, lanes) };
-    });
-    const head = ['protein', 'membrane', 'exposure'].concat(fl.map(j => st.lanes[j - 1].name || 'lane ' + j));
-    lines.push(head);
-    data.forEach(x => lines.push([x.r.name || '?', App.blotNameEn(x.b), App.expoLabel(x.rec)].concat(x.d.map(v => (v ? v.volume.toFixed(2) + (v.saturated ? ' (SAT)' : '') : '')))));
-    // normalized to a same-membrane loading control, then to the first lane
-    const ctrls = data.filter(x => App.isLoading(x.r));
-    data.filter(x => !App.isLoading(x.r)).forEach(x => {
-      const c = ctrls.find(c => c.b === x.b); if (!c) return;
-      const ratio = x.d.map((v, i) => (v && c.d[i] ? v.volume / Math.max(1e-9, c.d[i].volume) : null)), r0 = ratio.find(v => v) || 1;
-      lines.push([`${x.r.name}/${c.r.name} (rel. lane 1)`, App.blotNameEn(x.b), ''].concat(ratio.map(v => (v == null ? '' : (v / r0).toFixed(3)))));
-    });
-    lines.push([]); });
-    lines.push(['Volumes = sum of (pixel - local background) over the band, on the exposure shown in the figure. SAT = saturated pixels: do not quantify.']);
-    const csv = lines.map(l => l.map(v => /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v).join(',')).join('\r\n');
-    G.Export.download(new Blob(['﻿' + csv], { type: 'text/csv' }), 'blot_quantification.csv');
-    toast(L('已导出定量 CSV（用于参考；正式定量请用 ≥3 次独立实验）', 'Exported the densitometry CSV (for reference; quantify from ≥3 independent experiments)'), 3600);
+    const { blocks, lin } = qAll();
+    if (!blocks.length) { toast(L('还没有可定量的行', 'No rows to quantify yet')); return; }
+    G.Export.download(new Blob(['﻿' + quantCsv(blocks, lin)], { type: 'text/csv' }), 'blot_quantification.csv');
+    toast(L('已导出定量 CSV（含背景、积分宽度、归一化与线性检验；正式定量请用 ≥3 次独立实验）',
+      'Exported the densitometry CSV (background, integration width, normalisation and the linearity check; quantify from ≥3 independent experiments)'), 4000);
+  }
+  function exportQuantJson() {
+    const { blocks, lin } = qAll();
+    if (!blocks.length) { toast(L('还没有可定量的行', 'No rows to quantify yet')); return; }
+    G.Export.download(new Blob([JSON.stringify(quantJson(blocks, lin), null, 2)], { type: 'application/json' }), 'blot_quantification.json');
+    toast(L('已导出定量 JSON', 'Exported the quantification JSON'));
   }
 
   G.UI = { focusProtein, finishImages: async () => { if(App.reviewReturnStep>=3 && S().blots.every(b=>b.boxesReady)) {await App.ensurePrepared(); S().step=Math.max(S().step,App.reviewReturnStep);App.commit();openStep(App.reviewReturnStep);}else await nextStep(1);}, addFiles, markerPopover, flushPending: async () => { if(edit)closeEd(false);closePop(true);if(App.mode==='pieces'){const b=App.blot(App.viewBlot),pcs=G.View.piecesEnd(true);await new Promise(resolve=>applyPieces(b,pcs,false,resolve));if(App.curStep===2)G.View.piecesStart();}if(S())App.commit();}, toast, editRowName, openEd, markPicker, openStep, nextStep, lastFig: () => lastFig, preflight,

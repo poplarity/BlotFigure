@@ -167,7 +167,10 @@ export async function layoutChecks(browser, base) {
         const downloads=[], original=Export.download;
         Export.download=(blob,name)=>downloads.push({blob,name});
         try {
-          document.getElementById('btnQuant').click(); document.getElementById('btnRaw').click();
+          // btnQuant opens the quantification panel now; the CSV comes from its own button, and the panel has
+          // to be closed again or it covers the row menu the next check clicks
+          document.getElementById('btnQuant').click(); document.getElementById('qCsv').click();
+          document.getElementById('qClose').click(); document.getElementById('btnRaw').click();
           const start=performance.now();while(downloads.length<2 && performance.now()-start<10000) await new Promise(r=>setTimeout(r,20));
           const csv=await downloads.find(x=>x.name.endsWith('.csv'))?.blob.text();
           const f=BRender.build(false),c=await Export.svgToCanvas(f.svg,f.w,f.h,150);
