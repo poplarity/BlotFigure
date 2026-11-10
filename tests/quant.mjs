@@ -165,6 +165,17 @@ export async function quantChecks(browser, base) {
       panel.method === 'control' && !!panel.suggested && panel.control === panel.suggested && panel.source === 'suggested'
         && panel.rows >= 2 && panel.lin >= panel.rows - 1 && !panel.dilDisabled,
       JSON.stringify(panel));
+    // "not enough points" reads as a broken tool when the bands look even: a point is an exposure, and the
+    // reason has to name the exposures that were lost, not just count what is left
+    const why = await page.evaluate(() => [...document.querySelectorAll('#qLin .qlin')].map(b => ({
+      verdict: b.children[1].textContent.trim(),
+      why: b.querySelector('.qwhy') ? b.querySelector('.qwhy').textContent.trim() : '',
+      note: !!document.querySelector('#qLin .qlin-note')
+    })));
+    check('a row that cannot be checked says why (one exposure, or the saturated exposures by name)',
+      why.length >= 4 && why.some(w => /usable/.test(w.why)) && why.some(w => /one exposure/.test(w.why))
+        && why.every(w => !/not enough/.test(w.verdict) || w.why.length > 0) && why.some(w => w.note),
+      JSON.stringify(why));
     // choosing the control is the user's decision, and the export records that it was a decision
     const otherControl = await page.evaluate(() => {
       const b = BApp.quantData()[0], cur = BApp.quantSettings().controlRow;

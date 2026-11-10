@@ -279,11 +279,14 @@ body.quant-mode #figCol .col-head { gap: 9px; }
 
 /* one line per protein: a verdict is per row, so a single "check" button would have nothing to report */
 .qlin-list { display: grid; gap: 3px; }
-.qlin { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: none; background: none;
+.qlin-note { margin: 0 0 3px 6px; font-size: 11.5px; }
+.qlin { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; width: 100%; text-align: left; border: none; background: none;
   padding: 5px 6px; border-radius: var(--r-sm); cursor: pointer; font-size: 12.3px; }
 .qlin:hover { background: #f5f7fa; }
 .qlin.sel { background: var(--accent-bg); }
 .qlin .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+/* the reason names the exposures that were lost, so it usually needs a line of its own */
+.qlin .qwhy { flex: 1 1 100%; min-width: 0; font-size: 11.5px; line-height: 1.45; color: var(--muted); }
 .qlin .good { color: var(--ok); } .qlin .bad { color: var(--warn); } .qlin .none { color: var(--faint); }
 
 /* ---------- the numbers column ---------- */

@@ -366,6 +366,18 @@
   const qUsable = f => !!(f && f.worst && f.worst.r2 != null);
   const qWord = f => !qUsable(f) ? L('点数不足', 'not enough points')
     : (f.verdict === 'proportional' ? L('成正比', 'proportional') : L('偏离', 'deviates'));
+  /* A "point" is one exposure, not one band: saying only "not enough points" leaves the user staring at a
+   * perfectly even row of bands and concluding the tool is broken. Name the reason instead. */
+  const qWhy = f => {
+    if (!f) return '';
+    if (f.reason === 'factors') return f.exposures <= 1
+      ? L('只有一次曝光', 'only one exposure')
+      : L('几次曝光的时长相同', 'the exposures share one time');
+    const n = Math.max(0, ...f.fits.map(y => y.n));
+    const dead = (f.used || []).map((u, k) => (u === 0 ? f.labels[k] : null)).filter(Boolean);
+    return L(`只有 ${n} 个可用点`, `only ${n} usable`)
+      + (dead.length ? L(`（${dead.join('、')} 里已过曝）`, ` (${dead.join(', ')} saturated)`) : '');
+  };
   const qMark = f => !qUsable(f) ? '·' : (f.verdict === 'proportional' ? '✓' : '⚠');
   const qTone = f => !qUsable(f) ? 'none' : (f.verdict === 'proportional' ? 'ok' : 'bad');
   // the CSV calls these "rel. lane 1"; the table uses the same divisor, or the two numbers would disagree
@@ -472,16 +484,19 @@
       sel.onchange = e => { App.setQuant({ totalImage: e.target.value || null }); qRender(); };
     }
     // one line per protein: the verdict is per row, so a single "check" button could only report the worst case
-    $('qLin').innerHTML = flat.map(({ x }) => {
-      const f = fitById.get(x.row.id), w = f && f.worst;
-      const detail = !w
-        ? (f && f.reason === 'factors' ? L('曝光时长相同或未知', 'one exposure time')
-          : L(`只有 ${f ? Math.max(0, ...f.fits.map(y => y.n)) : 0} 个可用点`, `only ${f ? Math.max(0, ...f.fits.map(y => y.n)) : 0} usable`))
-        : `R² ${w.r2.toFixed(3)} · ${L('残差', 'residual')} ${(w.maxDev * 100).toFixed(0)}%`;
-      return `<button class="qlin${qState.row === x.row.id ? ' sel' : ''}" data-row="${esc(x.row.id)}">`
+    // the "one point = one exposure" line only appears when something cannot be checked, which is the moment
+    // "not enough points" would otherwise read as "the bands look fine, the tool must be broken"
+    const anyNone = flat.some(({ x }) => !qUsable(fitById.get(x.row.id)));
+    $('qLin').innerHTML = (anyNone ? `<p class="hint qlin-note">${L('一个点 = 一次曝光', 'One point is one exposure')}</p>` : '')
+      + (flat.map(({ x }) => {
+      const f = fitById.get(x.row.id), w = f && f.worst, why = qWhy(f);
+      // a reason long enough to name the lost exposures gets its own line; the verdict stays on the first one
+      return `<button class="qlin${qState.row === x.row.id ? ' sel' : ''}" data-row="${esc(x.row.id)}" title="${esc(why)}">`
         + `<span class="nm">${esc(qNm(x.row))}</span><span class="${qTone(f)}">${qWord(f)}</span>`
-        + `<span class="none">${esc(detail)}</span></button>`;
-    }).join('') || `<p class="hint">${L('没有可检验的行', 'No rows to check')}</p>`;
+        + (w ? `<span class="none">R² ${w.r2.toFixed(3)} · ${L('残差', 'residual')} ${(w.maxDev * 100).toFixed(0)}%</span>`
+          : (why ? `<span class="qwhy">${esc(why)}</span>` : ''))
+        + `</button>`;
+      }).join('') || `<p class="hint">${L('没有可检验的行', 'No rows to check')}</p>`);
     // conditions: the rows the figure already labels, not a second editor
     const cur = flat.find(o => o.x.row.id === qState.row);
     const groups = cur ? (App.columnData(cur.b.id).groups || []) : [];
@@ -585,7 +600,7 @@
       + conds.map(c => `<tr><td>${esc(c.text || `${L('第', 'lanes ')}${c.from}–${c.to}`)}</td><td>${c.n}</td><td>${qFmt(c.mean)}</td>`
         + `<td>${c.sd == null ? '—' : qFmt(c.sd)}</td><td>${c.cv == null ? '—' : (c.cv * 100).toFixed(1) + '%'}</td></tr>`).join('')
       + `</tbody></table>` : '';
-    const lin = f ? `<p class="qd-line">${L('线性', 'Linearity')}：${qWord(f)}${f.worst ? ` · R² ${f.worst.r2.toFixed(3)} · ${L('残差', 'residual')} ${(f.worst.maxDev * 100).toFixed(0)}% · n=${f.worst.n}` : ''}</p>` : '';
+    const lin = f ? `<p class="qd-line">${L('线性', 'Linearity')}：${qWord(f)}${f.worst ? ` · R² ${f.worst.r2.toFixed(3)} · ${L('残差', 'residual')} ${(f.worst.maxDev * 100).toFixed(0)}% · n=${f.worst.n}` : (qWhy(f) ? ` · ${qWhy(f)}` : '')}</p>` : '';
     const mine = b.warnings.filter(w => w.row && w.row.id === x.row.id).map(w => qWarnText(w, qIsEn()));
     host.innerHTML = `<div class="qd-h"><b>${esc(qNm(x.row))}</b><span class="qd-sub">${esc(x.blot ? App.blotNameEn(x.blot) : '')}${x.rec ? ' · ' + esc(App.expoLabel(x.rec)) : ''}</span></div>`
       + `<p class="qd-sub">${showNorm ? L('归一化值（相对第 1 个可定量道）', 'Normalised (relative to the first quantifiable lane)') : L('体积', 'Volume')}</p>`

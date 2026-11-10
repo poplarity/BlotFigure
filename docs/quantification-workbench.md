@@ -302,7 +302,8 @@ const f = lastFig;   // { rowBoxes:[{id, columnId, x0, x1, y, h}], laneX, laneW,
 |---|---|---|---|
 | `no-conditions` | 无条件行 | 成图还没有条件行。第 5 步加一个条件行，就能按重复统计。`[ 去第 5 步 ]` | No condition rows yet. Add one in step 5 to get replicate statistics. |
 | `empty-row` | 某行全部道都空 | `<行名>`：这一行没有可量的条带。 | `<row>`: this row has no measurable band. |
-| `no-exposures` | 该行只有一张图 | `<行名>`：只有一次曝光，无法做多曝光线性检验。可填稀释序列。 | Only one exposure: no multi-exposure linearity check. A dilution series would work. |
+| `no-exposures` | 该行只有一张图 | `<行名>` 下面一行：只有一次曝光。可填稀释序列。 | only one exposure |
+| `few-points` | 有过曝曝光被排除 | `<行名>` 下面一行：只有 1 个可用点（10 s、1 min 里已过曝） | only 1 usable (10 s, 1 min saturated) |
 | `all-saturated` | 全部曝光都饱和 | `<行名>`：每一次曝光都过曝，请回第 3 步换更短的曝光。`[ 去第 3 步 ]` | Every exposure is saturated… |
 
 界面文案约定：

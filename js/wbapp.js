@@ -1940,18 +1940,20 @@
     if (idx < 0 || !row.img) return null;
     const ex = App.rowExpo(row).filter(e => e && isFinite(e.factor));
     const specs = (C.src[idx] || []).map(s => App.quantLaneSpec(row, s, App.images.get(row.img)));
+    // (labels and `used` are for the wording only: "not enough points" has to say which exposures were lost)
+    const labels = ex.map(e => App.expoLabel(App.images.get(e.id)));
     // three exposures that all carry factor 1 are three pictures of one exposure time, not a series
-    if (new Set(ex.map(e => e.factor)).size < 3) return { mode: 'exposure', exposures: ex.length, fits: specs.map(() => ({ n: 0, r2: null })), worst: null, reason: 'factors', verdict: 'not enough points' };
-    const series = specs.map(() => []);
-    ex.forEach(e => {
+    if (new Set(ex.map(e => e.factor)).size < 3) return { mode: 'exposure', exposures: ex.length, labels, used: [], fits: specs.map(() => ({ n: 0, r2: null })), worst: null, reason: 'factors', verdict: 'not enough points' };
+    const series = specs.map(() => []), used = ex.map(() => 0);
+    ex.forEach((e, k) => {
       const rec = App.images.get(e.id);
       if (!rec || !rec.cs) return;
-      WB.quantify(rec.img, rec.cs, specs).forEach((v, i) => { if (v && v.quantifiable) series[i].push({ x: e.factor, y: v.volume }); });
+      WB.quantify(rec.img, rec.cs, specs).forEach((v, i) => { if (v && v.quantifiable) { series[i].push({ x: e.factor, y: v.volume }); used[k]++; } });
     });
     const fits = series.map(pts => WB.linearFit(pts));
     const usable = fits.filter(f => f.r2 != null);
     const worst = usable.length ? usable.reduce((a, b) => (b.r2 < a.r2 ? b : a)) : null;
-    return { mode: 'exposure', exposures: ex.length, fits, worst, verdict: WB.linearVerdict(worst || { r2: null }) };
+    return { mode: 'exposure', exposures: ex.length, labels, used, fits, worst, verdict: WB.linearVerdict(worst || { r2: null }) };
   };
   /* a declared dilution series: volume must scale with the fraction loaded */
   App.quantDilution = function (row, fractions) {
