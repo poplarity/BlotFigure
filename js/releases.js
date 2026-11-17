@@ -1,6 +1,20 @@
 /* Local bilingual release summaries, available without network access. */
 window.BlotFigureReleases = [
   {
+    "version": "0.15.0",
+    "date": "2026-11-16",
+    "zh": [
+      "成图后可进入定量工作台，统一选择内参，实时预览并导出散点/柱形定量图及可追溯数据。",
+      "每蛋白固定尺寸定量框，支持直接拖动/缩放和局部背景；内参原位显示真实分母，饱和/越界/重叠道明确排除。",
+      "条件名称可选左右与对齐方式，蛋白框显示源像素宽高；保留五步成图流程及独立曝光。"
+    ],
+    "en": [
+      "Optional post-figure quantification with one loading control, live point/bar plots and traceable PNG/SVG/CSV/JSON exports.",
+      "Fixed-size per-protein ROIs, direct resizing and local background; visible control signals and explicit saturation, boundary and overlap exclusions.",
+      "Condition-name side/alignment and source-pixel crop dimensions, preserving the five-step figure workflow and independent exposures."
+    ]
+  },
+  {
     "version": "0.14.0",
     "date": "2026-10-27",
     "zh": [

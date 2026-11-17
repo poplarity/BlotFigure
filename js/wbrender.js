@@ -54,7 +54,7 @@
   // ---- multi-line labels (as GelFigure) ----
   const LEAD = 1.18;   // line spacing, × font size
   // lines whose last baseline is y (they stack upwards from the line they label)
-  const textLines = (lines, x, y, pt, anchor, extra) => '<g data-pptx-lines="1">' + lines.map((t, i) => text(t, x, y - (lines.length - 1 - i) * pt * LEAD, pt, anchor, extra)).join('') + '</g>';
+  const textLines = (labels, positionX, baselineY, size, anchor, extra, leading = size * LEAD) => '<g data-pptx-lines="1">' + labels.map((label, index) => text(label, positionX, baselineY - (labels.length - 1 - index) * leading, size, anchor, extra)).join('') + '</g>';
   function vertical(t, pt) {
     mctx.font = `${pt * 4}px ${FT.fontStack(family)}`;
     const m=mctx.measureText(t);
@@ -292,26 +292,74 @@
       grow(0, yTop - lp, W, yTop);
       yTop -= lp * 1.25;
     }
-    const conds = S.conditions.map((c, r) => Object.assign({ r }, c)).filter(c => P || c.name || c.values.some(v => v));
-    // Same compact placement as GelFigure: units sit beside the bands, independently
-    // of lane names. Only a real collision with the condition names lifts that table.
-    if(hasUnit && !mwRight && conds.length) {
-      const headerTop=unitY-vertical(unitText,mp).ascent;
-      let cy=yTop,shift=0;
-      for(let k=conds.length-1;k>=0;k--){const c=conds[k],cp=c.pt||pt,nm=c.name||(P?L('条件','Condition'):'');
-        if(nm)shift=Math.max(shift,cy+vertical(nm,cp).descent+.5+Math.max(mp,cp)/8-headerTop);cy-=cp*1.3;}
-      yTop-=shift;
-    }
-    for (let k = conds.length - 1; k >= 0; k--) {
-      const c = conds[k], cp = c.pt || pt;
-      lanes.forEach(j => {
-        const v = c.values[j - 1] || '', hit = P ? `<rect x="${f(X.get(j) - laneW * 0.45)}" y="${f(yTop - cp)}" width="${f(laneW * 0.9)}" height="${f(cp * 1.25)}" fill="transparent"/>` : '';
-        if (v || P) els.push(ed(`data-edit="cond" data-r="${c.r}" data-j="${j}"`, hit + text(v || '·', X.get(j), yTop, cp, 'middle', v ? ` fill="${FT.color(c.color)}"` : ph)));
+    const conditionWidths = { left: 0, right: 0 };
+    const conditions = S.conditions.map((condition, rowIndex) => ({ condition, rowIndex }))
+      .filter(({ condition }) => P || condition.name || condition.values.some(value => value))
+      .map(({ condition, rowIndex }) => {
+        const size = condition.pt || pt, side = condition.nameSide === 'right' ? 'right' : 'left';
+        const alignment = ['left', 'center', 'right'].includes(condition.nameAlign) ? condition.nameAlign : side === 'right' ? 'left' : 'right';
+        const fraction = { left: 0, center: 0.5, right: 1 }[alignment], anchor = { left: 'start', center: 'middle', right: 'end' }[alignment];
+        const titleRuns = condition.name ? G.NameText.runs(condition) : P ? [{ text: L('条件', 'Condition') }] : [];
+        const title = { name: G.NameText.plain(titleRuns), nameRuns: titleRuns };
+        const labels = title.name ? FT.lines(title, title.name.split('\n')) : [];
+        const lines = labels.map(label => {
+          const metrics = FT.metrics(label, size, family);
+          const heights = metrics.runs.map(run => ({ ...vertical(run.text, run.pt), shift: run.shift }));
+          return { metrics, ascent: Math.max(0, ...heights.map(height => height.ascent - height.shift)), descent: Math.max(0, ...heights.map(height => height.descent + height.shift)) };
+        });
+        const leading = Math.max(size * LEAD, ...lines.slice(1).map((label, index) => lines[index].descent + label.ascent + size * 0.15));
+        lines.forEach((label, index) => {
+          const offset = (labels.length - 1 - index) * leading;
+          label.top = -offset - label.ascent;
+          label.bottom = -offset + label.descent;
+        });
+        const valueHeight = vertical('Mg', size);
+        const ascent = Math.max(valueHeight.ascent, ...lines.map(label => -label.top)), descent = Math.max(valueHeight.descent, ...lines.map(label => label.bottom));
+        conditionWidths[side] = Math.max(conditionWidths[side], ...lines.map(label => label.metrics.width));
+        return { condition, rowIndex, size, side, fraction, anchor, labels, lines, leading, ascent, descent };
+      }).reverse();
+    let previousCondition = null;
+    conditions.forEach(condition => {
+      if (previousCondition) yTop = previousCondition.baseline - Math.max(previousCondition.size * 1.3,
+        previousCondition.ascent + condition.descent + Math.max(previousCondition.size, condition.size) * 0.15);
+      condition.baseline = yTop;
+      const width = conditionWidths[condition.side];
+      condition.titleX = (condition.side === 'right' ? W + st.labelGapPt * 2 : -st.labelGapPt * 2 - width) + condition.fraction * width;
+      condition.lines.forEach(label => {
+        const start = condition.titleX - condition.fraction * label.metrics.width;
+        label.left = start + label.metrics.left;
+        label.right = start + label.metrics.right;
       });
-      const nm = c.name || (P ? L('条件', 'Condition') : '');
-      if (nm) { els.push(ed(`data-edit="condname" data-r="${c.r}"`, text(c.name?FT.label(c):nm, -st.labelGapPt * 2, yTop, cp, 'end', c.name ? ` fill="${FT.color(c.color)}"` : ph))); grow(-st.labelGapPt * 2 - measure(nm, cp), yTop - cp, 0, yTop); }
-      yTop -= cp * 1.3;
+      previousCondition = condition;
+    });
+    let conditionShift = 0;
+    if (hasUnit && conditions.length) {
+      const headerX = mwRight ? W + st.tickLenPt + 2.5 : -st.tickLenPt - 2.5;
+      const headerWidth = measure(unitText, mp), headerHeight = vertical(unitText, mp);
+      const headerLeft = mwRight ? headerX : headerX - headerWidth, headerRight = mwRight ? headerX + headerWidth : headerX;
+      const headerTop = unitY - headerHeight.ascent, headerBottom = unitY + headerHeight.descent;
+      const candidates = conditions.filter(condition => (condition.side === 'right') === mwRight)
+        .flatMap(condition => condition.lines.filter(label => label.left < headerRight && label.right > headerLeft)
+          .map(label => ({ top: condition.baseline + label.top, bottom: condition.baseline + label.bottom, gap: 0.5 + Math.max(mp, condition.size) / 8 })));
+      if (candidates.some(label => label.top < headerBottom && label.bottom + label.gap > headerTop)) {
+        conditionShift = Math.max(0, ...candidates.map(label => label.bottom + label.gap - headerTop));
+      }
     }
+    conditions.forEach(({ condition, rowIndex, size, anchor, labels, lines, leading, titleX, baseline, ascent, descent }) => {
+      const conditionY = baseline - conditionShift;
+      lanes.forEach(lane => {
+        const value = condition.values[lane - 1] || '';
+        const hit = P ? `<rect x="${f(X.get(lane) - laneW * 0.45)}" y="${f(conditionY - size)}" width="${f(laneW * 0.9)}" height="${f(size * 1.25)}" fill="transparent"/>` : '';
+        if (value || P) els.push(ed(`data-edit="cond" data-r="${rowIndex}" data-j="${lane}"`, hit + text(value || '·', X.get(lane), conditionY, size, 'middle', value ? ` fill="${FT.color(condition.color)}"` : ph)));
+      });
+      if (labels.length) {
+        els.push(ed(`data-edit="condname" data-r="${rowIndex}"`, textLines(labels, titleX, conditionY, size, anchor, condition.name ? ` fill="${FT.color(condition.color)}"` : ph, leading)));
+        lines.forEach(label => grow(label.left, conditionY + label.top, label.right, conditionY + label.bottom));
+      }
+      grow(0, conditionY - ascent, W, conditionY + descent);
+    });
+    if (previousCondition) yTop = previousCondition.baseline - conditionShift - Math.max(previousCondition.size * 1.3,
+      previousCondition.ascent + lp * 0.3 + Math.max(previousCondition.size, lp) * 0.15);
     // placeholders count the lanes shown (hidden ladder lanes skipped), the order bulk paste fills them in (with the
     // lane numbers printed: a dot, not the number twice)
     const names = lanes.map((j, i) => {const l=S.lanes[j-1];return l.name?(st.laneItalic?{name:l.name,nameRuns:l.nameRuns,italicDefault:true}:FT.label(l)):(P?(st.laneNumbers?'·':String(i+1)):'');});

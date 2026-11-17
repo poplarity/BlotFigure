@@ -263,6 +263,9 @@
   window.addEventListener('keydown', e => {
     const tag = (e.target.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable || composing(e) || e.defaultPrevented || e.repeat) return;
+    if (inQuant() && (e.key === 'Backspace' || e.key === 'Delete' || (e.altKey && ['ArrowUp', 'ArrowDown'].includes(e.key)))) {
+      e.preventDefault(); return;
+    }
     if ((e.key === 'Backspace' || e.key === 'Delete') && S() && App.boxSelection().length && !App.mode && (e.target === $('previewBox') || e.target === document.body)) { e.preventDefault(); deleteSelectedBoxes(); return; }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? App.redo() : App.undo(); }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); App.redo(); }
@@ -325,7 +328,7 @@
       toast(L(`已导出 ${dpi} dpi ${fmt}`, `Exported ${dpi} dpi ${fmt}`) + (eff < dpi ? L(`（条带本身 ${eff} dpi）`, ` (the bands themselves are ${eff} dpi)`) : ''));
     } catch (e) { alert(e.message); } finally { App.busy(false); }
   }
-  $('btnPNG').onclick = () => exportRaster('png');
+  $('btnPNG').onclick = () => inQuant() && qState.preview === 'chart' ? qExportPlot('png') : exportRaster('png');
   $('btnTIFF').onclick = () => exportRaster('tiff');
   $('btnPPTX').onclick=async()=>{
     if(needFigure() || !(await preflight()))return;
@@ -333,7 +336,7 @@
     try { await new Promise(r=>setTimeout(r,20));await G.PPTX.exportFile(baseName()+'.pptx');G.dispatchEvent(new Event('blotfigure-figure-exported'));toast(L('已导出：文字可编辑，图片格式 → 裁剪可恢复全图','Exported: edit text or use Picture Format → Crop to restore the full picture'),5000); }
     catch(e){toast(L('PPT 导出失败：','PPT export failed: ')+e.message,6000);}finally{App.busy(false);}
   };
-  $('btnSVG').onclick = async () => { if (needFigure() || !(await preflight())) return;try{G.Export.exportSVG(G.BRender.build(false).svg, baseName() + '.svg');G.dispatchEvent(new Event('blotfigure-figure-exported')); toast(L('已导出 SVG', 'Exported SVG'));}catch(e){toast(L('SVG 导出失败：','SVG export failed: ')+e.message,5000);} };
+  $('btnSVG').onclick = async () => { if (inQuant() && qState.preview === 'chart') return qExportPlot('svg'); if (needFigure() || !(await preflight())) return;try{G.Export.exportSVG(G.BRender.build(false).svg, baseName() + '.svg');G.dispatchEvent(new Event('blotfigure-figure-exported')); toast(L('已导出 SVG', 'Exported SVG'));}catch(e){toast(L('SVG 导出失败：','SVG export failed: ')+e.message,5000);} };
   $('btnLog').onclick = () => {
     if (needFigure()) return;
     G.Export.download(new Blob([JSON.stringify(App.processingLog(), null, 2)], { type: 'application/json' }), baseName() + '_processing_log.json');
@@ -349,8 +352,8 @@
    * An optional workspace, not a sixth step: the five steps produce the figure, and this reads numbers out of
    * the finished figure. The panel, the table, the CSV, the JSON and the methods paragraph are all built from
    * App.quantData(), so what the user reads on screen and what lands in the supplement cannot drift apart. */
-  const qState = { row: null, lane: null, view: 'volume' };
-  let qRaf = 0, qSnap = null;
+  const qState = { row: null, lane: null, view: 'norm', preview: 'figure', scope: 'current', sourceChanged: false };
+  let qRaf = 0, qSnap = null, qLastSignature = null;
   const inQuant = () => document.body.classList.contains('quant-mode');
   const qUnnamed = () => L('（未命名）', '(unnamed)');
   const qNm = r => (r && r.name) || qUnnamed();
@@ -363,28 +366,46 @@
     if (a >= 0.01) return v.toFixed(3);
     return v.toExponential(1);
   };
-  const qUsable = f => !!(f && f.worst && f.worst.r2 != null);
-  const qWord = f => !qUsable(f) ? L('点数不足', 'not enough points')
+  const qFit = f => f && (f.worst || f.fit);
+  const qUsable = f => !!(qFit(f) && qFit(f).r2 != null);
+  const qCheckLabel = f => f && f.mode === 'dilution' ? L('B · 上样量', 'B · Amount loaded') : L('A · 曝光时间', 'A · Exposure time');
+  const qWord = f => f && f.verdict === 'partial' ? L('部分可检验', 'partially testable')
+    : !qUsable(f) ? L('无法检验', 'not testable')
     : (f.verdict === 'proportional' ? L('成正比', 'proportional') : L('偏离', 'deviates'));
   /* A "point" is one exposure, not one band: saying only "not enough points" leaves the user staring at a
    * perfectly even row of bands and concluding the tool is broken. Name the reason instead. */
   const qWhy = f => {
     if (!f) return '';
-    if (f.reason === 'factors') return f.exposures <= 1
+    if (f.mode === 'dilution') {
+      if (f.fit.reason === 'no-signal') return L('没有可用于验证的正信号', 'No positive signal to validate');
+      return qUsable(f) ? '' : L('至少需要 3 个不同且可定量的上样比例', 'At least 3 distinct, quantifiable loading fractions are needed');
+    }
+    if (f.reason === 'times-unknown') return L('请填写真实曝光时长；图像推测倍数不能用于检验', 'Enter recorded exposure times; image-derived factors cannot validate linearity');
+    if (f.reason === 'times-repeated') return L('不足 3 种不同曝光时长', 'Fewer than 3 distinct exposure times');
+    if (f.reason === 'exposures') return f.exposures <= 1
       ? L('只有一次曝光', 'only one exposure')
-      : L('几次曝光的时长相同', 'the exposures share one time');
-    const n = Math.max(0, ...f.fits.map(y => y.n));
+      : L(`只有 ${f.exposures} 次曝光，至少需要 3 次`, `Only ${f.exposures} exposures; at least 3 are needed`);
+    if (f.coverage && f.coverage.tested > 0) return f.coverage.tested < f.coverage.total
+      ? L(`仅 ${f.coverage.tested}/${f.coverage.total} 道可检验，其余未验证`, `Only ${f.coverage.tested}/${f.coverage.total} lanes testable; the others remain unvalidated`) : '';
+    if ((f.fits || []).some(fit => fit.reason === 'no-signal')) return L('没有可用于验证的正信号', 'No positive signal to validate');
+    const n = Math.max(0, ...(f.fits || []).map(y => y.n));
     const dead = (f.used || []).map((u, k) => (u === 0 ? f.labels[k] : null)).filter(Boolean);
     return L(`只有 ${n} 个可用点`, `only ${n} usable`)
-      + (dead.length ? L(`（${dead.join('、')} 里已过曝）`, ` (${dead.join(', ')} saturated)`) : '');
+      + (dead.length ? L(`（${dead.join('、')} 无可用测量）`, ` (${dead.join(', ')} have no usable measurements)`) : '');
   };
-  const qMark = f => !qUsable(f) ? '·' : (f.verdict === 'proportional' ? '✓' : '⚠');
-  const qTone = f => !qUsable(f) ? 'none' : (f.verdict === 'proportional' ? 'ok' : 'bad');
-  // the CSV calls these "rel. lane 1"; the table uses the same divisor, or the two numbers would disagree
-  const qRel = x => {
-    if (!x.norm) return null;
-    const r0 = x.norm.find(v => v != null) || 1;
-    return x.norm.map(v => (v == null ? null : v / r0));
+  const qMark = f => !qUsable(f) || f.verdict === 'partial' ? '·' : (f.verdict === 'proportional' ? '✓' : '⚠');
+  const qTone = f => !qUsable(f) || f.verdict === 'partial' ? 'none' : (f.verdict === 'proportional' ? 'ok' : 'bad');
+  const qRel = x => x.relative;
+  const qFitMap = linearity => {
+    const byRow = new Map();
+    linearity.flat().forEach(entry => {
+      if (!byRow.has(entry.row.id)) byRow.set(entry.row.id, []);
+      byRow.get(entry.row.id).push(entry.fit);
+    });
+    return new Map([...byRow].map(([id, checks]) => {
+      const selected = checks.find(fit => fit.verdict === 'deviates') || checks.find(fit => fit.mode === 'dilution') || checks[0];
+      return [id, { ...selected, checks }];
+    }));
   };
 
   function qOpen() {
@@ -392,10 +413,14 @@
     if (!App.S.rows.some(r => !r.hidden)) { toast(L('还没有可定量的行', 'No rows to quantify yet')); return; }
     if (App.mode) App.setMode(null);
     if (edit) closeEd(true);
+    G.NoteUI?.suspend();
     document.body.classList.remove('q-set-open');
     document.body.classList.add('quant-mode');
     $('quantPanel').classList.remove('hidden');
     $('quantData').classList.remove('hidden');
+    const signature = App.quantSignature();
+    qState.sourceChanged = qLastSignature != null && signature !== qLastSignature;
+    qLastSignature = signature;
     updatePreview();                 // the stage got wider: the figure has to be re-fitted, not just re-marked
     qRender();
     updateCoach();
@@ -405,6 +430,9 @@
     document.body.classList.remove('quant-mode', 'q-set-open');
     $('quantPanel').classList.add('hidden');
     $('quantData').classList.add('hidden');
+    $('qChartBox').classList.add('hidden');
+    $('previewBox').classList.remove('hidden');
+    qPreviewToolbar(false);
     qState.lane = null;
     prev.querySelectorAll('.q-ov').forEach(n => n.remove());
     updatePreview();
@@ -423,23 +451,31 @@
 
   function qRender() {
     if (!inQuant() || !S()) return;
+    const restoreRoiFocus = document.activeElement?.id === 'qEditRoi';
+    $('qSourceStatus').textContent = qState.sourceChanged ? L('成图已改变，定量已刷新', 'Figure changed; measurements refreshed') : L('与当前成图同步', 'Following the current figure');
     const blocks = App.quantData(), lin = blocks.map(b => qLinearity(b));
-    const fitById = new Map();
-    lin.forEach(arr => arr.forEach(o => fitById.set(o.row.id, o.fit)));
+    const fitById = qFitMap(lin);
     const flat = [];
     blocks.forEach((b, bi) => b.rows.forEach(x => flat.push({ b, bi, x })));
-    if (!qState.row || !flat.some(o => o.x.row.id === qState.row)) qState.row = flat.length ? flat[0].x.row.id : null;
-    if (qState.view === 'norm' && blocks.length && blocks[0].settings.method === 'none') qState.view = 'volume';
+    if (!qState.row || !flat.some(o => o.x.row.id === qState.row)) qState.row = flat.length ? (flat.find(entry => entry.x.target) || flat[0]).x.row.id : null;
+    qState.view = blocks.length && blocks[0].settings.method === 'none' ? 'volume' : 'norm';
     qSnap = { blocks, lin, fitById, flat };
+    $('qRoiRow').innerHTML = flat.map(({ x }) => `<option value="${esc(x.row.id)}"${x.row.id === qState.row ? ' selected' : ''}>${esc(qNm(x.row))}${x.isControl ? L('（内参）', ' (control)') : ''}</option>`).join('');
+    const roiEntry = flat.find(entry => entry.x.row.id === qState.row);
+    $('qRoiSummary').textContent = roiEntry ? (roiEntry.x.roi.mode === 'fixed' ? `${roiEntry.x.roi.width} × ${roiEntry.x.roi.height} px` : L('自适应峰宽', 'Adaptive peak width'))
+      + (roiEntry.x.roi.reviewed ? L(' · 已应用当前来源', ' · applied to current source') : L(' · 请核对定量框', ' · review the ROIs')) : '';
+    $('qRoiEdit').disabled = $('qRoiToolbar').disabled = !roiEntry;
     qPanel(blocks, flat, fitById);
     qTable(blocks, flat, fitById);
     qDetail(flat, fitById);
+    qChart();
     drawQuantOverlay(lastFig);
+    if (restoreRoiFocus) $('qEditRoi')?.focus({ preventScroll: true });
     updateCoach();          // the line reads the data just computed instead of computing it again
   }
 
   const qMethods = () => [
-    ['control', L('内参蛋白', 'Loading control'), L('同一条膜上的一个蛋白，逐道相除', 'One protein on the same membrane, divided lane by lane')],
+    ['control', L('内参蛋白', 'Loading control'), L('选择成图中的一个蛋白，按对应泳道相除', 'One figure protein, divided by corresponding lane')],
     ['total', L('总蛋白', 'Total protein'), L('Ponceau / 考马斯 / stain-free 图逐道积分', 'Ponceau / Coomassie / stain-free, integrated lane by lane')],
     ['sum', L('各道总和', 'Sum of lanes'), L('每行除以本行各道之和', 'Each row divided by its own lane sum')],
     ['none', L('不归一化', 'No normalisation'), L('只给体积，不给比值', 'Volumes only, no ratios')]
@@ -448,19 +484,17 @@
   function qPanel(blocks, flat, fitById) {
     const s = App.quantSettings();
     // four options, each with one line of why: a dropdown would hide the reason a choice matters
-    $('qMethodBox').innerHTML = qMethods().map(([v, t, h]) =>
+    const methods = qMethods().map(([v, t, h]) =>
       `<label class="qopt${s.method === v ? ' on' : ''}"><input type="radio" name="qm" value="${v}"${s.method === v ? ' checked' : ''}>` +
-      `<span><b>${t}</b><small>${h}</small></span></label>`).join('');
+      `<span><b>${t}</b><small>${h}</small></span></label>`);
+    $('qMethodBox').innerHTML = methods[0] + `<details class="adv" id="qOtherMethods"${s.method !== 'control' ? ' open' : ''}><summary>${L('其他归一化方式', 'Other normalisation methods')}</summary>${methods.slice(1).join('')}</details>`;
     // the one field the chosen method needs
     const dep = $('qDep');
     let html = '';
     if (s.method === 'control') {
-      const sug = App.suggestControl();
-      html = `<div class="qrow"><label for="qControl">${L('内参行', 'Control row')}</label><select id="qControl">`
-        + `<option value="">${L('（未指定）', '(not chosen)')}</option>`
-        + flat.map(({ x }) => `<option value="${esc(x.row.id)}">${esc(qNm(x.row))}${x.row.id === sug ? L('（建议）', ' (suggested)') : ''}</option>`).join('')
-        + `</select></div>`
-        + (s.controlRow ? '' : `<p class="hint">${L('名称像内参的只是“建议”，不会自动生效；请在上面选定。', 'A name that looks like a loading control is only a suggestion; choose it above to use it.')}</p>`);
+      html = `<div class="qrow"><label for="qControl">${L('统一内参', 'Figure control')}</label><select id="qControl"><option value="">${L('（未指定）', '(not chosen)')}</option>`
+        + flat.map(({ x, b }) => `<option value="${esc(x.row.id)}"${x.row.id === s.controlRow ? ' selected' : ''}>${esc(qNm(x.row))}${blocks.length > 1 ? ' · ' + esc(b.column.title || b.id) : ''}${App.isLoading(x.row) ? L('（建议）', ' (suggested)') : ''}</option>`).join('')
+        + `</select></div><p class="hint">${L('应用于当前成图的所有目标，按成图泳道编号逐道相除。请确认目标与内参同编号泳道对应同一样本；图片组不限制内参选择。', 'Applies to all targets in this figure, paired by figure-lane number. Confirm matching lanes represent the same samples; image groups do not restrict the control choice.')}</p>`;
     } else if (s.method === 'total') {
       const seen = new Set(), opts = [];
       App.S.blots.forEach(b => (b.images || []).forEach(id => {
@@ -469,32 +503,45 @@
         seen.add(id); opts.push(`<option value="${esc(id)}">${esc(rec.name)} · ${esc(App.blotNameEn(b))}</option>`);
       }));
       html = `<div class="qrow"><label for="qTotal">${L('总蛋白图', 'Total-protein picture')}</label>`
-        + `<select id="qTotal"><option value="">${L('（未选择）', '(none)')}</option>${opts.join('')}</select></div>`;
+        + `<select id="qTotal"><option value="">${L('（未选择）', '(none)')}</option>${opts.join('')}</select></div>`
+        + `<div class="qrow"><label for="qTotalPolarity">${L('条带极性', 'Band polarity')}</label><select id="qTotalPolarity">`
+        + `<option value="auto">${L('自动识别', 'Automatic')}</option><option value="dark">${L('亮底暗条带（染色）', 'Dark bands on light background')}</option>`
+        + `<option value="bright">${L('暗底亮条带（荧光）', 'Bright bands on dark background')}</option></select></div>`
+        + `<p class="hint">${L('请确认这是同一膜的总蛋白图。亮暗不能判断图像用途；stain-free 荧光可用亮条带。', 'Confirm this is total protein on the same membrane. Polarity does not identify the acquisition type; stain-free fluorescence may have bright bands.')}</p>`;
     }
     dep.classList.toggle('hidden', !html);
     dep.innerHTML = html;
     if (s.method === 'control') {
-      const sel = $('qControl');
-      if (s.controlRow) sel.value = s.controlRow;
-      sel.onchange = e => { App.setQuant({ controlRow: e.target.value || null }); qRender(); };
+      $('qControl').onchange = event => {
+        App.setQuant({ controlRow: event.target.value || null });
+        if (qState.row === event.target.value) qState.row = null;
+        qRender();
+      };
     }
     if (s.method === 'total') {
       const sel = $('qTotal');
       if (s.totalImage) sel.value = s.totalImage;
       sel.onchange = e => { App.setQuant({ totalImage: e.target.value || null }); qRender(); };
+      $('qTotalPolarity').value = s.totalPolarity;
+      $('qTotalPolarity').onchange = e => { App.setQuant({ totalPolarity: e.target.value }); qRender(); };
     }
     // one line per protein: the verdict is per row, so a single "check" button could only report the worst case
     // the "one point = one exposure" line only appears when something cannot be checked, which is the moment
     // "not enough points" would otherwise read as "the bands look fine, the tool must be broken"
-    const anyNone = flat.some(({ x }) => !qUsable(fitById.get(x.row.id)));
-    $('qLin').innerHTML = (anyNone ? `<p class="hint qlin-note">${L('一个点 = 一次曝光', 'One point is one exposure')}</p>` : '')
-      + (flat.map(({ x }) => {
-      const f = fitById.get(x.row.id), w = f && f.worst, why = qWhy(f);
+    const anyNone = [...fitById.values()].some(summary => summary.checks.some(fit => !qUsable(fit) || fit.verdict === 'partial'));
+    $('qLin').innerHTML = !fitById.size ? `<p class="hint">${L('尚未启用检验。可勾选多曝光检验，或填写已知稀释比例。', 'No checks requested. Enable exposure checks or enter known dilution fractions if needed.')}</p>`
+      : (anyNone && s.exposureCheck ? `<p class="hint qlin-note">${L('一个点 = 一次曝光', 'One point is one exposure')}</p>` : '')
+      + (flat.filter(({ x }) => fitById.has(x.row.id)).map(({ x }) => {
+      const f = fitById.get(x.row.id), checks = f ? f.checks : [], why = checks.map(qWhy).filter(Boolean).join(' · ');
       // a reason long enough to name the lost exposures gets its own line; the verdict stays on the first one
       return `<button class="qlin${qState.row === x.row.id ? ' sel' : ''}" data-row="${esc(x.row.id)}" title="${esc(why)}">`
         + `<span class="nm">${esc(qNm(x.row))}</span><span class="${qTone(f)}">${qWord(f)}</span>`
-        + (w ? `<span class="none">R² ${w.r2.toFixed(3)} · ${L('残差', 'residual')} ${(w.maxDev * 100).toFixed(0)}%</span>`
-          : (why ? `<span class="qwhy">${esc(why)}</span>` : ''))
+        + checks.map(check => {
+          const fit = qFit(check), reason = qWhy(check);
+          return `<span class="none qcheck">${qCheckLabel(check)} · ${qWord(check)}`
+            + (qUsable(check) ? ` · R² ${fit.r2.toFixed(3)} · ${L('残差', 'residual')} ${(fit.maxDev * 100).toFixed(0)}%` : '') + '</span>'
+            + (reason ? `<span class="qwhy">${esc(reason)}</span>` : '');
+        }).join('')
         + `</button>`;
       }).join('') || `<p class="hint">${L('没有可检验的行', 'No rows to check')}</p>`);
     // conditions: the rows the figure already labels, not a second editor
@@ -506,6 +553,33 @@
       : `<p class="hint">${L('成图还没有条件行。第 5 步加一个条件行，就能按重复统计。', 'No condition rows yet. Add one in step 5 to get replicate statistics.')}</p>`)
       + `<button class="btn sm ghost" id="qCondEdit">${groups.length ? L('去编辑条件行', 'Edit the condition rows') : L('去第 5 步加条件行', 'Add one in step 5')}</button>`;
     $('qCondEdit').onclick = () => { qClose(); openStep(5); setTimeout(() => flash('btnAddCond'), 80); };
+    $('qReferences').innerHTML = blocks.map((block, index) => {
+      const choices = App.columnData(block.id).groups || [], selected = s.referenceGroups[block.id] || '';
+      const missing = selected && !choices.some(group => App.quantGroupKey(group) === selected);
+      return `<div class="qrow"><label for="qReference${index}">${esc(blocks.length > 1 ? (block.column.title || block.id) : L('相对对照', 'Reference group'))}</label>`
+        + `<select id="qReference${index}" data-reference-column="${esc(block.id)}"><option value="">${L('不缩放，显示内参比值', 'None — show control ratios')}</option>`
+        + (missing ? `<option value="${esc(selected)}" selected>${L('原对照组已改变，请重选', 'Reference changed — choose again')}</option>` : '')
+        + choices.map(group => { const key = App.quantGroupKey(group); return `<option value="${esc(key)}"${key === selected ? ' selected' : ''}>${esc(group.text || `${group.from}–${group.to}`)}</option>`; }).join('') + '</select></div>';
+    }).join('') + `<p class="hint">${L('选对照组后，逐样本内参比值再除以对照组均值；不默认使用第一道。', 'Optional: divide each control ratio by the reference-group mean, never by the first lane automatically.')}</p>`;
+    $('qReferences').querySelectorAll('select').forEach(select => select.onchange = () => {
+      App.setQuant({ referenceGroups: { ...App.quantSettings().referenceGroups, [select.dataset.referenceColumn]: select.value || null } }); qRender();
+    });
+    $('qTargets').innerHTML = flat.filter(({ x }) => !x.isControl).map(({ b, x }) => `<label><input type="checkbox" data-target="${esc(x.row.id)}"${x.target ? ' checked' : ''}><span>${esc(qNm(x.row))}${blocks.length > 1 ? ' · ' + esc(b.column.title || b.id) : ''}</span></label>`).join('');
+    $('qTargets').querySelectorAll('input').forEach(input => input.onchange = () => {
+      const targets = [...$('qTargets').querySelectorAll('input:checked')].map(target => target.dataset.target);
+      App.setQuant({ targets }); qRender();
+    });
+    $('qSampleUnit').value = s.sampleUnit;
+    $('qPlotStyle').value = s.plotStyle;
+    const grouped = s.sampleUnit === 'independent' && cur && (App.columnData(cur.b.id).groups || []).length > 0 && !cur.b.overlapping;
+    $('qPlotHint').textContent = grouped
+      ? L('按已有分组显示均值和逐样本点；SD 仅用于 n > 1。', 'Existing groups show means and individual points; SD requires n > 1.')
+      : s.plotStyle === 'bars' ? L('当前显示逐道柱形和数据点，不计算组均值或 SD。', 'Showing individual-lane bars and points, without group means or SD.')
+        : L('当前显示逐道数据点；确认独立样本并设置分组后才显示均值和 SD。', 'Showing individual measurements; means and SD require confirmed independent samples and groups.');
+    $('qErrorBars').value = s.errorBars;
+    $('qErrorBars').disabled = s.sampleUnit !== 'independent';
+    $('qPlotScope').value = qState.scope;
+    $('qExposureCheck').checked = s.exposureCheck;
     // the dilution series of the row in hand (the row menu opens the same input)
     const row = cur && cur.x.row, dil = (s.dilution[row && row.id] || []);
     $('qDilLabel').textContent = L(`上样比例（${row ? qNm(row) : '当前行'}）`, `Fractions (${row ? qNm(row) : 'current row'})`);
@@ -516,8 +590,7 @@
   function qDilOut(r, nums) {
     const out = r && nums && nums.length ? App.quantDilution(r, nums) : null;
     if (!out || !out.fit || out.fit.r2 == null) {
-      $('qDilOut').innerHTML = out && out.fit && out.fit.n < 3 && nums && nums.length
-        ? `<span class="w">${L('至少要 3 个可定量的浓度点才做回归。', 'At least 3 quantifiable points are needed for a fit.')}</span>` : '';
+      $('qDilOut').innerHTML = out && nums && nums.length ? `<span class="w">${esc(qWhy(out))}</span>` : '';
       return;
     }
     const ok = out.verdict === 'proportional';
@@ -526,7 +599,7 @@
   }
 
   function qTable(blocks, flat, fitById) {
-    const s = App.quantSettings(), view = qState.view, multi = App.layoutColumns().length > 1;
+    const view = qState.view, multi = App.layoutColumns().length > 1;
     $('qTableWrap').innerHTML = blocks.map(b => {
       const lanes = b.lanes.map(j => App.columnData(b.id).lanes[j - 1] || {});
       const head = `<tr><th class="qrowh">${L('蛋白', 'Protein')}</th>`
@@ -534,22 +607,24 @@
       const body = b.rows.map(x => {
         const f = fitById.get(x.row.id), rel = qRel(x);
         // a row with no denominator still gets its cells, so switching to "normalised" cannot break the table
-        const vals = view === 'norm' ? (rel || x.d.map(() => null)) : x.d.map(v => (v ? v.volume : null));
+        const raw = view === 'volume' || x.isControl;
+        const vals = raw ? x.d.map(v => (v ? v.volume : null)) : (rel || x.d.map(() => null));
         const mx = Math.max(1e-9, ...vals.map(v => (v == null ? 0 : Math.abs(v))));
         const cells = x.d.map((v, i) => {
           const lane = b.lanes[i];
-          if (view === 'volume' && v && !v.quantifiable) {
-            return `<td class="sat" data-lane="${lane}" title="${v.saturated ? L('过曝：只给下界', 'Saturated: this is a lower bound') : L('不可定量', 'Not quantifiable')}">${v.saturated ? 'SAT' : 'n/q'}</td>`;
+          if (raw && v && !v.quantifiable) {
+            return `<td class="sat" data-lane="${lane}" title="${esc(qExclusion(v.reason || (v.saturated ? 'saturated' : 'not quantifiable')))}">${v.saturated ? 'SAT' : 'n/q'}</td>`;
           }
           const val = vals[i];
-          if (val == null) return `<td class="na" data-lane="${lane}">—</td>`;
+          if (val == null) return `<td class="na" data-lane="${lane}" title="${esc(qExclusion(x.exclusions[i]))}">—</td>`;
           const w = Math.max(2, Math.round(Math.abs(val) / mx * 100));
-          return `<td class="qnc" data-lane="${lane}"><span class="qcell"><span>${qFmt(val)}</span>`
+          return `<td class="qnc${qState.row === x.row.id && qState.lane === lane ? ' qpoint-sel' : ''}" data-lane="${lane}"><span class="qcell"><span>${qFmt(val)}</span>`
             + `<span class="qbar"><i style="width:${w}%"></i></span></span></td>`;
         }).join('');
         return `<tr data-row="${esc(x.row.id)}" class="${qState.row === x.row.id ? 'sel' : ''}">`
           + `<td class="qrowh"><span class="qname" title="${esc(qNm(x.row))}${App.S.blots.length > 1 && x.blot ? ' · ' + esc(App.blotName(x.blot)) : ''}">${esc(qNm(x.row))}</span>`
-          + `<i class="qchip ${qTone(f)}" title="${esc(qWord(f))}">${qMark(f)}</i>`
+          + (x.isControl ? `<small class="qcontrol-source" title="${L('扣背景原始信号，作为分母；不是内参比值', 'Background-subtracted source signal used as denominator, not a control ratio')}">${L('内参 · 原始信号', 'Control · source signal')}</small>` : '')
+          + (f ? `<i class="qchip ${qTone(f)}" title="${esc(qWord(f))}">${qMark(f)}</i>` : '')
           + `<button class="qmenu" data-row="${esc(x.row.id)}" title="${L('这一行的设置', 'Settings for this row')}" aria-label="${L('这一行的设置', 'Settings for this row')}">⋯</button>`
           + `</td>` + cells + `</tr>`;
       }).join('');
@@ -557,12 +632,12 @@
         + (multi ? `<caption>${esc((b.column && (b.column.title || b.column.id)) || b.id)}</caption>` : '')
         + `<thead>${head}</thead><tbody>${body}</tbody></table>`;
     }).join('') || `<p class="hint">${L('还没有可定量的行', 'No rows to quantify yet')}</p>`;
-    // the view toggle: there is nothing to show in "normalised" when nothing divides the volumes
-    $('qViewSeg').querySelectorAll('button').forEach(btn => {
-      btn.classList.toggle('on', btn.dataset.v === view);
-      btn.disabled = btn.dataset.v === 'norm' && s.method === 'none';
-      btn.title = btn.disabled ? L('先选一种归一化方式', 'Choose a normalisation method first') : '';
-    });
+    $('qRawTable').innerHTML = blocks.map(block => `<table class="qtable">`
+      + (multi ? `<caption>${esc(block.column.title || block.id)}</caption>` : '')
+      + `<thead><tr><th class="qrowh">${L('蛋白', 'Protein')}</th>${block.lanes.map(lane => `<th>${lane}</th>`).join('')}</tr></thead><tbody>`
+      + block.rows.map(entry => `<tr><td class="qrowh">${esc(qNm(entry.row))}</td>`
+        + entry.d.map(value => `<td>${!value ? '—' : !value.quantifiable ? value.saturated ? 'SAT' : 'n/q' : qFmt(value.volume)}</td>`).join('') + '</tr>').join('')
+      + '</tbody></table>').join('');
     // a warning that applies to every row belongs above the table; the rest sits on its own row
     const gl = [];
     blocks.forEach(b => b.warnings.forEach(w => { if (!w.row) gl.push(qWarnText(w, qIsEn())); }));
@@ -577,41 +652,81 @@
     if (!cur) { host.innerHTML = ''; return; }
     const { b, x } = cur, f = fitById.get(x.row.id);
     // the chart reads the same view as the table: a number on screen has one meaning, not two
-    const rel = qRel(x), showNorm = qState.view === 'norm' && !!rel;
-    const vals = showNorm ? rel : x.d.map(v => (v && v.quantifiable ? v.volume : null));
-    const n = vals.length, mx = Math.max(1e-9, ...vals.map(v => (v == null ? 0 : Math.abs(v))));
+    const rel = qRel(x), showNorm = qState.view === 'norm' && !x.isControl;
+    const vals = showNorm ? (rel || x.d.map(() => null)) : x.d.map(v => (v && v.quantifiable ? v.volume : null));
+    const n = vals.length, minimum = Math.min(0, ...vals.filter(value => value != null)), maximum = Math.max(0, ...vals.filter(value => value != null));
     const W = 320, H = 118, pB = 18, pT = 10, pL = 4;
     const step = (W - pL * 2) / Math.max(1, n), bw = Math.max(6, Math.min(30, step - 6)), base = H - pB;
+    const vertical = value => base - (value - minimum) / (maximum - minimum || 1) * (base - pT), zero = vertical(0);
     const cols = ['#2f6feb', '#8b5cf6', '#0e9f6e', '#d97706'];
     const tone = i => {
-      const j = b.lanes[i], list = x.conditions || [];
+      const j = b.lanes[i], list = (showNorm ? x.conditions : x.volumeConditions) || [];
       const k = list.findIndex(c => j >= c.from && j <= c.to);
       return k >= 0 ? cols[k % cols.length] : '#9aa2ad';
     };
     const bars = vals.map((v, i) => {
-      const h = v == null ? 0 : Math.max(1, Math.abs(v) / mx * (base - pT));
+      const h = v == null ? 0 : Math.abs(vertical(v) - zero);
       const xx = pL + i * step + (step - bw) / 2;
       return `<g data-lane="${b.lanes[i]}">`
-        + `<rect x="${xx.toFixed(1)}" y="${(base - h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="${tone(i)}" opacity="${qState.lane == null || qState.lane === b.lanes[i] ? .9 : .45}"/>`
+        + `<rect data-value="${v ?? ''}" x="${xx.toFixed(1)}" y="${(v == null ? zero : Math.min(vertical(v), zero)).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="${tone(i)}" opacity="${qState.lane == null || qState.lane === b.lanes[i] ? .9 : .45}"/>`
         + `<text x="${(xx + bw / 2).toFixed(1)}" y="${H - 5}" text-anchor="middle" font-size="9" fill="#9aa2ad">${i + 1}</text></g>`;
     }).join('');
-    const conds = (x.conditions || []).filter(c => c.n);
+    const conds = b.settings.sampleUnit === 'independent' && !b.overlapping ? ((showNorm ? x.conditions : x.volumeConditions) || []).filter(c => c.n) : [];
     const stats = conds.length ? `<table class="qstat"><thead><tr><th>${L('条件', 'Condition')}</th><th>n</th><th>${L('均值', 'Mean')}</th><th>SD</th><th>CV</th></tr></thead><tbody>`
       + conds.map(c => `<tr><td>${esc(c.text || `${L('第', 'lanes ')}${c.from}–${c.to}`)}</td><td>${c.n}</td><td>${qFmt(c.mean)}</td>`
         + `<td>${c.sd == null ? '—' : qFmt(c.sd)}</td><td>${c.cv == null ? '—' : (c.cv * 100).toFixed(1) + '%'}</td></tr>`).join('')
       + `</tbody></table>` : '';
-    const lin = f ? `<p class="qd-line">${L('线性', 'Linearity')}：${qWord(f)}${f.worst ? ` · R² ${f.worst.r2.toFixed(3)} · ${L('残差', 'residual')} ${(f.worst.maxDev * 100).toFixed(0)}% · n=${f.worst.n}` : (qWhy(f) ? ` · ${qWhy(f)}` : '')}</p>` : '';
+    const lin = f ? f.checks.map(check => {
+      const fit = qFit(check), why = qWhy(check);
+      return `<p class="qd-line">${qCheckLabel(check)}：${qWord(check)}`
+        + (qUsable(check) ? ` · R² ${fit.r2.toFixed(3)} · ${L('残差', 'residual')} ${(fit.maxDev * 100).toFixed(0)}% · n=${fit.n}` : '')
+        + (why ? ` · ${esc(why)}` : '') + '</p>';
+    }).join('') : '';
     const mine = b.warnings.filter(w => w.row && w.row.id === x.row.id).map(w => qWarnText(w, qIsEn()));
     host.innerHTML = `<div class="qd-h"><b>${esc(qNm(x.row))}</b><span class="qd-sub">${esc(x.blot ? App.blotNameEn(x.blot) : '')}${x.rec ? ' · ' + esc(App.expoLabel(x.rec)) : ''}</span></div>`
-      + `<p class="qd-sub">${showNorm ? L('归一化值（相对第 1 个可定量道）', 'Normalised (relative to the first quantifiable lane)') : L('体积', 'Volume')}</p>`
-      + `<svg class="qchart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${esc(L('各道数值', 'Values by lane'))}">${bars}</svg>`
+      + `<p class="qd-sub">${showNorm ? esc(`${qName(x.row)} / ${qDenomLabel(b, x)}`) + (x.reference ? ' · ' + esc(L('相对对照组均值：', 'relative to reference-group mean: ') + (x.reference.group || L('无效对照组', 'invalid reference'))) : '') : L('原始信号（已扣背景）', 'Raw signal (background-subtracted)')}</p>`
+      + (x.isControl ? `<p class="hint">${L('统一内参：这里显示实际分母，不是除以自身后的 1。', 'Figure loading control: these are the actual denominators, not self-normalised ones.')}</p>` : '')
+      + `<p class="hint">${x.roi.mode === 'fixed' ? L('固定定量框', 'Fixed quantification ROI') + ` · ${x.roi.width} × ${x.roi.height} px` : L('高级：自适应峰宽', 'Advanced: adaptive peak width')}${x.roi.reviewed ? L(' · 已确认当前来源', ' · current source reviewed') : L(' · 初始建议或来源已变，请核对', ' · suggested or source changed; review required')}</p><button class="btn sm" id="qEditRoi">${L('调整定量框…', 'Adjust quantification ROIs…')}</button>`
+      + `<svg class="qchart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${esc(L('各道数值', 'Values by lane'))}"><line class="qzero" x1="${pL}" x2="${W - pL}" y1="${zero.toFixed(1)}" y2="${zero.toFixed(1)}" stroke="#d4d9df"/>${bars}</svg>`
       + stats + lin
-      + mine.map(t => `<p class="qd-line" style="color:var(--warn)">⚠ ${esc(t)}</p>`).join('');
+      + mine.map(t => `<p class="qd-line" style="color:var(--warn)">⚠ ${esc(t)}</p>`).join('')
+      + (showNorm ? x.exclusions.map((reason, index) => reason ? `<p class="qd-line">${L('第', 'Lane ')}${b.lanes[index]}${L('道：', ': ')}${esc(qExclusion(reason))}</p>` : '').join('') : '');
+    $('qEditRoi').onclick = event => G.WBQuantROI.open(x.row.id, qRender, event.currentTarget);
   }
 
-  /* the figure marks the row being read: a box round it, and the lane under the pointer inside it.
-   * The integration window itself is NOT drawn here — it lives in the source picture's coordinates, and a
-   * window drawn in the wrong place would be worse than none: the panel reports its width in pixels instead. */
+  function qPreviewToolbar(chart) {
+    document.body.classList.toggle('quant-chart', chart);
+    $('btnPNG').textContent = chart ? L('定量图 PNG', 'Plot PNG') : L('导出 PNG', 'Export PNG');
+    $('btnSVG').textContent = chart ? L('定量图 SVG（矢量）', 'Plot SVG (vector)') : L('SVG（矢量，可在 AI 中编辑）', 'SVG (vector, editable in Illustrator)');
+  }
+
+  function qChart() {
+    if (!qSnap) return;
+    const chart = qState.preview === 'chart';
+    qPreviewToolbar(chart);
+    $('previewBox').classList.toggle('hidden', chart);
+    $('qChartBox').classList.toggle('hidden', !chart);
+    $('qPreviewSeg').querySelectorAll('button').forEach(button => button.classList.toggle('on', button.dataset.preview === qState.preview));
+    if (!chart) return;
+    const result = G.WBQuantPlot.render(qSnap.blocks, { row: qState.row, all: qState.scope === 'selected', scale: qState.view,
+      highlight: { row: qState.row, lane: qState.lane } });
+    $('qChartBox').innerHTML = result.panels.length ? result.svg : `<p class="hint">${L('请先勾选要出图的目标蛋白', 'Check the target proteins to plot first')}</p>`;
+  }
+
+  async function qExportPlot(format) {
+    const blocks = App.quantData();
+    const result = G.WBQuantPlot.render(blocks, { row: qState.row, all: qState.scope === 'selected', scale: qState.view });
+    if (!result.panels.length || result.panels.every(panel => panel.result.buckets.every(bucket => !bucket.points.length))) {
+      toast(L('没有可出图的有效值，请检查目标、内参与对照组', 'No valid values to plot; check targets, loading controls and reference groups')); return;
+    }
+    try {
+      const metadata = { Software: 'BlotFigure ' + App.VERSION, Description: result.description };
+      if (format === 'svg') G.Export.exportSVG(result.svg, 'blot_quantification.svg');
+      else await G.Export.exportPNG(result.svg, result.width, result.height, App.S.style.dpi || 600, 'blot_quantification.png', metadata);
+      toast(L('定量图已导出', 'Quantitative plot exported'));
+    } catch (error) { toast(L('定量图导出失败：', 'Plot export failed: ') + error.message); }
+  }
+
   function drawQuantOverlay(f) {
     prev.querySelectorAll('.q-ov').forEach(n => n.remove());
     if (!inQuant() || !S() || !f || !f.rowBoxes) return;
@@ -640,6 +755,36 @@
         ov.appendChild(el);
       }
     }
+    const selected = qSnap && qSnap.flat.find(entry => entry.x.row.id === qState.row);
+    const laneIndex = selected ? selected.b.lanes.indexOf(qState.lane) : -1;
+    const measurement = selected && selected.x.d[laneIndex], source = selected && selected.x.source.lanes[laneIndex];
+    if (measurement && measurement.bounds && source) {
+      const segment = row.segs.find(candidate => App.boxId(candidate) === source.box);
+      const piece = segment && App.pieceOf(row, segment), sourceFrame = piece && App.segFrame(piece, segment);
+      const integrationFrame = source.integration.F;
+      (f.sourceRegions || []).filter(region => region.row === qState.row && region.box === source.box).forEach(region => {
+        if (!sourceFrame) return;
+        [measurement.bounds, ...(measurement.backgroundBounds || [])].forEach((bounds, rectangleIndex) => {
+          const points = [[bounds.u0, bounds.v0], [bounds.u1, bounds.v0], [bounds.u1, bounds.v1], [bounds.u0, bounds.v1]].map(point => {
+            const image = WB.toImg(integrationFrame, point[0], point[1]), local = WB.toFrame(sourceFrame, image[0], image[1]);
+            return at(region.x + (local[0] - region.u0) / (region.u1 - region.u0) * region.w, region.y + (local[1] - region.v0) / (region.v1 - region.v0) * region.h);
+          });
+          const corner = at(region.x, region.y), opposite = at(region.x + region.w, region.y + region.h);
+          const left = Math.max(corner.x, Math.min(...points.map(point => point.x))), right = Math.min(opposite.x, Math.max(...points.map(point => point.x)));
+          const top = Math.max(corner.y, Math.min(...points.map(point => point.y))), bottom = Math.min(opposite.y, Math.max(...points.map(point => point.y)));
+          if (!(right > left && bottom > top)) return;
+          const highlight = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+          highlight.setAttribute('class', rectangleIndex ? 'q-background' : 'q-integration');
+          highlight.setAttribute('role', 'img'); highlight.setAttribute('aria-label', rectangleIndex ? L('实际背景区域', 'Actual background region') : L('实际积分范围', 'Actual integration window'));
+          highlight.style.cssText = `position:absolute;left:${left}px;top:${top}px;width:${right - left}px;height:${bottom - top}px;overflow:hidden;pointer-events:none`;
+          const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+          polygon.setAttribute('points', points.map(point => `${point.x - left},${point.y - top}`).join(' '));
+          polygon.setAttribute('fill', rectangleIndex ? '#c8781020' : '#2873de22'); polygon.setAttribute('stroke', rectangleIndex ? '#b7640c' : '#2366cb'); polygon.setAttribute('stroke-width', '1.5');
+          if (rectangleIndex) polygon.setAttribute('stroke-dasharray', '4 2');
+          highlight.appendChild(polygon); ov.appendChild(highlight);
+        });
+      });
+    }
     prev.appendChild(ov);
   }
 
@@ -648,16 +793,16 @@
     const row = App.row(id); if (!row) return;
     qState.row = id;
     const s = App.quantSettings(), dil = (s.dilution[id] || []).join(', ');
-    const ex = App.rowExpo(row), best = App.bestExpo(row);
     const cur = App.quantData().flatMap(b => b.rows).find(x => x.row.id === id);
     const sv = cur && cur.d.find(v => v);   // one measured lane is enough to say how they were measured
     pop.innerHTML = `<h4>${esc(qNm(row))}</h4>`
       + `<div class="qrow"><label for="qmDil">${L('稀释比例', 'Dilution')}</label><input id="qmDil" type="text" value="${esc(dil)}" placeholder="1, 0.5, 0.25"></div>`
       + `<p class="hint">${L('按泳道顺序填写已知上样比例。这项才检验信号与蛋白量是否成正比。', 'In lane order. This is the check that signal is proportional to protein amount.')}</p>`
       + `<div class="actions"><button class="btn sm primary" id="qmOk">${L('确定', 'OK')}</button></div>`
-      + `<h4 style="margin-top:14px">${L('曝光', 'Exposure')}</h4>`
-      + `<div class="qexpo">${ex.map(e => { const rec = App.images.get(e.id); return `<button class="btn sm${e.id === row.img ? ' primary' : ''}" data-ex="${esc(e.id)}">${esc(App.expoLabel(rec))}${e.id === best ? ' ★' : ''}${e.satFrac > 0.002 ? ' ⚠' : ''}</button>`; }).join('') || `<span class="hint">${L('这一行没有可用的曝光', 'No exposures for this row')}</span>`}</div>`
-      + (sv ? `<p class="hint" style="margin-top:10px">${L('这一行怎么算的', 'How this row was measured')}：${L('积分宽', 'width')} ${Math.round(sv.widthPx)} px · ${L('背景', 'background')} ${sv.background.toFixed(4)} · SNR ${sv.snr.toFixed(0)}${sv.excludedFrac > 0.002 ? ` · ${L('排除过曝', 'excluded')} ${(sv.excludedFrac * 100).toFixed(1)}%` : ''}${cur.rec && cur.rec.bits != null ? ` · ${cur.rec.bits}-bit` : ''}</p>` : '');
+      + `<h4 style="margin-top:14px">${L('成图来源（只读）', 'Figure source (read-only)')}</h4>`
+      + `<p class="hint">${esc(cur && cur.rec ? cur.rec.name + ' · ' + App.expoLabel(cur.rec) : L('无可用来源', 'No source'))}</p>`
+      + `<button class="btn sm" id="qmEditSource">${L('返回成图修改框选或曝光', 'Return to the figure to change boxes or exposure')}</button>`
+      + (sv && sv.background != null ? `<p class="hint" style="margin-top:10px">${L('这一行怎么算的', 'How this row was measured')}：${L('积分宽', 'width')} ${Math.round(sv.widthPx)} px · ${L('背景', 'background')} ${sv.background.toFixed(4)} · SNR ${sv.snr.toFixed(0)}${sv.excludedFrac > 0.002 ? ` · ${L('饱和像素', 'saturated pixels')} ${(sv.excludedFrac * 100).toFixed(1)}%` : ''}${cur.rec && cur.rec.bits != null ? ` · ${cur.rec.bits}-bit` : ''}</p>` : '');
     placePopNear(rect);
     $('qmOk').onclick = () => {
       const nums = $('qmDil').value.split(/[,\s;]+/).filter(Boolean).map(Number);
@@ -665,11 +810,7 @@
       if (nums.length && nums.every(n => isFinite(n) && n > 0)) next[id] = nums; else delete next[id];
       closePop(); App.setQuant({ dilution: next }); qRender();
     };
-    pop.querySelectorAll('[data-ex]').forEach(btn => btn.onclick = () => {
-      row.img = btn.dataset.ex; row.auto = btn.dataset.ex === best;
-      App.viewBlot = row.blot; App.viewImg = row.img;
-      closePop(); App.commit(); qRender();
-    });
+    $('qmEditSource').onclick = () => { closePop(); qClose(); App.selRow = row.id; openStep(3); };
   }
 
   function qCopyTable() {
@@ -679,10 +820,10 @@
       lines.push([L('蛋白', 'Protein'), ...names].join('\t'));
       b.rows.forEach(x => {
         const rel = qRel(x);
-        const vals = view === 'norm'
+        const vals = view === 'norm' && !x.isControl
           ? (rel ? rel.map(v => (v == null ? '' : v.toFixed(3))) : x.d.map(() => ''))
           : x.d.map(v => (!v ? '' : (v.quantifiable ? v.volume.toFixed(2) : (v.saturated ? 'SAT' : 'n/q'))));
-        lines.push([qName(x.row), ...vals].join('\t'));
+        lines.push([qName(x.row) + (x.isControl ? ' (loading control; background-subtracted source signal)' : ''), ...vals].join('\t'));
       });
       lines.push('');
     });
@@ -701,16 +842,19 @@
     if (v) { App.setQuant({ method: v }); qRender(); }
   });
   $('qLin').addEventListener('click', e => { const b = e.target.closest('.qlin'); if (b) qSelect(b.dataset.row); });
-  $('qViewSeg').addEventListener('click', e => {
-    const btn = e.target.closest('button');
-    if (!btn || btn.disabled) return;
-    qState.view = btn.dataset.v; qRender();
-  });
+  $('qRoiRow').onchange = event => qSelect(event.target.value);
+  $('qRoiEdit').onclick = $('qRoiToolbar').onclick = event => {
+    document.body.classList.remove('q-set-open');
+    if (qState.row) G.WBQuantROI.open(qState.row, qRender, event.currentTarget);
+  };
   $('qTableWrap').addEventListener('click', e => {
     const menu = e.target.closest('.qmenu');
     if (menu) { e.stopPropagation(); qRowMenu(menu.dataset.row, menu.getBoundingClientRect()); return; }
     const tr = e.target.closest('tr[data-row]');
-    if (tr) qSelect(tr.dataset.row);
+    if (tr) {
+      const cell = e.target.closest('td[data-lane]');
+      qState.row = tr.dataset.row; qState.lane = cell ? Number(cell.dataset.lane) : null; qRender();
+    }
   });
   // hovering a cell marks that lane on the figure; nothing is recomputed
   $('qTableWrap').addEventListener('mouseover', e => {
@@ -731,6 +875,33 @@
   };
   $('qCsv').onclick = () => exportQuant();
   $('qJson').onclick = () => exportQuantJson();
+  $('qExposureCheck').onchange = event => { App.setQuant({ exposureCheck: event.target.checked }); qRender(); };
+  [['qSampleUnit', 'sampleUnit'], ['qPlotStyle', 'plotStyle'], ['qErrorBars', 'errorBars']].forEach(([identifier, setting]) => {
+    $(identifier).onchange = event => {
+      if (setting === 'plotStyle') qState.preview = 'chart';
+      App.setQuant({ [setting]: event.target.value }); qRender();
+    };
+  });
+  $('qPlotScope').onchange = event => { qState.scope = event.target.value; qChart(); };
+  $('qPreviewSeg').onclick = event => {
+    const button = event.target.closest('[data-preview]');
+    if (!button) return;
+    qState.preview = button.dataset.preview; qChart();
+    if (qState.preview === 'figure') { updatePreview(); drawQuantOverlay(lastFig); }
+  };
+  $('qPlotShow').onclick = () => { qState.preview = 'chart'; document.body.classList.remove('q-set-open'); qChart(); };
+  $('qPlotSVG').onclick = () => qExportPlot('svg');
+  $('qPlotPNG').onclick = () => qExportPlot('png');
+  const qChoosePoint = event => {
+    const point = event.target.closest('.q-plot-point');
+    if (!point) return;
+    if (event.type === 'keydown' && !['Enter', ' '].includes(event.key)) return;
+    event.preventDefault();
+    qState.row = point.dataset.row; qState.lane = +point.dataset.lane; qRender();
+    $('qTableWrap').querySelector(`tr[data-row="${CSS.escape(qState.row)}"] td[data-lane="${qState.lane}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  };
+  $('qChartBox').addEventListener('click', qChoosePoint);
+  $('qChartBox').addEventListener('keydown', qChoosePoint);
   $('qCopy').onclick = qCopyTable;
   $('qCopyTop').onclick = qCopyTable;
   $('qSetBtn').onclick = () => document.body.classList.toggle('q-set-open');
@@ -1463,6 +1634,13 @@
   }
   function renderAnno() {
     const st = S(), rows = [];
+    st.conditions.forEach((condition, index) => {
+      const side = condition.nameSide === 'right' ? 'right' : 'left';
+      const alignment = ['left', 'center', 'right'].includes(condition.nameAlign) ? condition.nameAlign : side === 'right' ? 'left' : 'right';
+      rows.push(`<div class="condition-layout"><div class="condition-layout-name">${L('条件名称', 'Condition name')} · ${esc(condition.name || L('未命名', 'Unnamed'))}</div><div class="field inline">`
+        + `<label>${L('位置', 'Side')} <select data-cond-side="${index}" aria-label="${esc(L('条件名称位置：', 'Condition name side: ') + (condition.name || index + 1))}"><option value="left"${side === 'left' ? ' selected' : ''}>${L('左侧', 'Left')}</option><option value="right"${side === 'right' ? ' selected' : ''}>${L('右侧', 'Right')}</option></select></label>`
+        + `<label>${L('对齐', 'Align')} <select data-cond-align="${index}" aria-label="${esc(L('条件名称对齐：', 'Condition name alignment: ') + (condition.name || index + 1))}">${[['left', L('左对齐', 'Left')], ['center', L('居中', 'Centre')], ['right', L('右对齐', 'Right')]].map(([value, label]) => `<option value="${value}"${alignment === value ? ' selected' : ''}>${label}</option>`).join('')}</select></label></div></div>`);
+    });
     (st.brackets || []).forEach((bk, k) => {
       const ends = [App.row(bk.r0), App.row(bk.r1)].filter(Boolean);
       if (!ends.some(r => App.rowColumn(r) === App.activeColumn)) return;
@@ -1472,6 +1650,8 @@
       }
     });
     const box = $('annoList'); box.innerHTML = rows.join('');
+    box.querySelectorAll('[data-cond-side]').forEach(control => control.onchange = done(event => { const condition = S().conditions[Number(control.dataset.condSide)]; condition.nameSide = event.target.value; }));
+    box.querySelectorAll('[data-cond-align]').forEach(control => control.onchange = done(event => { S().conditions[Number(control.dataset.condAlign)].nameAlign = event.target.value; }));
     box.querySelectorAll('[data-a]').forEach(b => b.onclick = () => arrowPopover(+b.dataset.a, b.getBoundingClientRect()));
     box.querySelectorAll('[data-adel]').forEach(b => b.onclick = done(() => st.arrows.splice(+b.dataset.adel, 1)));
     box.querySelectorAll('[data-b]').forEach(b => b.onclick = () => bracketPopover(+b.dataset.b, b.getBoundingClientRect()));
@@ -1528,6 +1708,13 @@
     sel.innerHTML = st.blots.map(b => `<option value="${b.id}"${b.id === App.viewBlot ? ' selected' : ''}>${esc(App.blotName(b))}</option>`).join('');
     const b = App.blot(App.viewBlot), rec = G.View.curImage();
     $('fitSel').disabled = !App.selRow;
+    const dimensionRow = App.row(App.selRow), dimensionSegment = dimensionRow && (dimensionRow.segs.find(segment => App.boxId(segment) === App.selSeg) || dimensionRow.segs[0]);
+    $('boxDimensions').classList.toggle('hidden', !dimensionSegment || App.curStep !== 3);
+    if (dimensionSegment) {
+      const size = App.boxDimensions(dimensionRow, dimensionSegment);
+      $('boxDimensions').textContent = `${App.boxLabel(dimensionSegment)} · ${Number(size.width.toFixed(1))} × ${Number(size.height.toFixed(1))} px`;
+      $('boxDimensions').title = L('蛋白裁切框：源像素宽 × 高，不是定量积分框', 'Protein crop: source-pixel width × height, not the quantification ROI');
+    }
     if (!b) return;
     // tabs: the exposures, shortest first, and the white-light picture the marker is read from (another white-light
     // picture only while it is shown: one per capture is common, and they look alike)
@@ -2149,24 +2336,25 @@
     // the workspace gets the same line: what to do next, in the order the left column is numbered
     if (inQuant()) {
       const snap = qSnap || (() => {
-        const blocks = App.quantData(), lin = blocks.map(b => qLinearity(b)), fitById = new Map();
-        lin.forEach(a => a.forEach(o => fitById.set(o.row.id, o.fit)));
+        const blocks = App.quantData(), lin = blocks.map(b => qLinearity(b)), fitById = qFitMap(lin);
         return { blocks, lin, fitById };
       })();
       const bad = [...snap.fitById.entries()].filter(([, f]) => qUsable(f) && f.verdict === 'deviates');
       const blocked = snap.blocks.some(b => b.warnings.some(w => ['no-control', 'control-missing', 'no-total', 'total-not-stain'].includes(w.code)));
-      const qs2 = App.quantSettings();
       let act = null, done = false;
       if (bad.length) {
-        msg = L(`定量：<b>${esc(qNm(App.row(bad[0][0])))}</b> 的信号不成正比 —— 先看左边第 ② 节，再决定要不要报倍数`,
-          `Quantification: <b>${esc(qNm(App.row(bad[0][0])))}</b> is not proportional — read section ② on the left before reporting fold changes`);
-        act = () => flash('qLin');
-      } else if (blocked || (qs2.method === 'control' && !qs2.controlRow)) {
+        msg = L(`定量：<b>${esc(qNm(App.row(bad[0][0])))}</b> 的可选质控发现偏离，请查看高级质控`,
+          `Quantification: an optional check found a deviation for <b>${esc(qNm(App.row(bad[0][0])))}</b> — see advanced quality checks`);
+        act = () => { $('qAdvanced').open = true; flash('qLin'); };
+      } else if (blocked) {
         msg = L('定量：<b>选一个内参</b>（或总蛋白图），右边才会出比值', 'Quantification: <b>choose a control</b> (or a total-protein picture) to get ratios');
         act = () => { const el = $('qDep').querySelector('select'); if (el) { el.focus(); flash(el); } };
+      } else if (snap.blocks.some(block => block.warnings.some(warning => warning.code === 'reference-invalid'))) {
+        msg = L('定量：<b>请核对对照组</b>，原分组已改变或没有有效参考值', 'Quantification: <b>check the reference group</b>; it changed or has no valid reference values');
+        act = () => flash('qReferences');
       } else {
-        msg = L('定量：①②③ 都齐了 —— 数字在右边，导出在左下', 'Quantification: ①②③ done — the numbers are on the right, the exports bottom left');
-        done = true; act = () => flash('qCsv');
+        msg = L('定量：已按当前框选与曝光计算，可预览定量图或导出数据', 'Quantification: measured from the current boxes and exposures — preview the plot or export data');
+        done = true; act = () => flash('qPlotShow');
       }
       $('coachText').innerHTML = msg + (act && !done ? ' <span class="coach-go">→</span>' : '');
       $('coach').classList.toggle('done', done); $('coach').classList.toggle('act', !!act);
@@ -2370,10 +2558,10 @@
    * The panel, the CSV, the JSON and the methods paragraph are all built from App.quantData(), so what the
    * user reads on screen and what lands in the supplement cannot drift apart. */
   const qName = r => (r && r.name) || '?';
-  const qVol = v => !v ? '' : v.volume.toFixed(2) + (v.quantifiable ? '' : (v.saturated ? ' (SAT)' : ' (n/q)'));
+  const qVol = v => !v ? '' : (v.volume == null ? '' : v.volume.toFixed(2)) + (v.quantifiable ? '' : (v.saturated ? ' (SAT)' : ' (n/q)'));
   const qDenomLabel = (blk, x) => {
     const s = blk.settings;
-    if (s.method === 'control') { const c = blk.rows.find(y => y.row.id === s.controlRow); return c ? qName(c.row) : 'control'; }
+    if (s.method === 'control') { const control = App.row(x.control); return control ? qName(control) : 'loading control'; }
     if (s.method === 'total') return 'total protein';
     if (s.method === 'sum') return 'lane sum';
     return '';
@@ -2381,16 +2569,32 @@
   const qLaneNames = blk => blk.lanes.map(j => (App.columnData(blk.id).lanes[j - 1] || {}).name || 'lane ' + j);
   const qMembrane = x => (x.blot ? App.blotNameEn(x.blot) : '?');
   const qExpo = x => (x.rec ? App.expoLabel(x.rec) : '');
+  function qExclusion(reason) {
+    const labels = {
+      'no source band': L('无对应源条带', 'No corresponding source band'),
+      saturated: L('目标条带过曝', 'Target saturated'),
+      'not quantifiable': L('目标条带不可定量', 'Target not quantifiable'),
+      'missing control lane': L('内参缺少对应泳道', 'Corresponding control lane missing'),
+      'control saturated': L('对应内参泳道过曝', 'Corresponding control lane saturated'),
+      'control not quantifiable': L('对应内参泳道不可定量', 'Corresponding control lane not quantifiable'),
+      'control non-positive': L('对应内参信号不大于零', 'Corresponding control signal is not positive'),
+      'missing or invalid loading control': L('未选择有效内参', 'No valid loading control selected'),
+      'invalid reference group': L('对照组均值无效', 'Invalid reference-group mean')
+    };
+    return labels[reason] || G.WBQuantROI.reason(reason || '');
+  }
 
   /* warnings travel as codes so the panel can speak the interface language and the export stays English */
   function qWarnText(w, en) {
     const nm = w.row ? qName(w.row) : '', bl = w.blot ? App.blotNameEn(w.blot) : '';
     switch (w.code) {
+      case 'roi-method-updated': return en ? 'This project used the earlier adaptive method. Fixed-ROI suggestions now recalculate its values; review and apply a template for each protein before interpreting the results.' : '此项目原用自适应积分；当前已按固定框建议重算，数值可能改变。请逐蛋白核对并应用定量框后再解释结果。';
       case 'no-control': return en ? 'No loading control is chosen, so no ratios are reported.' : '还没有指定内参，因此不给比值。';
+      case 'reference-invalid': return en ? `${nm}: the reference group is missing, overlapping or has no positive mean; no relative values are reported.` : `${nm}：对照组已改变、分组重叠或均值无效，不生成相对倍数。`;
       case 'control-missing': return en ? 'The chosen control row is not part of this figure.' : '指定的内参行不在当前成图里。';
       case 'no-total': return en ? 'No total-protein picture is chosen, so no ratios are reported.' : '还没有选择总蛋白图，因此不给比值。';
-      case 'total-not-stain': return en ? 'The chosen picture has bright bands on a dark background — that is a chemiluminescence frame, not a stain. Choose the Ponceau / Coomassie / stain-free photo.'
-        : '所选图是暗背景亮条带（化学发光），不是染色图。请选 Ponceau / 考马斯 / stain-free 照片。';
+      case 'total-not-stain': return en ? 'A total-protein signal could not be prepared from the chosen picture. Check its source and band polarity.'
+        : '无法从所选图建立总蛋白信号，请核对来源与条带极性。';
       case 'total-not-in-group': return en ? `${nm}: the chosen total-protein picture is on another membrane, so this row has no total to divide by. Choose that membrane's own stain.`
         : `${nm}：所选总蛋白图在另一张膜上，这一行没有可除的总蛋白。请选同一张膜的染色图。`;
       case 'weak-control': return en
@@ -2400,72 +2604,94 @@
       case 'eight-bit': return en ? `${bl || 'A membrane'} came from an 8-bit source: its volumes are comparable only within that membrane.`
         : `${bl || '某张膜'}来自 8-bit 源：体积只能在同一张膜内比较。`;
       case 'linearity': return en
-        ? `${nm}: the signal is not proportional across exposures (R² ${w.r2 == null ? '—' : w.r2.toFixed(3)}, largest residual ${(w.dev * 100).toFixed(0)}%). These volumes are outside the detector's linear range — do not report them as fold changes.`
-        : `${nm}：各次曝光的信号不成正比（R² ${w.r2 == null ? '—' : w.r2.toFixed(3)}，最大残差 ${(w.dev * 100).toFixed(0)}%）。这些体积已超出检测器线性范围，不要当作倍数变化报告。`;
+        ? `${nm}: the signal failed the ${w.mode === 'dilution' ? 'loaded-amount' : 'exposure-time'} proportionality criterion (R² ${w.r2 == null ? '—' : w.r2.toFixed(3)}, largest residual ${(w.dev * 100).toFixed(0)}%). Do not treat this as validation for fold changes.`
+        : `${nm}：${w.mode === 'dilution' ? '上样量' : '曝光时间'}正比检验未通过（R² ${w.r2 == null ? '—' : w.r2.toFixed(3)}，最大残差 ${(w.dev * 100).toFixed(0)}%）。不能据此认定倍数变化有效。`;
+      case 'linearity-incomplete': return en
+        ? `${nm}: the ${w.mode === 'dilution' ? 'dilution' : 'exposure'} check is ${w.verdict}; ${w.tested}/${w.total} lanes tested. Unvalidated lanes are not passes.`
+        : `${nm}：${w.mode === 'dilution' ? '稀释' : '曝光'}检验尚不完整，已检验 ${w.tested}/${w.total} 道；未验证不等于通过。`;
       default: return en ? String(w.code) : String(w.code);
     }
   }
   // linearity is the expensive part: one pass per block, reused by the panel and the exports
   function qLinearity(blk) {
-    return blk.rows.map(x => ({ row: x.row, fit: App.quantLinearity(x.row) })).filter(o => o.fit);
+    return blk.rows.flatMap(x => App.quantLinearityChecks(x.row, blk.settings.exposureCheck).map(fit => ({ row: x.row, fit })));
   }
   function qWarnings(blk, lin) {
     const out = blk.warnings.slice();
     (lin || []).forEach(o => {
-      const deviates = o.fit.verdict === 'deviates' && o.fit.worst;
-      if (deviates) out.push({ code: 'linearity', row: o.row, r2: o.fit.worst.r2, dev: o.fit.worst.maxDev });
+      const fit = qFit(o.fit);
+      if (o.fit.verdict === 'deviates' && fit) out.push({ code: 'linearity', mode: o.fit.mode, row: o.row, r2: fit.r2, dev: fit.maxDev });
+      else if (o.fit.verdict !== 'proportional') out.push({ code: 'linearity-incomplete', row: o.row, mode: o.fit.mode,
+        verdict: o.fit.verdict, tested: o.fit.coverage ? o.fit.coverage.tested : 0, total: o.fit.coverage ? o.fit.coverage.total : 1 });
     });
     return out;
   }
 
   function quantCsv(blocks, linByBlock) {
-    const lines = [], detail = [], norm = [], lins = [], cond = [], warns = [];
+    const lines = [], detail = [], norm = [], lins = [], points = [], cond = [], warns = [];
     blocks.forEach((blk, bi) => {
       const st = App.columnData(blk.id), names = qLaneNames(blk), s = blk.settings;
       if (blocks.length > 1) lines.push(['layout column', blk.id, (blk.column && blk.column.title) || '']);
       lines.push(['protein', 'membrane', 'exposure'].concat(names));
       blk.rows.forEach(x => lines.push([qName(x.row), qMembrane(x), qExpo(x)].concat(x.d.map(qVol))));
       blk.rows.forEach(x => {
-        if (!x.norm) return;
-        const r0 = x.norm.find(v => v != null) || 1;
-        lines.push([`${qName(x.row)}/${qDenomLabel(blk, x)} (rel. lane 1)`, qMembrane(x), ''].concat(x.norm.map(v => (v == null ? '' : (v / r0).toFixed(3)))));
+        const relative = qRel(x);
+        if (!relative) return;
+        lines.push([`${qName(x.row)}/${qDenomLabel(blk, x)}${x.reference ? ` (fold of ${x.reference.group || 'invalid reference'})` : ' (control ratio)'}`, qMembrane(x), ''].concat(relative.map(value => value == null ? '' : value.toPrecision(10))));
       });
       lines.push([]);
       blk.rows.forEach(x => x.d.forEach((v, i) => {
         if (!v) return;
-        detail.push([qName(x.row), qMembrane(x), qExpo(x), names[i], v.volume.toFixed(2), v.background.toFixed(5), v.bgNoise.toFixed(5), v.snr.toFixed(1), Math.round(v.widthPx), v.excludedFrac.toFixed(4), x.rec && x.rec.bits != null ? x.rec.bits : '', v.quantifiable ? 'yes' : 'no', v.grade]);
+        detail.push([qName(x.row), qMembrane(x), qExpo(x), names[i], v.volume, v.background, v.bgNoise, v.snr, v.widthPx, v.excludedFrac, x.rec && x.rec.bits != null ? x.rec.bits : '', v.quantifiable ? 'yes' : 'no', v.grade,
+          x.source.image, x.source.exposureSeconds ?? '', JSON.stringify({ ...x.source.lanes[i], sampledBounds: v.bounds, backgroundBounds: v.backgroundBounds }), x.exclusions[i] || '',
+          x.roi.mode, v.heightPx ?? '', v.areaPx ?? '', v.rawSum ?? '', JSON.stringify(x.roi)]);
       }));
       // what divided the volume, so the division can be redone without this tool
       if (s.method !== 'none') blk.rows.forEach(x => {
         if (!x.denom) return;
-        x.denom.forEach((dv, i) => { if (dv != null) norm.push([qName(x.row), qMembrane(x), names[i], qDenomLabel(blk, x), dv.toFixed(4), x.norm && x.norm[i] != null ? x.norm[i].toFixed(5) : '']); });
+        x.denom.forEach((dv, i) => norm.push([qName(x.row), qMembrane(x), names[i], qDenomLabel(blk, x), dv ?? '', x.norm && x.norm[i] != null ? x.norm[i] : '',
+          x.reference ? x.reference.group || '' : '', x.reference ? x.reference.mean ?? '' : '', x.relative ? x.relative[i] ?? '' : '', x.exclusions[i] || '',
+          x.controlSource ? JSON.stringify({ row: x.controlSource.row, column: x.controlSource.column, image: x.controlSource.image,
+            exposureSeconds: x.controlSource.exposureSeconds, ...x.controlSource.lanes[i] }) : '']));
       });
       (linByBlock[bi] || []).forEach(o => {
-        const f = o.fit, w = f.worst || (f.fit && f.fit.r2 != null ? f.fit : null);
-        const verdict = f.reason === 'factors' ? 'not enough points (exposure times unknown)' : f.verdict;
-        lins.push([qName(o.row), f.mode, f.mode === 'dilution' ? 1 : f.exposures, w ? w.n : '', w ? w.r2.toFixed(4) : '', w ? w.maxDev.toFixed(4) : '', verdict]);
+        const f = o.fit, fit = qFit(f), coverage = f.coverage;
+        lins.push([qName(o.row), f.mode, f.mode === 'dilution' ? 1 : f.exposures, fit ? fit.n : '',
+          qUsable(f) ? fit.r2.toFixed(4) : '', qUsable(f) ? fit.maxDev.toFixed(4) : '', f.verdict,
+          coverage ? coverage.tested : '', coverage ? coverage.total : '', f.reason || (fit && fit.reason) || '']);
+        const series = f.mode === 'exposure' ? f.series.flat() : f.series;
+        series.forEach(point => points.push([qName(o.row), App.blotNameEn(App.blot(o.row.blot)), f.mode,
+          point.lane, (App.images.get(point.image) || {}).name || '', point.x, f.mode === 'exposure' ? 'seconds' : 'loaded fraction', point.y]));
       });
-      blk.rows.forEach(x => (x.conditions || []).forEach(c => {
+      blk.rows.forEach(x => [...(x.volumeConditions || []).map(stat => ({ ...stat, scale: 'volume' })),
+        ...(x.conditions || []).map(stat => ({ ...stat, scale: x.reference ? 'fold of reference-group mean' : 'control ratio' }))].forEach(c => {
         if (!c.n) return;
-        cond.push([qName(x.row), qMembrane(x), c.text || `lanes ${c.from}-${c.to}`, c.n, c.mean.toFixed(5), c.sd == null ? '' : c.sd.toFixed(5), c.cv == null ? '' : c.cv.toFixed(4)]);
+        cond.push([qName(x.row), qMembrane(x), c.text || `lanes ${c.from}-${c.to}`, c.scale, c.n, c.mean.toFixed(5), c.sd == null ? '' : c.sd.toFixed(5), c.cv == null ? '' : c.cv.toFixed(4)]);
       }));
       qWarnings(blk, linByBlock[bi]).forEach(w => warns.push([qWarnText(w, true)]));
     });
     lines.push(['# normalisation: what each volume was divided by']);
-    lines.push(['protein', 'membrane', 'lane', 'basis', 'denominator', 'normalised']);
+    lines.push(['protein', 'membrane', 'lane', 'basis', 'denominator', 'normalised', 'reference_group', 'reference_mean', 'displayed_normalised', 'exclusion', 'control_source']);
     lines.push(...norm);
     lines.push([]);
     lines.push(['# lane detail: how each volume was measured']);
-    lines.push(['protein', 'membrane', 'exposure', 'lane', 'volume', 'background', 'bg_noise', 'snr', 'width_px', 'excluded_frac', 'bit_depth', 'quantifiable', 'source_grade']);
+    lines.push(['protein', 'membrane', 'exposure', 'lane', 'volume', 'background', 'bg_noise', 'snr', 'width_px', 'excluded_frac', 'bit_depth', 'quantifiable', 'source_grade', 'source_image_id', 'exposure_seconds', 'source_geometry', 'exclusion', 'integration_mode', 'height_px', 'area_px', 'raw_sum', 'roi_template']);
     lines.push(...detail);
     lines.push([]);
     lines.push(['# linearity: does the signal scale with what was loaded (or with exposure)?']);
-    lines.push(['protein', 'mode', 'exposures', 'n_lanes', 'r2', 'max_dev', 'verdict']);
+    lines.push(['protein', 'mode', 'exposures', 'n_points', 'r2', 'max_dev', 'verdict', 'lanes_tested', 'lanes_total', 'reason']);
     lines.push(...lins);
     lines.push([]);
+    lines.push(['# linearity points: measured volumes used in each fit']);
+    lines.push(['protein', 'membrane', 'mode', 'lane', 'image', 'x', 'x_unit', 'volume']);
+    lines.push(...points);
+    lines.push([]);
+    lines.push(['# analysis settings', JSON.stringify(App.quantSettings())]);
+    lines.push(['# exposure-time check', App.quantSettings().exposureCheck ? 'requested' : 'not performed']);
+    lines.push(['# sample unit', App.quantSettings().sampleUnit, 'descriptive n counts measured lanes, not automatically biological replicates']);
     if (cond.length) {
-      lines.push(['# conditions: the lane ranges the figure labels, as replicates (no test is applied)']);
-      lines.push(['protein', 'membrane', 'condition', 'n', 'mean', 'sd', 'cv']);
+      lines.push(['# conditions: descriptive summaries of measured lanes (no test is applied)']);
+      lines.push(['protein', 'membrane', 'condition', 'scale', 'n', 'mean', 'sd', 'cv']);
       lines.push(...cond);
       lines.push([]);
     }
@@ -2475,10 +2701,10 @@
       lines.push([]);
     }
     lines.push(['Volumes = sum of (signal - local background) over the band, on the exposure shown in the figure.']);
-    lines.push(['Background = median of the columns beside the band; width_px = the integration window: the band profile at 35% of its peak, mirrored about the peak and held to 0.16-1.00 of the lane spacing (not a fixed fraction).']);
-    lines.push(['SAT = more than 2% of the band is clipped; those pixels are left out of the sum, so the volume is a lower bound and no ratio is given. n/q = too few pixels to measure; no ratio either.']);
+    lines.push(['Fixed mode: one width/height template per protein, in source pixels; signal = raw_sum - area_px * local median background. The background uses two recorded strips with shared direction, gap and width. Fixed ROI samples use a 1 px grid; no zero clamp or automatic background fallback. Advanced adaptive mode uses the 35% peak-profile width with historical flank/fallback background.']);
+    lines.push(['SAT = saturated measurement; fixed mode rejects any saturated source pixel in its ROI. Advanced adaptive mode omits clipped samples and rejects lanes above 2% clipping. n/q = invalid, outside, overlapping or unavailable ROI/background; no normalised value.']);
     lines.push(['source_grade display-8bit = the source carries only 8 bits per channel (an 8-bit acquisition or export); use these volumes only as relative values within one membrane.']);
-    lines.push(['Normalisation divides by a control on the same membrane (or by total protein, or by the lane sum) and then by lane 1. It does not make a saturated or non-proportional signal valid.']);
+    lines.push(['Normalised values are target/control ratios. Optional relative expression divides by the positive mean of the explicitly selected reference group, never by the first lane automatically. Normalisation does not validate a saturated or non-proportional signal.']);
     lines.push(['No p-values are reported: n, mean, SD and CV are given so the statistics can be done in the analysis software, where the design is known.']);
     return lines.map(l => l.map(v => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v)).join(',')).join('\r\n');
   }
@@ -2489,6 +2715,8 @@
       software: 'BlotFigure ' + App.VERSION,
       generatedAt: new Date().toISOString(),
       method: s.method,
+      settings: s,
+      sampleUnit: s.sampleUnit,
       control: s.controlRow ? { row: (App.row(s.controlRow) || {}).name || null, source: s.controlSource } : null,
       totalProteinImage: s.totalImage ? ((App.images.get(s.totalImage) || {}).name || null) : null,
       parameters: App.processingLog().quantification,
@@ -2500,12 +2728,25 @@
           protein: x.row.name || null,
           membrane: qMembrane(x),
           exposure: qExpo(x),
-          volumes: x.d.map(v => (v ? { volume: v.volume, background: v.background, bgNoise: v.bgNoise, snr: v.snr, widthPx: v.widthPx, excludedFrac: v.excludedFrac, saturated: v.saturated, grade: v.grade, quantifiable: v.quantifiable } : null)),
+          row: x.row.id,
+          source: x.source,
+          controlRow: x.control,
+          controlSource: x.controlSource,
+          target: x.target,
+          reference: x.reference,
+          exclusions: x.exclusions,
+          roi: x.roi,
+          volumes: x.d.map(v => (v ? { volume: v.volume, rawSum: v.rawSum, background: v.background, bgNoise: v.bgNoise, snr: v.snr, mode: v.mode || 'adaptive', widthPx: v.widthPx, heightPx: v.heightPx, areaPx: v.areaPx, bounds: v.bounds, backgroundBounds: v.backgroundBounds, reason: v.reason, excludedFrac: v.excludedFrac, saturated: v.saturated, grade: v.grade, quantifiable: v.quantifiable } : null)),
           denominator: x.denom || null,
           normalised: x.norm || null,
-          conditions: (x.conditions || []).map(c => ({ condition: c.text || `lanes ${c.from}-${c.to}`, from: c.from, to: c.to, n: c.n, mean: c.mean, sd: c.sd, cv: c.cv, values: c.values }))
+          relativeNormalised: x.relative || null,
+          conditions: (x.conditions || []).map(c => ({ condition: c.text || `lanes ${c.from}-${c.to}`, from: c.from, to: c.to,
+            scale: x.reference ? 'fold of reference-group mean' : 'control ratio', unit: s.sampleUnit,
+            n: c.n, mean: c.mean, sd: c.sd, cv: c.cv, values: c.values })),
+          volumeConditions: (x.volumeConditions || []).map(c => ({ condition: c.text || `lanes ${c.from}-${c.to}`, from: c.from, to: c.to,
+            scale: 'volume', n: c.n, mean: c.mean, sd: c.sd, cv: c.cv, values: c.values }))
         })),
-        linearity: (linByBlock[bi] || []).map(o => ({ protein: o.row.name || null, mode: o.fit.mode, exposures: o.fit.exposures || null, worst: o.fit.worst || o.fit.fit, verdict: o.fit.verdict })),
+        linearity: (linByBlock[bi] || []).map(o => ({ protein: o.row.name || null, row: o.row.id, ...o.fit })),
         warnings: qWarnings(blk, linByBlock[bi]).map(w => qWarnText(w, true))
       }))
     };
@@ -2515,30 +2756,53 @@
   function quantMethods(blocks, linByBlock) {
     const s = App.quantSettings(), v = App.VERSION;
     const bits = [];
-    bits.push(`Band intensities were quantified in BlotFigure ${v} on the exposure shown in each panel. Each band was integrated over a window taken from its own profile (full width at 35% of the peak, mirrored about the peak and limited to 0.16–1.00 of the lane spacing), above a background estimated from the columns flanking that band (median; MAD as its noise). Saturated pixels were excluded from the sum; a lane with more than 2% clipped pixels is reported as a lower bound and no ratio is given.`);
+    bits.push(`Band intensities were quantified in BlotFigure ${v} on the exposure shown in each panel.`);
+    const fixed = blocks.flatMap(block => block.rows.filter(entry => entry.roi.mode === 'fixed'));
+    const adaptive = blocks.flatMap(block => block.rows.filter(entry => entry.roi.mode === 'adaptive'));
+    if (fixed.length) bits.push('Fixed-ROI measurements used one locked width and height per protein, independent of individual-lane peak strength, sampled on a 1-pixel grid in the selected source image. Integrated signal was the ROI sum minus its area multiplied by the local median background; MAD estimates background noise. Two explicit background strips used the same direction, gap and width for every lane of that protein, without automatic fallback. Signed values were retained. Any saturated ROI, out-of-image/crop ROI, unavailable background or overlap with another measured ROI was excluded.');
+    fixed.forEach(entry => bits.push(`${qName(entry.row)}: ${entry.roi.width} x ${entry.roi.height} source pixels; ${entry.roi.backgroundDirection === 'sides' ? 'left/right' : 'above/below'} background strips ${entry.roi.backgroundWidth} px wide at ${entry.roi.gap} px gap; relative angle ${entry.roi.angle} degrees; ${entry.roi.reviewed ? 'the user applied the template to the current source' : 'suggested template, not yet reviewed for the current source'}.`));
+    if (adaptive.length) bits.push(`Advanced adaptive integration was explicitly selected for ${adaptive.map(entry => qName(entry.row)).join(', ')}. Width followed the 35% peak profile, mirrored about the peak and limited to 0.16–1.00 lane spacing; background used flank medians with the historical above/below fallback. Clipped samples were omitted; lanes above 2% clipping were excluded. This mode does not use equal-area templates.`);
     const eight = blocks.some(b => b.rows.some(x => x.rec && x.rec.bits != null && x.rec.bits <= 8));
     if (eight) bits.push('Some membranes were recorded at 8 bits per channel; their volumes are therefore compared only within the same membrane.');
     if (s.method === 'control') {
-      const c = App.row(s.controlRow);
-      if (c) bits.push(`Signals were normalised to ${c.name || 'the loading control'} on the same membrane${s.controlSource === 'suggested' ? ' (chosen by protein name)' : ''}, and are expressed relative to lane 1.`);
+      const controls = [...new Set(blocks.flatMap(block => block.rows.filter(entry => entry.denom && entry.control).map(entry => `${qName(entry.row)} / ${qName(App.row(entry.control))} (${qMembrane(entry)})`)))];
+      if (controls.length) bits.push(`Signals were divided by the loading-control signal from one row selected in the completed figure, matching corresponding figure-lane numbers across source image groups: ${controls.join('; ')}. Loading-control and sample correspondence were selected by the user. Missing or invalid control lanes were excluded without shifting later lane matches.`);
+      else bits.push('No valid loading control was selected; no normalised target/control values are reported.');
     } else if (s.method === 'total') {
       const t = App.images.get(s.totalImage);
-      bits.push(`Signals were normalised to total protein in the same lanes${t ? ` (${t.name})` : ''}, and are expressed relative to lane 1.`);
+      bits.push(`Signals were normalised to total protein in the same lanes${t ? ` (${t.name})` : ''}.`);
       // a stain has no band to follow: say how it was integrated, or the window sentence above would be wrong
-      bits.push('Total protein was integrated over the full width of each lane, above the background of the gaps between lanes.');
+      bits.push('Total protein was integrated over a central, sampling-grid-rounded window (nominal half-width 0.28 of lane spacing) spanning the selected membrane piece height, above the local background.');
     } else if (s.method === 'sum') {
-      bits.push('Signals were normalised to the sum of all lanes on the same membrane, and are expressed relative to lane 1.');
+      bits.push('Signals were normalised to the sum of all lanes on the same membrane and layout column.');
     } else {
       bits.push('Volumes are reported without normalisation.');
     }
+    const references = [...new Set(blocks.flatMap(block => block.rows.filter(entry => entry.reference && entry.relative).map(entry => `${qName(entry.row)} relative to ${entry.reference.group} (${qMembrane(entry)}, ${entry.reference.n} valid reference measurements)`)))];
+    if (references.length) bits.push(`Relative expression was calculated per sample by dividing each normalised value by the selected reference-group mean for that target and layout column: ${references.join('; ')}. The reference-group mean, not every reference sample, is one.`);
+    if (blocks.some(block => block.rows.some(entry => entry.reference && !entry.relative))) bits.push('Some selected reference groups were missing or invalid; relative expression was not reported for those rows.');
+    bits.push('Measurements used original pixels from the figure-selected exposures and boxes; display brightness, export resolution and rendered text did not affect the values.');
     const lines = (linByBlock || []).flat();
-    const okNames = lines.filter(o => o.fit.verdict === 'proportional').map(o => o.row.name).filter(Boolean);
-    const badNames = lines.filter(o => o.fit.verdict === 'deviates').map(o => o.row.name).filter(Boolean);
-    if (okNames.length) bits.push(`Signal was proportional to exposure time across the available exposures for ${okNames.join(', ')}${badNames.length ? `, but not for ${badNames.join(', ')}` : ''} (linear regression through the origin; R² ≥ 0.98 and residuals ≤ 10% of the strongest point).`);
-    else if (badNames.length) bits.push(`Signal was not proportional to exposure time for ${badNames.join(', ')} (linear regression through the origin; R² ≥ 0.98 and residuals ≤ 10% of the strongest point); the affected ratios should be read with caution.`);
+    ['exposure', 'dilution'].forEach(mode => {
+      const checks = lines.filter(entry => entry.fit.mode === mode);
+      const names = verdict => checks.filter(entry => entry.fit.verdict === verdict).map(entry => qName(entry.row));
+      const okNames = names('proportional'), badNames = names('deviates');
+      const incomplete = checks.filter(entry => !['proportional', 'deviates'].includes(entry.fit.verdict));
+      const axis = mode === 'exposure' ? 'recorded exposure time' : 'the protein amount loaded';
+      const label = mode === 'exposure' ? 'Exposure-time' : 'Dilution-series';
+      if (okNames.length) bits.push(`${label} checks found signal proportional to ${axis} for ${okNames.join(', ')}.`);
+      if (badNames.length) bits.push(`${label} checks found signal not proportional to ${axis} for ${badNames.join(', ')}; these checks do not validate fold-change reporting.`);
+      incomplete.forEach(entry => bits.push(`${label} proportionality was not fully validated for ${qName(entry.row)}${entry.fit.coverage ? ` (${entry.fit.coverage.tested}/${entry.fit.coverage.total} lanes testable)` : ''}.`));
+    });
+    if (lines.length) bits.push('Requested proportionality checks used regression through the origin with at least three distinct positive input levels, R² ≥ 0.98 and maximum residual ≤ 10% of the strongest point. Image-derived exposure factors were not used. Exposure-time checks alone do not establish proportionality to protein amount.');
+    if (!s.exposureCheck) bits.push('Exposure-time checks were not performed.');
+    if (!lines.length) bits.push('Signal proportionality to protein amount was not validated by this analysis.');
     const conds = [];
     (blocks || []).forEach(b => b.rows.forEach(x => (x.conditions || []).forEach(c => { if (c.n) conds.push(`${x.row.name || 'unnamed'} ${c.text || `lanes ${c.from}-${c.to}`}: n = ${c.n}`); })));
-    if (conds.length) bits.push(`Replicates are reported as mean ± SD with CV (${conds.join('; ')}).`);
+    if (conds.length) bits.push(`Descriptive summaries of measured lanes are reported on the displayed normalised and volume scales (${conds.join('; ')}). These counts do not by themselves establish biological replication.`);
+    bits.push(s.sampleUnit === 'independent' ? `The user confirmed independent samples. Nonoverlapping groups show individual measurements and means${s.errorBars === 'sd' ? ' with sample SD where n > 1' : ', without error bars'}; ungrouped or overlapping lanes remain individual measurements.`
+      : s.sampleUnit === 'technical' ? 'Measurements were declared technical repeats; plots do not show a biological-replicate summary.' : 'Independence of samples was not confirmed; plots show individual measurements without group means or error bars.');
+    if (s.plotStyle === 'bars') bits.push('Bar plots show group means only for confirmed independent, nonoverlapping groups; otherwise each bar represents one measured lane and carries no SD. Individual measurements are retained as points.');
     bits.push('No significance test was applied by the software.');
     return bits.join(' ');
   }
@@ -2553,8 +2817,8 @@
     const { blocks, lin } = qAll();
     if (!blocks.length) { toast(L('还没有可定量的行', 'No rows to quantify yet')); return; }
     G.Export.download(new Blob(['﻿' + quantCsv(blocks, lin)], { type: 'text/csv' }), 'blot_quantification.csv');
-    toast(L('已导出定量 CSV（含背景、积分宽度、归一化与线性检验；正式定量请用 ≥3 次独立实验）',
-      'Exported the densitometry CSV (background, integration width, normalisation and the linearity check; quantify from ≥3 independent experiments)'), 4000);
+    toast(L('已导出定量 CSV（含背景、积分范围、归一化与所请求的质控；请按实验设计核对样本与统计）',
+      'Exported quantitative CSV (background, integration bounds, normalisation and requested QC; verify samples and statistics for the study design)'), 4000);
   }
   function exportQuantJson() {
     const { blocks, lin } = qAll();

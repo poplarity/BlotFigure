@@ -1,6 +1,6 @@
 # Download one file and start making figures
 
-For the `0.14.0` desktop controls, see [typography, annotations and insets](desktop-editing.md). The download links below include these controls.
+Version `0.15.0` includes the [desktop controls](desktop-editing.md) and optional [post-figure quantification](../README.md#exports), including fixed-size ROIs and quantitative plots.
 
 [中文说明](getting-started.zh-CN.md) · [Back to the project](../README.md)
 
@@ -10,9 +10,9 @@ For the `0.14.0` desktop controls, see [typography, annotations and insets](desk
 
 ## 1. Download
 
-**[Download BlotFigure-v0.14.0.html](https://github.com/poplarity/BlotFigure/releases/download/v0.14.0/BlotFigure-v0.14.0.html)** and save it to your Desktop or Downloads folder.
+**[Download BlotFigure-v0.15.0.html](https://github.com/poplarity/BlotFigure/releases/download/v0.15.0/BlotFigure-v0.15.0.html)** and save it to your Desktop or Downloads folder.
 
-This is the complete tool, about 700 KB. The interface, styles and image-processing code are all inside the same file.
+This is the complete tool, about 1.1 MB. The interface, styles and image-processing code are all inside the same file.
 
 If you arrive at the [GitHub release page](https://github.com/poplarity/BlotFigure/releases/latest):
 

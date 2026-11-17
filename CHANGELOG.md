@@ -4,6 +4,37 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-16
+
+Current-figure quantification, fixed-size ROIs and direct analysis tools.
+
+**中文摘要**
+- 定量框入口前置到左栏和预览工具栏；统一尺寸常显，单道/整排/画框直接切换，支持拖边角控制点统一缩放、点表选道和前后道导航，高级参数折叠。修复缺道放大、无效输入恢复及应用后的键盘焦点。
+- 条件行名称支持独立左右位置与左/中/右对齐，同侧共享对齐列，保留多列独立、文字格式和 PPT/SVG/PNG 一致性；选中蛋白裁切框显示源像素宽高，定量框另显统一宽高与面积。
+- 定量默认改为每蛋白固定宽高矩形，新增独立源图编辑器：拖画模板、单道/整排移动、可选等距/角度和统一局部背景，实时预览、应用/取消与撤销。饱和、越界、重叠道明确排除；旧项目提示方法改变需复核，高级选项保留原自适应积分。
+- 内参在原表格位置直接显示扣背景分母，详情可查看逐道信号及调整定量框；点击数值联动真实积分及背景位置，不再只提示去折叠明细寻找。
+- 定量工作台以当前成图的原始曝光、框和可见泳道为准，成图统一选择一个内参，不按图片组分区，默认目标/内参，可选相对对照组均值，不再自动以第一道为 1。右侧直接显示定量结果，内参原始分母原位显示，目标原始信号另有折叠明细。
+- 修复未确认独立样本时选择柱形而预览不变：改为立即切换逐道柱形＋点；只有确认独立样本且分组有效才绘制组均值柱/SD。内参缺道不移位，导出保留分母原图、实际测量与泳道对应。
+- 新增实时定量图、逐点表格与实际积分范围联动，支持当前/全部所选目标的 PNG/SVG，以及带来源与排除原因的数据导出。独立样本确认后才显示分组均值/SD；多曝光检验改为折叠的可选高级质控。
+- 定量线性检验只使用记录的曝光时长，逐道报告覆盖率和失败；重复输入水平、无信号及非正斜率不再误判通过。曝光与稀释两种检验的结果及原始测量点同步进入导出。
+- 内参需显式确认，支持荧光总蛋白及手动极性；条件统计与当前表格尺度一致，体积和相对值分别保留。定量工作台阻止意外删框、重排及注释编辑，检验说明不再挤压蛋白名称。
+
+### Added
+- Discoverable sidebar/preview ROI actions, direct shared-template resize handles, segmented tools, lane/table navigation and visible source dimensions. Per-condition name side/alignment uses independent shared-width title columns and preserves editable exports.
+- Per-protein fixed-size quantification ROI templates and a bilingual, offline source editor with shared dimensions, drawing, individual/global movement, optional spacing/angle and consistent visible local-background strips. Preserve ROI geometry, review state and exclusions in projects and exports without editing figure sources.
+- Current-figure quantitative plots with one explicit figure-level loading control, optional reference-group scaling, individual-point/source-window linking and shared offline PNG/SVG rendering. Results show the formula directly; control-source signals stay in their cells and original target signals live in folded details. Group summaries require independent-sample confirmation; exposure checks are optional and folded.
+
+### Fixed
+- Show loading-control source signals directly in their table cells and details. Fixed-ROI mode rejects saturation, out-of-crop/image regions and signal/background overlaps; retain adaptive integration only as an explicit advanced alternative, and warn older projects before interpreting recalculated fixed-ROI values.
+- Bar mode immediately updates the preview, showing individual-lane bars when independent grouping is unavailable rather than silently retaining points. Keep exact cross-source control-lane provenance and do not shift matches around missing control lanes.
+- Quantification uses recorded exposure times, reports per-lane coverage and failures, and rejects degenerate fits. Exposure and dilution checks, including their measured points, remain visible in exports.
+- Require explicit loading-control confirmation; support fluorescent total protein and selectable polarity; keep condition statistics on the displayed scale. Guard figure edits in the quantification workspace and separate diagnostic text from protein names.
+- Give source-editor selects consistent height across browser engines, including WebKit. Native Safari download and storage behaviour still require device-specific verification.
+
+### Scientific boundaries
+- Initial ROI geometry is a suggestion requiring review; sample correspondence, loading-control stability and biological independence are not inferred from the assembled figure. Quantification does not certify publication suitability or produce automatic p-values.
+- Exposure-time and dilution checks are optional, with recorded coverage and exclusions. Eight-bit sources carry precision warnings. Legacy adaptive analyses warn that fixed-ROI recalculation can change their values.
+
 ## [0.14.0] - 2026-10-27
 
 Desktop typography and source-linked annotations, adapted from GelFigure.

@@ -239,6 +239,12 @@
         if (!marking && !pcsEd && (!row.hidden || sel)) {
           const tag = toScr(...bx.pts[0]); ctx.fillStyle = col; ctx.font = `600 10px ${FONT}`; ctx.textAlign = 'left';
           ctx.fillText(App.boxLabel(sg), tag.x + 4, tag.y + 13);
+          if (chosen && App.curStep === 3) {
+            const size = App.boxDimensions(row, sg), label = `${Number(size.width.toFixed(1))} × ${Number(size.height.toFixed(1))} px`;
+            ctx.font = `600 10px ${FONT}`;
+            const labelWidth = ctx.measureText(label).width + 10, left = Math.max(2, Math.min(w - labelWidth - 2, tag.x + 4)), top = Math.max(2, Math.min(h - 19, tag.y - 22));
+            ctx.fillStyle = '#ffffffee'; ctx.fillRect(left, top, labelWidth, 18); ctx.fillStyle = '#1f57c3'; ctx.fillText(label, left + 5, top + 12);
+          }
         }
         if (!last || bx.pts[1][0] > last[0]) last = bx.pts[1];
       });

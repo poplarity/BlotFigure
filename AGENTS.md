@@ -4,15 +4,20 @@
 
 The maintainer communicates in Chinese. This is the authoritative handover for coding agents; keep the existing WB workflow and independent protein regions. Develop and push to `dev`; merge into `main` and release only when the maintainer asks. Current user instructions take precedence over this snapshot.
 
-## 接手快照 — 2026-11-05
+## 接手快照 — 2026-11-16（v0.15.0 发布批次）
 
-- **已发布版本仍为 v0.14.0**（标签 [`v0.14.0`](https://github.com/poplarity/BlotFigure/tree/v0.14.0)，`e0cbdb0`，2026-10-27）。`dev` 上已有一套**未发布的定量分析功能**（P0–P3，见 [docs/quantification-plan.md](docs/quantification-plan.md) §6）：`WB.quantify` 重写、线性检验（多曝光 / 稀释序列）、四种归一化方式（内参 / 总蛋白 / 道和 / 不归一化）、弱内参告警、条件 n/mean/SD/CV、CSV/JSON/英文方法段落。定量不再是导出菜单里的模态框，而是**成图后的可选工作台**（第 5 步底部卡片或导出菜单入口，`body.quant-mode`，`← 返回成图` / `Esc` 退出；设计见 [docs/quantification-workbench.md](docs/quantification-workbench.md)，落地记录见 quantification-plan §6.3）。合并 `main`、升版本号、打标签都必须等维护者明确说「合并 / 发布」。
+- **维护者于 2026-11-16 明确授权发布 v0.15.0**。本批次包含成图后的可选定量工作台、全图明确选择内参、逐蛋白固定 ROI/局部背景与直接编辑、实时散点/柱形定量图、CSV/JSON/方法导出、条件名位置/对齐及裁切框源像素尺寸。当前行为以 [docs/quantification-plan.md](docs/quantification-plan.md) §6.7–6.8 为准；早期逐道自适应峰宽、工作台换曝光和首道缩放不是默认。发布状态与 CI 必须检查本次标签 [`v0.15.0`](https://github.com/poplarity/BlotFigure/tree/v0.15.0) 的实际 SHA，不借用历史成功记录。此次授权不延伸到后续新功能发布。
 - 发布提交的 [main CI](https://github.com/poplarity/BlotFigure/actions/runs/40478213062) 已完成且成功，三种浏览器通过；[Pages](https://github.com/poplarity/BlotFigure/actions/runs/40478213101) 和 [Release](https://github.com/poplarity/BlotFigure/actions/runs/40478213511) 发布成功。可编辑 PPT 另经 Windows PowerPoint 验证。这是历史验证记录，不代表未来提交已通过检查。
-- 本次交接编辑前，远程 `main` / `dev` 均为 `75d3389`：它只更新首页展示图和截图脚本，应用仍为 v0.14.0。本轮交接文档在 `dev` 提交；开始新任务时重新检查真实分支和工作区，不能把这个 SHA 当作永久最新状态。
-- 正式站点：[poplarity.github.io/BlotFigure](https://poplarity.github.io/BlotFigure/)；源码：[poplarity/BlotFigure](https://github.com/poplarity/BlotFigure)；[发布附件](https://github.com/poplarity/BlotFigure/releases/tag/v0.14.0)。`main` 推送会部署网站；`dev` 推送只触发 CI，不更新正式站点。
-- 本轮只整理维护文档，不改变图像算法、交互或版本号，不新建发布标签。
+- 本批次开始前 `dev` 为 `1bc11db`、`main` 为 `75d3389`；上一正式标签为 [`v0.14.0`](https://github.com/poplarity/BlotFigure/tree/v0.14.0)（`e0cbdb0`），保留不改写。工作区内 Nov 11–12 已批准的定量/交互修改一并纳入本批次；不能把本段基线 SHA 当作以后永久最新状态。
+- 正式站点：[poplarity.github.io/BlotFigure](https://poplarity.github.io/BlotFigure/)；源码：[poplarity/BlotFigure](https://github.com/poplarity/BlotFigure)；[本批次发布附件](https://github.com/poplarity/BlotFigure/releases/tag/v0.15.0)。`main` 推送会部署网站；`dev` 推送只触发 CI，不更新正式站点。发布记录见 [docs/releases/v0.15.0.md](docs/releases/v0.15.0.md)。
+- 2026-11-11 定量 review 后修复了曝光来源、逐道/退化回归判定、稀释检验导出、荧光总蛋白、工作台只读、统计尺度与内参确认记录，见 quantification-plan §6.4；该节优先于早期实现记录。版本号不变，不新建发布标签。
+- 2026-11-12 按维护者确认，定量跟随当前成图的原始曝光、框与可见泳道；全图统一选择一行内参，不按来源图片组/排版列限制，以成图泳道编号配对，缺失内参道不能导致后续错位。`S.quant.version:3` 保存单个 `controlRow` 及既有对照组/目标/绘图设置；旧版多个不同内参要求重选，唯一明确选择可迁移，名称建议不自动确认。默认目标/内参，可选除以对照组均值，不自动以第一道为 1。右侧直接显示定量结果与公式，原始信号折叠，不再有顶层尺度切换。柱形立即预览：未确认独立性时每道一柱加点，只有已确认且有效、不重叠分组才显示组均值/SD。预览与 PNG/SVG 共用无依赖渲染器，多曝光检验仍默认不执行。当前约定见 quantification-plan §6.6，优先于 §6.3–6.5 的冲突记录。
+
+- 同日后续按维护者确认，当前约定升级为 §6.7：`S.quant.version:4` 保存逐蛋白 `rois`，默认固定宽高源像素矩形；自动只给初始位置/尺寸建议，不能按每道峰强改变面积。`WBQuantROI` 提供独立源图编辑（拖画尺寸、单道/整排移动、可选等距/角度、统一左右或上下背景区），草稿实时计算，应用一次撤销，取消/Esc 不改状态，绝不改成图曝光/框/排版。越界/重叠/任意积分区饱和像素排除，不缩框或自动换背景。内参恢复原位扣背景分母及详情，不强制为 1；历史自适应保留高级选项，旧项目提示重算需复核。此条优先于上一条“内参原始信号仅在折叠明细”及旧自适应默认算法。
 
 ## 在另一台电脑接手
+
+最新交互约定（2026-11-12）：定量 ROI 入口位于左栏最前的 `qRoiSetup` 与预览工具栏 `qRoiToolbar`，右侧 `qEditRoi` 仅为快捷入口。编辑器统一宽高/面积常显，单道/整排/画框用现有分段按钮；拖控制点统一改本蛋白所有道尺寸，逐道位移不改成图。背景/等距/角度/算法折叠，缺道放大要有空状态，应用/取消后正确恢复焦点；WebKit ResizeObserver 必须延迟到下一动画帧，不能同步改被观察尺寸。条件对象保存 `nameSide:left|right`、`nameAlign:left|center|right`，默认左侧向内对齐；同侧共享名称列，不移动泳道值，独立排版列分别设置。蛋白裁切框与定量框分别显示实际源像素尺寸，编辑标记不导出。设计见 [docs/plans/2026-11-12-quantification-usability.md](docs/plans/2026-11-12-quantification-usability.md)。
 
 1. Clone 仓库，读本文与贡献指南。检查 `git status -sb`、最近提交、`git worktree list`，再 `git fetch origin` 检查远程。保留现有未提交修改；不要用 reset/clean 清理别人的工作。
 2. 在 `dev` 开发；已有工作树占用该分支时，到那个工作树操作或建立隔离分支。使用 `git pull --ff-only origin dev` 前先确认当前分支。正式版本复现使用标签的独立 checkout。
@@ -66,6 +71,8 @@ Linux 缺浏览器系统库时用 `npx playwright install --with-deps chromium f
 | `js/name-text.js`, `js/figure-text.js` | `NameText` / `FigureText`：安全文字片段、字体测量、上下标/颜色、SVG 文本；与 GelFigure 复用思路。 |
 | `js/wbnotes.js`, `js/wbnote-render.js` | `WBNotes` / `WBNoteRender`：与蛋白裁切分离的区域注释、放大图、侧边文字及来源锚点。 |
 | `js/wbrender.js` | `BRender`：状态 → 以 pt 为单位的 SVG、命中区域、来源片段、最小字号。 |
+| `js/wbquantplot.js` | `WBQuantPlot`：权威定量数据 → 同一份预览/PNG/SVG；逐样本点、可选分组均值/SD、来源与排除说明。 |
+| `js/wbquantroi.js` | `WBQuantROI`：独立定量 ROI 源图编辑与实时草稿，固定模板/背景、手势、应用/取消，不能修改成图。 |
 | `js/pptx.js` | `PPTX`：原生可编辑文字/图形、可恢复裁切的图片、无依赖 ZIP。 |
 | `js/wbview.js` | 原图画布、膜条/蛋白框/泳道/Marker 手势、缩放、拖动与矩形多选。 |
 | `js/wbui.js`, `js/wbextras.js` | `UI` 与扩展：五步菜单、相册分组、曝光比较、成图编辑、历史和导入入口。 |
@@ -138,7 +145,12 @@ Linux 缺浏览器系统库时用 `npx playwright install --with-deps chromium f
 | `workspace` | `tests/workspace014.mjs`：小电脑窗口、多选/Backspace/IME、参考数 2–6、同图 8/4/6、自定义 Marker 持久化。 |
 | `parity` | v0.14 文字格式/字号继承、颜色、来源注释/放大、可编辑 PPT、RGB 标注 TIFF、导入型号冲突。 |
 | `community` | 更新提示/历史、主动反馈（mock）、支持入口、导出提醒、离线与网络边界。 |
-| `quant` | `tests/quant.mjs`：`WB.quantify` 体积/背景/饱和/位深、`totalSignal` 染色极性、`linearFit` 判别力、定量工作台（两种入口、`quant-mode`、表格↔成图双向选中、换曝光+撤销、归一化视图与 CSV 同除数、复制 TSV、窄窗抽屉、`← 返回成图`/`Esc`）、归一化四方式、弱内参告警、条件 n/mean/SD/CV、CSV/JSON/方法段落。 |
+| `quant` | `tests/quant.mjs`：`WB.quantify` 体积/背景/饱和/位深、`totalSignal` 极性、`linearFit` 判别力、可选 A/B 质控、明确内参、工作台只读来源、视图/统计/导出尺度、TSV、窄窗、退出、四种方式与 CSV/JSON/方法段落。 |
+| `quantplot` | `tests/quantplot.mjs`：无首道缩放、对照组均值、已删除内参不回退、当前曝光/框/实际积分范围、独立样本确认、无分组/重叠/负值、点表来源联动、顶部导出跟随预览、真实 PNG/SVG、设置撤销和项目往返。 |
+| `quantfigure` | `tests/quantfigure.mjs`：全图单内参、跨来源组/排版列配对、无效/隐藏道不移位、旧选择迁移、直接结果/折叠原始信号、柱形实时预览、逐道柱与独立分组均值/SD、内参来源导出、双语与窄窗。 |
+| `quantroi` | `tests/quantroi.mjs`：固定面积/积分真值/负值/饱和/越界/重叠、逐蛋白模板、内参原位数值/联动、源图交互、取消/Esc/撤销、方法改变提示、等距/角度/背景、真实导出与项目往返、双语/窄窗。 |
+| `quantux` | `tests/quantux.mjs`：入口前置、固定尺寸常显、直接控制点缩放/单道整排移动、点表导航、缺道放大、重置与焦点、取消不改状态、窄窗与双语。 |
+| `conditionlayout` | `tests/conditionlayout.mjs`：左右名称列、六种位置/对齐组合、格式/多行/kDa 避让、真实控件与多列、可编辑 PPT 及 SVG/PNG 边界。 |
 | `test/boxlanes.html`, `test/ladderlane.html`, `test/register.html`, `test/engine.html` | 完整 runner 包含的算法检查；其他诊断页见 DEVELOP。实际应用的手动 Marker 流程不能仅用旧算法诊断页替代。 |
 
 发布前跑完整三内核；修改导出时额外检查实际产物，不只验证“有下载”。可选 Windows PowerPoint 验证器是 `scripts/check-pptx.ps1`，调用时 `-Folder` 与 `-Names` 必须对应本次真实生成的 PPT，默认文件名可能不存在；不能将空报告当作成功。Office 另存文件可能带机器身份元数据，只放忽略目录、不公开。
@@ -173,7 +185,7 @@ CI 在 `main` / `dev` 推送和 PR 运行 Node 22 + 三内核。检查 workflow 
 - **待确认范围：** 旧截图过程中英文顶栏在较窄宽度有拥挤现象；v0.14 已有小屏控件回归。区分主顶栏与成图工具栏，实际复现后定位，不能因 1920 宽截图正常就宣称所有窗口都无溢出。
 - `DEVELOP.md` 的“已知待办”与逐版本模型是历史记录，部分已被后续版本解决（拼接、单草稿、区域 Marker 字号、按参考数切块等）。先核对当前代码和本文，再决定是否仍为问题。
 - 自动分类/配准/识别受复合参考图、弱带、不规则摆膜影响。保留用户纠正与显式重新识别入口，不宣传每张图都自动正确；无曝光时间时不能还原真实拍摄时长。
-- **定量的验证边界：** 体积、背景、饱和与位深已在真实 8-bit TIFF 上核对；多曝光线性检验只有合成序列（仓库不含真实多曝光样本）。A 模式检验的是**检测器随曝光时间是否线性**，不能证明信号与蛋白量成正比——后者要靠用户填写的稀释序列（B 模式）。措辞见 `docs/quantification-plan.md` §6.2。工作台的屏幕数字与 CSV/JSON/方法段落同出 `App.quantData()`；它**不**在成图上画积分窗口（窗口在源图坐标系，错位比不画更糟），积分宽度/背景/SNR 只在行菜单里报告。`tests/quant.mjs` 只覆盖合成演示图。
+- **定量的验证边界：** 体积、背景、饱和与位深曾在真实 8-bit TIFF 上核对；本轮只有合成图与构造反例，不代表真实实验已经验证。多曝光线性检验只有合成序列（仓库不含真实多曝光样本）。A 模式只检验记录曝光时间与信号的正比性，不能证明信号与蛋白量成正比——后者要靠用户声明的同一样品稀释序列（B 模式）。未知时间不使用推测倍数，逐道汇总不隐藏部分覆盖，A/B 都进入导出，内参必须显式确认，总蛋白极性可手动指定。`App.quantData()` 与 `App.quantLinearityChecks()` 分别提供测量/统计和检验结果。点/表/来源联动按实际源帧显示积分/背景范围；不能用示意框代替真实边界。跨来源选择不证明样品对应、内参稳定或生物学独立，这些须实验者确认。固定 ROI 的建议位置/尺寸不是自动验证，需核对完整条带及干净背景。当前界面、固定框算法及柱形语义以 `docs/quantification-plan.md` §6.7 为准；WebKit 自动化不代替 Safari.app 下载/存储实机验证。
 - 字体是本地系统字体，不保证每台电脑完全相同；PPT 可恢复裁切的是完整**处理后**图像；缓存跨设备不自动同步。
 
 与维护者沟通用简明中文，先说结果、验证和剩余限制。复现用户报告后区分真实 bug 与难发现的操作，两者都可能需要改善体验；不要把“用户没找到入口”当作无需处理的理由。

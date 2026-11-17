@@ -114,6 +114,13 @@ export async function quantChecks(browser, base) {
         && eng.fits.bends.r2 < 0.98 && eng.fits.bends.maxDev > 0.1 && eng.fits.two.r2 === null
         && eng.fits.verdicts.join(',') === 'proportional,deviates,not enough points',
       JSON.stringify(eng.fits));
+    const invalidFits = await page.evaluate(() => [
+      [{ x: 1, y: 10 }, { x: 1, y: 10 }, { x: 1, y: 10 }],
+      [{ x: 1, y: 0 }, { x: 2, y: 0 }, { x: 3, y: 0 }],
+      [{ x: 1, y: -10 }, { x: 2, y: -20 }, { x: 3, y: -30 }]
+    ].map(points => { const fit = WB.linearFit(points); return { fit, verdict: WB.linearVerdict(fit) }; }));
+    check('identical concentrations, zero signal and negative slopes cannot validate proportionality',
+      invalidFits.every(result => result.fit.r2 == null && result.verdict !== 'proportional'), JSON.stringify(invalidFits));
 
     // ---- 8. a stain is read with the opposite polarity, and a chemi frame is refused ----
     const tot = await page.evaluate(() => {
@@ -122,20 +129,81 @@ export async function quantChecks(browser, base) {
       for (let y = 18; y < 22; y++) for (let x = 10; x < 30; x++) light[y * w + x] = 0.5;   // dark band on a light membrane
       for (let y = 18; y < 22; y++) for (let x = 10; x < 30; x++) dark[y * w + x] = 0.9;    // bright band on a dark one
       const st = WB.totalSignal({ w, h, data: light }), ch = WB.totalSignal({ w, h, data: dark });
-      return { stain: !!st, peak: st ? Math.max.apply(null, st.sig) : null, chemiRefused: ch === null };
+      const forced = WB.totalSignal({ w, h, data: dark }, 'bright');
+      return { stain: !!st, peak: st ? Math.max.apply(null, st.sig) : null,
+        fluorescence: !!ch, bright: ch && ch.bright, forcedPeak: forced ? Math.max.apply(null, forced.sig) : null };
     });
-    check('a stain (dark bands on a light membrane) is inverted; a chemiluminescence frame is refused',
-      tot.stain && Math.abs(tot.peak - 0.5) < 1e-6 && tot.chemiRefused, JSON.stringify(tot));
+    check('a declared total-protein image supports dark stains and bright fluorescence with explicit polarity',
+      tot.stain && Math.abs(tot.peak - 0.5) < 1e-6 && tot.fluorescence && tot.bright
+        && Math.abs(tot.forcedPeak - 0.9) < 1e-6, JSON.stringify(tot));
 
     // ---- 9. the workspace, opened with real clicks ----
     await page.goto(`${base}/index.html?demo=1&ladder=pr26619&draft=1&lang=en`);
     await page.waitForFunction(() => document.title.startsWith('READY '), null, { timeout: 240000 });
     // name a row as a loading control, so the suggested-control path is the one exercised
     await page.evaluate(() => { const r = BApp.S.rows.find(x => !x.hidden); r.name = 'GAPDH'; BApp.commit(); });
+    const rowChecks = await page.evaluate(() => {
+      const app = BApp, row = app.S.rows.find(candidate => !candidate.hidden), records = app.chemiOf(app.blot(row.blot));
+      const exposures = records.map(record => record.exposure), quantify = WB.quantify, rowExpo = app.rowExpo;
+      try {
+        records.forEach(record => { record.exposure = null; });
+        const unknown = app.quantLinearity(row);
+        records.forEach((record, index) => { record.exposure = index + 1; });
+        app.rowExpo = candidate => rowExpo(candidate).map((exposure, index) => ({ ...exposure, factor: index + 1 }));
+        const values = [[1.25, 1.35], [1.75, 2], [3, 3]];
+        WB.quantify = (image, signal, specs) => {
+          const index = records.findIndex(record => record.img === image);
+          return specs.map((spec, lane) => spec ? { volume: values[index][lane === 0 ? 0 : 1], quantifiable: true } : null);
+        };
+        const deviating = app.quantLinearity(row);
+        WB.quantify = (image, signal, specs) => {
+          const index = records.findIndex(record => record.img === image);
+          return specs.map((spec, lane) => spec ? { volume: index + 1, quantifiable: lane === 0 || index === 0 } : null);
+        };
+        const partial = app.quantLinearity(row);
+        return { unknown, deviating, partial };
+      } finally {
+        records.forEach((record, index) => { record.exposure = exposures[index]; });
+        WB.quantify = quantify;
+        app.rowExpo = rowExpo;
+      }
+    });
+    check('intensity-derived factors cannot replace missing exposure times in a linearity check',
+      rowChecks.unknown.verdict !== 'proportional' && rowChecks.unknown.reason === 'times-unknown', JSON.stringify(rowChecks.unknown));
+    check('a lane exceeding the residual limit makes the row fail even if another lane has a lower R2',
+      rowChecks.deviating.verdict === 'deviates', JSON.stringify(rowChecks.deviating));
+    check('one testable lane cannot mark the remaining untestable lanes as proportional',
+      rowChecks.partial.verdict === 'partial' && rowChecks.partial.coverage.tested === 1
+        && rowChecks.partial.coverage.total > 1, JSON.stringify(rowChecks.partial));
+    await page.locator('#preview image[data-row]').first().click();
+    const settledRows = await page.evaluate(() => BApp.S.rows.map(row => row.id));
     // the export-menu item is a shortcut to the same workspace, not a second dialog
     await page.click('#btnExportMenu');
     await page.click('#btnQuant');
     await page.waitForSelector('body.quant-mode', { timeout: 10000 });
+    await page.locator('#preview image[data-row]').first().click();
+    await page.keyboard.press('Backspace');
+    const afterDelete = await page.evaluate(() => BApp.S.rows.map(row => row.id));
+    check('the quantification workspace blocks inherited Backspace deletion of a selected figure box',
+      JSON.stringify(afterDelete) === JSON.stringify(settledRows), JSON.stringify({ settledRows, afterDelete }));
+    if (afterDelete.length !== settledRows.length) await page.evaluate(() => BApp.undo());
+    await page.keyboard.press('Alt+ArrowDown');
+    const afterReorder = await page.evaluate(() => BApp.S.rows.map(row => row.id));
+    check('the quantification workspace blocks inherited figure-reordering shortcuts',
+      JSON.stringify(afterReorder) === JSON.stringify(settledRows), JSON.stringify(afterReorder));
+    const annotation = await page.evaluate(() => {
+      const note = WBNotes.addLabel(BApp.S.rows[0].id, 'main'); note.text = 'Read-only note'; BApp.commit();
+      return { id: note.id, before: JSON.stringify(note) };
+    });
+    const noteBox = await page.locator(`#preview [data-note="${annotation.id}"]`).first().boundingBox();
+    await page.mouse.move(noteBox.x + noteBox.width / 2, noteBox.y + noteBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(noteBox.x + noteBox.width / 2 + 20, noteBox.y + noteBox.height / 2 + 12, { steps: 5 });
+    await page.mouse.up();
+    const afterAnnotation = await page.evaluate(id => JSON.stringify(BApp.S.notes.find(note => note.id === id)), annotation.id);
+    check('figure annotations cannot be dragged or edited inside the quantification workspace',
+      annotation.before === afterAnnotation, afterAnnotation);
+    await page.evaluate(id => { BApp.S.notes = BApp.S.notes.filter(note => note.id !== id); BApp.commit(); }, annotation.id);
     const fromMenu = await page.evaluate(() => ({
       mode: document.body.classList.contains('quant-mode'),
       dlgGone: !document.getElementById('quantDlg'),
@@ -161,10 +229,29 @@ export async function quantChecks(browser, base) {
       lin: document.querySelectorAll('#qLin .qlin').length,
       dilDisabled: document.getElementById('qDil').disabled
     }));
-    check('the workspace opens from the step-5 card: four methods, one linearity line per row, and a suggested control the export records as suggested',
-      panel.method === 'control' && !!panel.suggested && panel.control === panel.suggested && panel.source === 'suggested'
-        && panel.rows >= 2 && panel.lin >= panel.rows - 1 && !panel.dilDisabled,
+    check('the workspace proposes a loading control but waits for an explicit choice before using it',
+      panel.method === 'control' && !!panel.suggested && panel.control === '' && panel.source === 'none'
+        && panel.rows >= 2 && panel.lin === 0 && !panel.dilDisabled,
       JSON.stringify(panel));
+    await page.locator('#qAdvanced > summary').click();
+    await page.check('#qExposureCheck');
+    const linearityNameWidths = await page.evaluate(() => [...document.querySelectorAll('#qLin .nm')].map(label => label.getBoundingClientRect().width));
+    check('per-check diagnostics do not squeeze protein names into a single character',
+      linearityNameWidths.length > 0 && linearityNameWidths.every(width => width >= 96), JSON.stringify(linearityNameWidths));
+    const unconfirmed = await page.evaluate(() => {
+      BApp.setQuant({ dilution: {} });
+      return { source: BApp.quantSettings().controlSource, control: BApp.quantSettings().controlRow,
+        ratios: BApp.quantData().flatMap(block => block.rows).filter(row => row.norm).length };
+    });
+    check('editing unrelated settings cannot turn a suggested control into a confirmed control',
+      unconfirmed.source === 'none' && !unconfirmed.control && unconfirmed.ratios === 0, JSON.stringify(unconfirmed));
+    const legacySuggestion = await page.evaluate(() => {
+      const saved = BApp.S.quant;
+      BApp.S.quant = { method: 'control', controlRow: BApp.suggestControl(), controlSource: 'suggested' };
+      const settings = BApp.quantSettings(); BApp.S.quant = saved; return settings;
+    });
+    check('a legacy project marked suggested does not silently become an explicit control choice',
+      !legacySuggestion.controlRow && legacySuggestion.controlSource === 'none', JSON.stringify(legacySuggestion));
     // "not enough points" reads as a broken tool when the bands look even: a point is an exposure, and the
     // reason has to name the exposures that were lost, not just count what is left
     const why = await page.evaluate(() => [...document.querySelectorAll('#qLin .qlin')].map(b => ({
@@ -205,6 +292,7 @@ export async function quantChecks(browser, base) {
     });
 
     // ---- 10. each normalisation method means what it says ----
+    await page.locator('#qOtherMethods > summary').click();
     await page.locator('#qMethodBox input[value="sum"]').check();
     const sumState = await page.evaluate(() => {
       const b = BApp.quantData()[0], rows = b.rows.filter(x => x.norm);
@@ -215,35 +303,35 @@ export async function quantChecks(browser, base) {
       const b = BApp.quantData()[0];
       return { norm: b.rows.filter(x => x.norm).length, warn: b.warnings.map(w => w.code) };
     });
-    // with nothing dividing the volumes the toggle has nothing to show and says so
-    const noneToggle = await page.evaluate(() => document.querySelector('#qViewSeg button[data-v="norm"]').disabled);
+    const noneToggle = await page.evaluate(() => !document.getElementById('qViewSeg') && /Raw signal/.test(document.getElementById('qDetail').textContent));
     await page.locator('#qMethodBox input[value="control"]').check();
     check('the lane-sum method makes every lane a fraction of that row\'s total, and "none" gives no ratio',
       sumState.nRows > 0 && sumState.sum.every(s => s > 0.99 && s <= 1 + 1e-6) && noneState.norm === 0 && noneToggle,
       JSON.stringify({ sumState, noneState, noneToggle }));
-    // the two views read the same numbers the CSV calls "rel. lane 1": the first quantifiable lane is 1
-    await page.click('#qViewSeg button[data-v="norm"]');
     const normView = await page.evaluate(() => {
       const rows = [...document.querySelectorAll('#qTableWrap tbody tr')];
-      return rows.map(tr => ({ row: tr.dataset.row, first: (tr.querySelector('td.qnc .qcell span') || {}).textContent }));
+      const canonical = BApp.quantData().flatMap(block => block.rows);
+      return rows.map(tr => {
+        const entry = canonical.find(candidate => candidate.row.id === tr.dataset.row);
+        return { row: tr.dataset.row, first: (tr.querySelector('td.qnc .qcell span') || {}).textContent,
+          expected: (entry.isControl ? entry.d.map(value => value && value.quantifiable ? value.volume : null) : entry.relative || []).find(value => value != null) };
+      });
     });
-    await page.click('#qViewSeg button[data-v="volume"]');
-    check('the normalised view divides by the first quantifiable lane, exactly as the CSV does',
+    check('the normalised view reports the actual control ratio without automatic first-lane scaling',
       normView.filter(x => x.first != null).length >= 2
-        && normView.filter(x => x.first != null).every(x => x.first === '1.00'), JSON.stringify(normView));
-    // the chart under the table reads the same view, so one number never means two things
+        && normView.filter(x => x.first != null).every(x => Math.abs(Number(x.first) - x.expected) <= Math.max(0.001, Math.abs(x.expected) * 0.015)), JSON.stringify(normView));
     const normRow = await page.evaluate(() => {
       const b = BApp.quantData()[0];
       const x = b.rows.find(r => r.norm && r.norm.some(v => v != null));
       return x ? x.row.id : null;
     });
     await page.click(`#qTableWrap tbody tr[data-row="${normRow}"]`);
-    await page.click('#qViewSeg button[data-v="norm"]');
     const detailNorm = await page.evaluate(() => [...document.querySelectorAll('#qDetail .qd-sub')].pop().textContent);
-    await page.click('#qViewSeg button[data-v="volume"]');
-    const detailVol = await page.evaluate(() => [...document.querySelectorAll('#qDetail .qd-sub')].pop().textContent);
-    check('the detail chart follows the volume / normalised toggle',
-      /Normalised/.test(detailNorm) && /Volume/.test(detailVol), JSON.stringify({ detailNorm, detailVol }));
+    await page.locator('#qRawDetails > summary').click();
+    const detailVol = await page.textContent('#qRawDetails');
+    check('results name the control ratio while original signals remain in expanded details',
+      /\//.test(detailNorm) && /Raw signal details/.test(detailVol) && await page.locator('#qRawTable .qtable').count() > 0, JSON.stringify({ detailNorm, detailVol }));
+    await page.locator('#qRawDetails > summary').click();
 
     // ---- 10b. the table and the figure are two views of one selection ----
     const selId = () => page.evaluate(() => (document.querySelector('#qTableWrap tbody tr.sel') || { dataset: {} }).dataset.row);
@@ -260,15 +348,14 @@ export async function quantChecks(browser, base) {
     const other = page.locator('#qTableWrap tbody tr[data-row="' + ids[1] + '"] .qmenu');
     const before = await page.evaluate(id => ({ img: BApp.row(id).img, auto: BApp.row(id).auto }), ids[1]);
     await other.click();
-    const alt = page.locator('#popover [data-ex]:not(.primary)').first();
-    const canSwitch = await alt.count() > 0;
-    if (canSwitch) await alt.click();
+    const canSwitch = await page.locator('#popover [data-ex]').count() > 0;
     const switched = await page.evaluate(id => BApp.row(id).img, ids[1]);
-    if (canSwitch) { await page.click('#btnUndo'); }
     const restored = await page.evaluate(id => ({ img: BApp.row(id).img, auto: BApp.row(id).auto }), ids[1]);
-    check('the row menu switches that row\'s exposure, and undo puts the previous one back',
-      canSwitch && switched !== before.img && restored.img === before.img && restored.auto === before.auto,
+    const returnSource = await page.locator('#qmEditSource').count();
+    check('the row menu keeps the selected figure exposure read-only and offers a return to figure editing',
+      !canSwitch && returnSource === 1 && switched === before.img && restored.img === before.img && restored.auto === before.auto,
       JSON.stringify({ before, switched, canSwitch, restored }));
+    await page.keyboard.press('Escape');
     // Esc is the same exit as the back button
     await page.keyboard.press('Escape');
     const escLeft = await page.evaluate(() => !document.body.classList.contains('quant-mode'));
@@ -319,6 +406,7 @@ export async function quantChecks(browser, base) {
     // ---- 12. conditions become n / mean / SD / CV, with no test applied ----
     const conds = await page.evaluate(() => {
       const C = BApp, n = C.columns(C.layoutColumns()[0].id).vis.length;
+      C.setQuant({ sampleUnit: 'independent' });
       C.S.groups = [{ from: 1, to: Math.min(3, n), text: 'Control' }, { from: Math.min(3, n - 1) + 1, to: n, text: 'KD' }];
       C.commit();
       const b = C.quantData()[0], x = b.rows.find(r => r.conditions && r.conditions.some(c => c.n > 1));
@@ -327,6 +415,17 @@ export async function quantChecks(browser, base) {
     check('the lane ranges the figure already labels become replicates with n, mean, SD and CV',
       !!conds && conds.some(c => c.n > 1 && c.mean > 0 && c.sd != null && c.cv != null)
         && conds.every(c => c.n < 2 || c.sd != null), JSON.stringify(conds));
+    const statsRow = await page.evaluate(() => BApp.quantData()[0].rows.find(row => row.norm && row.norm[0] > 0).row.id);
+    await page.click(`#qTableWrap tbody tr[data-row="${statsRow}"]`);
+    const viewStats = [await page.evaluate(() => {
+        const rowId = document.querySelector('#qTableWrap tr.sel').dataset.row;
+        const row = BApp.quantData()[0].rows.find(candidate => candidate.row.id === rowId);
+        const values = row.relative.slice(0, 3).filter(value => value != null);
+        return { expected: values.reduce((sum, value) => sum + value, 0) / values.length,
+          actual: Number(document.querySelector('#qDetail .qstat tbody tr td:nth-child(3)').textContent) };
+      })];
+    check('condition means follow the same control-ratio scale as the visible result table',
+      viewStats.every(stat => Math.abs(stat.expected - stat.actual) <= Math.max(0.001, stat.expected * 0.015)), JSON.stringify(viewStats));
 
     // ---- 13. total protein, end to end: a painted stain normalises by what was loaded ----
     const total = await page.evaluate(() => {
@@ -364,11 +463,22 @@ export async function quantChecks(browser, base) {
       && total.ratios.every((r, i) => Math.abs(r - total.lanes[i]) / total.lanes[i] < 0.12);
     check('a painted total-protein stain normalises the lanes in proportion to what was loaded',
       totalOk, JSON.stringify(total).slice(0, 400));
+    const fluorescentTotal = await page.evaluate(() => {
+      const stain = BApp.images.get('stainT');
+      stain.img = { w: stain.img.w, h: stain.img.h, data: Float32Array.from(stain.img.data, value => 1 - value) };
+      BApp.setQuant({ totalPolarity: 'bright' });
+      const row = BApp.quantData()[0].rows.find(candidate => candidate.total && candidate.total.some(value => value && value.volume > 0));
+      return row ? { volumes: row.total.map(value => value && value.volume), warnings: BApp.quantData()[0].warnings.map(warning => warning.code) } : null;
+    });
+    check('a user-declared fluorescent total-protein image works end to end',
+      !!fluorescentTotal && fluorescentTotal.volumes.some(value => value > 0)
+        && !fluorescentTotal.warnings.includes('total-not-stain'), JSON.stringify(fluorescentTotal));
     // the methods text has to describe the stain integration it actually used, not the band profile
     await page.click('#qMethodsBtn');
     const totalMethods = await takeClip();
     check('the methods paragraph describes total-protein integration instead of reusing the band-window sentence',
-      !!totalMethods && /total protein/i.test(totalMethods) && /full width of each lane/.test(totalMethods),
+      !!totalMethods && /total protein/i.test(totalMethods) && /half-width 0\.28 of lane spacing/.test(totalMethods)
+        && /sampling-grid-rounded/.test(totalMethods),
       (totalMethods || '').slice(0, 300));
     await page.evaluate(() => {
       const C = BApp, blot = C.S.blots.find(b => b.images.includes('stainT'));
@@ -377,19 +487,37 @@ export async function quantChecks(browser, base) {
       C.images.delete('stainT');
       C.commit();
     });
+    const dilutionRow = await page.evaluate(() => {
+      const row = BApp.quantData()[0].rows.find(candidate => candidate.norm && candidate.norm.some(value => value > 0)).row;
+      row.name = 'Dilution target';
+      BApp.setQuant({ dilution: { [row.id]: [1, 0.5, 0.25] } });
+      return row.id;
+    });
+    await page.click(`#qTableWrap tbody tr[data-row="${dilutionRow}"]`);
+    const declaredDilution = await page.evaluate(() => ({
+      text: document.getElementById('qDilOut').textContent,
+      fit: BApp.quantDilution(BApp.row(document.querySelector('#qTableWrap tr.sel').dataset.row), [1, 0.5, 0.25])
+    }));
 
     // ---- 14. the exports, through the panel's own buttons ----
     const csv = await grab('qCsv');
     check('the exported CSV carries the volume table and every traceability block',
       !!csv && /# normalisation/.test(csv.text) && /# lane detail/.test(csv.text) && /# linearity/.test(csv.text)
-        && /# conditions/.test(csv.text) && /rel\. lane 1/.test(csv.text) && /lower bound/.test(csv.text),
+        && /# conditions/.test(csv.text) && /control ratio/.test(csv.text) && /Fixed mode/.test(csv.text) && /integration_mode/.test(csv.text),
       (csv && csv.text || '').slice(0, 300));
+    check('CSV includes the declared dilution fit, its failure and the original x/y points',
+      declaredDilution.fit.verdict === 'deviates' && /deviates/.test(declaredDilution.text)
+        && !!csv && /,dilution,/.test(csv.text) && /# linearity points/.test(csv.text), (csv && csv.text || '').slice(-1500));
     const json = await grab('qJson');
     const parsed = json ? JSON.parse(json.text) : null;
     check('the exported JSON records the software, the method and the per-lane numbers',
       !!parsed && /^BlotFigure \d/.test(parsed.software) && parsed.method === 'control' && !!parsed.parameters
         && parsed.columns[0].rows.some(r => r.volumes.some(v => v && v.volume > 0)),
       JSON.stringify(parsed && { software: parsed.software, method: parsed.method, cols: parsed.columns.length }));
+    const dilutionExport = parsed && parsed.columns.flatMap(column => column.linearity).find(fit => fit.mode === 'dilution');
+    check('JSON preserves the dilution settings, measured points and failed verdict',
+      !!dilutionExport && dilutionExport.verdict === 'deviates' && dilutionExport.series.length === 3
+        && parsed.parameters.settings.dilution[dilutionRow].join(',') === '1,0.5,0.25', JSON.stringify(dilutionExport));
 
     await page.evaluate(() => { window.__clip = null; });
     await page.click('#qMethodsBtn');
@@ -397,6 +525,9 @@ export async function quantChecks(browser, base) {
     check('the methods paragraph names the software, the normalisation and says no test was applied',
       !!methods && /BlotFigure \d/.test(methods) && /normalised/i.test(methods) && /No significance test/.test(methods),
       (methods || '').slice(0, 240));
+    check('Methods explicitly discloses a failed dilution-series check, rather than only a passed exposure check',
+      !!methods && /dilution/i.test(methods) && /not proportional to (the )?(protein )?amount/i.test(methods)
+        && /Dilution target/.test(methods), methods);
 
     check('no JavaScript errors during quantification', errs.length === 0, errs.join(' | '));
   } catch (e) {

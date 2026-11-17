@@ -180,20 +180,14 @@
     return { sig, bright, clip: clipped ? mx : Infinity, max: mx };
   }
 
-  /* signal image for a total-protein stain (Ponceau, Coomassie, stain-free): a light membrane with darker
-   * bands, so the signal is 1 - pixel — the opposite polarity to a chemiluminescence frame.
-   * A dark picture is a chemi exposure, not a stain, and is refused (null) rather than silently inverted. */
-  function totalSignal(img) {
-    // detectBright is true when the BANDS are the bright features. A stain has dark bands on a light
-    // membrane, so a true here means a chemiluminescence frame (or a scan whose bands glow) — refused
-    // rather than silently inverted.
-    if (E.detectBright(img)) return null;
-    const n = img.data.length, sig = new Float32Array(n);
-    for (let i = 0; i < n; i++) sig[i] = 1 - img.data[i];
+  function totalSignal(img, polarity) {
+    const bright = polarity === 'bright' || (polarity !== 'dark' && E.detectBright(img));
+    const n = img.data.length, sig = bright ? img.data : new Float32Array(n);
+    if (!bright) for (let i = 0; i < n; i++) sig[i] = 1 - img.data[i];
     let mx = 0; for (let i = 0; i < n; i++) if (sig[i] > mx) mx = sig[i];
     let cnt = 0; for (let i = 0; i < n; i++) if (sig[i] >= mx - 1e-6) cnt++;
     const clipped = cnt >= Math.max(6, n * 2e-6) && mx > 0.2;   // a saturated stain lane holds too much protein
-    return { sig, bright: false, clip: clipped ? mx : Infinity, max: mx };
+    return { sig, bright, clip: clipped ? mx : Infinity, max: mx };
   }
 
   /* ---------- session grouping ---------- */
@@ -1691,7 +1685,7 @@
    *   fullLane  integrate the whole lane width instead of following a band profile (total protein)
    * Returns per lane {volume, background, bgNoise, snr, widthPx, excludedFrac, saturated, grade, quantifiable}.
    *
-   * Four choices differ from a plain box integration, and each one matters for publication:
+   * The historical adaptive alternative differs from the fixed-template path below:
    * - The integration width comes from the band's own profile (where it falls to 35% of its peak), not from a
    *   fixed fraction of the lane spacing: a narrow band then stops collecting background, a broad one is not
    *   cut off.
@@ -1703,10 +1697,76 @@
    * An 8-bit source is flagged separately: only 8 bits per channel reached us (an 8-bit acquisition or an
    * 8-bit export), so its volumes are only comparable within one membrane. */
   const gradeOf = bits => (bits != null && bits <= 8 ? 'display-8bit' : 'ok');
+  function roiPolygon(spec, bounds) {
+    return [[bounds.u0, bounds.v0], [bounds.u1, bounds.v0], [bounds.u1, bounds.v1], [bounds.u0, bounds.v1]].map(point => toImg(spec.F, point[0], point[1]));
+  }
+  function roiIntersects(first, second) {
+    return [first, second].every(polygon => polygon.every((point, index) => {
+      const next = polygon[(index + 1) % polygon.length], axis = [point[1] - next[1], next[0] - point[0]];
+      const project = vertices => vertices.map(vertex => vertex[0] * axis[0] + vertex[1] * axis[1]);
+      const left = project(first), right = project(second);
+      return Math.min(...left) < Math.max(...right) - 1e-6 && Math.min(...right) < Math.max(...left) - 1e-6;
+    }));
+  }
+  function quantifyFixed(img, cs, spec) {
+    const width = Math.round(spec.roiWidth), height = Math.round(spec.roiHeight);
+    const gap = Math.max(0, Math.round(spec.backgroundGap || 0)), strip = Math.max(1, Math.round(spec.backgroundWidth || 1));
+    const bounds = { u0: -width / 2, u1: width / 2, v0: -height / 2, v1: height / 2, step: 1 };
+    const backgroundBounds = spec.backgroundDirection === 'above-below'
+      ? [{ ...bounds, v0: bounds.v0 - gap - strip, v1: bounds.v0 - gap }, { ...bounds, v0: bounds.v1 + gap, v1: bounds.v1 + gap + strip }]
+      : [{ ...bounds, u0: bounds.u0 - gap - strip, u1: bounds.u0 - gap }, { ...bounds, u0: bounds.u1 + gap, u1: bounds.u1 + gap + strip }];
+    const result = { mode: 'fixed', widthPx: width, heightPx: height, areaPx: width * height, bounds, backgroundBounds,
+      volume: null, rawSum: null, background: null, bgNoise: null, snr: 0, excludedFrac: 0, saturated: false, grade: gradeOf(spec.bits), quantifiable: false, reason: null };
+    if (!(width >= 2 && height >= 2 && Number.isFinite(width * height)) || !spec.F || !Object.values(spec.F).every(Number.isFinite)) {
+      result.reason = 'invalid ROI dimensions'; return result;
+    }
+    const inside = rectangle => roiPolygon(spec, rectangle).every(point => point[0] >= 0 && point[1] >= 0 && point[0] <= img.w - 1 && point[1] <= img.h - 1);
+    if (!inside(bounds)) { result.reason = 'ROI outside source image'; return result; }
+    if (spec.sourceCrop) {
+      const crop = spec.sourceCrop.bounds;
+      const contained = roiPolygon(spec, bounds).every(point => {
+        const local = toFrame(spec.sourceCrop.F, point[0], point[1]);
+        return local[0] >= crop.u0 - 1e-6 && local[0] <= crop.u1 + 1e-6 && local[1] >= crop.v0 - 1e-6 && local[1] <= crop.v1 + 1e-6;
+      });
+      if (!contained) { result.reason = 'ROI outside figure crop'; return result; }
+    }
+    if (!backgroundBounds.every(inside)) { result.reason = 'background outside source image'; return result; }
+    const signal = { w: img.w, h: img.h, data: cs.sig };
+    const sample = rectangle => sampleWindow(signal, spec.F, rectangle.u0, rectangle.u1, rectangle.v0, rectangle.v1, 1).data;
+    const background = backgroundBounds.flatMap(rectangle => Array.from(sample(rectangle))).sort((first, second) => first - second);
+    const median = values => values.length % 2 ? values[(values.length - 1) / 2] : (values[values.length / 2 - 1] + values[values.length / 2]) / 2;
+    result.background = median(background);
+    result.bgNoise = 1.4826 * median(background.map(value => Math.abs(value - result.background)).sort((first, second) => first - second));
+    const values = sample(bounds);
+    result.rawSum = values.reduce((sum, value) => sum + value, 0);
+    result.volume = result.rawSum - result.areaPx * result.background;
+    result.snr = result.bgNoise > 0 ? (values.reduce((peak, value) => Math.max(peak, value), -Infinity) - result.background) / result.bgNoise : 0;
+    if (Number.isFinite(cs.clip)) {
+      const clippedPixels = rectangle => {
+        const corners = roiPolygon(spec, rectangle);
+        let count = 0;
+        for (let vertical = Math.floor(Math.min(...corners.map(point => point[1]))); vertical <= Math.ceil(Math.max(...corners.map(point => point[1]))); vertical++) {
+          for (let horizontal = Math.floor(Math.min(...corners.map(point => point[0]))); horizontal <= Math.ceil(Math.max(...corners.map(point => point[0]))); horizontal++) {
+            const local = toFrame(spec.F, horizontal, vertical);
+            if (local[0] >= rectangle.u0 && local[0] < rectangle.u1 && local[1] >= rectangle.v0 && local[1] < rectangle.v1 && cs.sig[vertical * img.w + horizontal] >= cs.clip - 1e-6) count++;
+          }
+        }
+        return count;
+      };
+      const clipped = clippedPixels(bounds);
+      result.saturated = clipped > 0;
+      result.excludedFrac = Math.min(1, clipped / result.areaPx);
+      if (backgroundBounds.some(rectangle => clippedPixels(rectangle) > 0)) result.reason = 'background saturated';
+    }
+    if (result.saturated) result.reason = 'saturated';
+    result.quantifiable = !result.reason && Number.isFinite(result.volume);
+    return result;
+  }
   function quantify(img, cs, lanes) {
     const S = { w: img.w, h: img.h, data: cs.sig };
-    return lanes.map(L => {
+    const results = lanes.map(L => {
       if (!L) return null;
+      if (L.mode === 'fixed') return quantifyFixed(img, cs, L);
       const pitch = L.pitch > 0 ? L.pitch : 0;
       const hw = L.hw > 0 ? L.hw : (pitch ? pitch * 0.55 : 24);
       const step = Math.max(1, (2 * hw) / 300, (L.vBot - L.vTop) / 400);
@@ -1773,9 +1833,24 @@
         volume: vol * step * step,   // samples cover step x step image px each; keeps volumes comparable
         background: bg, bgNoise, snr: bgNoise > 0 && isFinite(peak) ? (peak - bg) / bgNoise : 0,
         widthPx: (xr - xl + 1) * step, excludedFrac, saturated: excl > 0,
+        bounds: { u0: win.u0 + xl * step, u1: win.u0 + (xr + 1) * step,
+          v0: win.v0 + jb0 * step, v1: win.v0 + (jb1 + 1) * step, step },
         grade: gradeOf(L.bits), quantifiable: tot > 0 && excludedFrac <= 0.02
       };
     });
+    results.forEach((measurement, index) => {
+      if (!measurement || lanes[index].mode !== 'fixed' || !measurement.bounds || measurement.reason) return;
+      const polygon = roiPolygon(lanes[index], measurement.bounds);
+      results.forEach((other, otherIndex) => {
+        if (index === otherIndex || !other || lanes[otherIndex].mode !== 'fixed' || !other.bounds || !other.areaPx) return;
+        const otherPolygon = roiPolygon(lanes[otherIndex], other.bounds);
+        if (roiIntersects(polygon, otherPolygon)) { measurement.reason = 'ROI overlap'; measurement.quantifiable = false; }
+        else if (measurement.backgroundBounds.some(rectangle => roiIntersects(roiPolygon(lanes[index], rectangle), otherPolygon))) {
+          measurement.reason = 'background overlaps another ROI'; measurement.quantifiable = false;
+        }
+      });
+    });
+    return results;
   }
 
   /* Proportionality of a series (exposures of one band, or a dilution series): v = k·x through the origin.
@@ -1787,14 +1862,17 @@
    * n counts the points actually used (fewer than 3 and nothing is claimed). */
   function linearFit(points) {
     const p = (points || []).filter(q => q && isFinite(q.x) && isFinite(q.y) && q.x > 0);
-    if (p.length < 3) return { n: p.length, k: null, r2: null, maxDev: null };
+    const levels = new Set(p.map(q => q.x)).size;
+    const invalid = { n: p.length, levels, k: null, r2: null, maxDev: null };
+    if (p.length < 3 || levels < 3) return { ...invalid, reason: 'levels' };
     let sxy = 0, sxx = 0, syy = 0;
     p.forEach(q => { sxy += q.x * q.y; sxx += q.x * q.x; syy += q.y * q.y; });
     const k = sxx ? sxy / sxx : 0;
+    if (!(syy > 0) || !(k > 0) || !isFinite(k) || !isFinite(syy)) return { ...invalid, reason: 'no-signal' };
     let ssr = 0; p.forEach(q => { const r = q.y - k * q.x; ssr += r * r; });
     const top = Math.max(...p.map(q => Math.abs(q.y)));
     const maxDev = top ? Math.max(...p.map(q => Math.abs(q.y - k * q.x))) / top : 0;
-    return { n: p.length, k, r2: syy ? 1 - ssr / syy : 1, maxDev };
+    return { n: p.length, levels, k, r2: 1 - ssr / syy, maxDev };
   }
   /* the pass rule is a convention, not a law: a series that is proportional to within 2% and leaves less than
    * 10% of its strongest point unexplained passes; anything else is reported as a deviation, never as "fine" */

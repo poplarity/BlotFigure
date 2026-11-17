@@ -64,8 +64,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .btn.primary:hover { background: var(--accent-dk); border-color: var(--accent-dk); }
 .btn.ghost { background: transparent; border-color: transparent; color: #cfd8e3; }
 .btn.ghost:hover { background: rgba(255,255,255,.1); }
-#panel .btn.ghost, .col-head .btn.ghost { color: var(--muted); }
-#panel .btn.ghost:hover, .col-head .btn.ghost:hover { background: #f2f4f7; color: var(--text); }
+#panel .btn.ghost, #quantPanel .btn.ghost, .col-head .btn.ghost { color: var(--muted); }
+#panel .btn.ghost:hover, #quantPanel .btn.ghost:hover, .col-head .btn.ghost:hover { background: #f2f4f7; color: var(--text); }
 .btn.sm { padding: 4px 9px; font-size: 12.3px; }
 .btn.big { padding: 9px 14px; font-size: 13.5px; }
 input[type=number], input[type=text], select, textarea { border: 1px solid #d3d8de; border-radius: var(--r-sm); padding: 5px 8px; background: #fff; width: 100%; transition: .12s; }
@@ -253,6 +253,20 @@ body.quant-mode .q-only { display: inline-flex; }
 body.quant-mode .n-only { display: none; }
 #qSetBtn { display: none !important; }
 body.quant-mode #figCol .col-head { gap: 9px; }
+.qpreview-tabs { padding: 6px 12px; align-items: center; gap: 10px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+#qChartBox { flex: 1; overflow: auto; padding: 24px; background: #f7f8fa; }
+#qChartBox svg { display: block; width: 100%; min-width: 280px; height: auto; max-width: 1100px; margin: 0 auto; background: #fff; box-shadow: 0 2px 16px rgba(16,24,40,.1); }
+.q-plot-point { cursor: pointer; }
+.q-plot-point:focus { stroke: #111; stroke-width: 2; outline: none; }
+body.quant-chart #btnTIFF, body.quant-chart #btnPPTX, body.quant-chart #btnRaw, body.quant-chart #btnLegend { display: none; }
+.qtargets { display: grid; gap: 5px; max-height: 170px; overflow-y: auto; }
+.qtargets label, .qcheck-option { display: flex; align-items: flex-start; gap: 7px; font-size: 12px; line-height: 1.5; }
+.qtargets label span { overflow-wrap: anywhere; }
+.qtargets input, .qcheck-option input { flex: none; margin-top: 3px; accent-color: var(--accent); }
+#qAdvanced > summary { font-weight: 600; }
+#qAdvanced .qcheck-option { margin-top: 10px; }
+.qcontrol-label { margin: 10px 0 3px; font-size: 11.5px; color: var(--muted); }
+.qnc.qpoint-sel { background: var(--accent-bg); box-shadow: inset 0 0 0 1px var(--accent); }
 
 .qhead { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px; padding: 10px 12px;
   background: var(--panel); border-bottom: 1px solid var(--line); }
@@ -287,6 +301,7 @@ body.quant-mode #figCol .col-head { gap: 9px; }
 .qlin .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 /* the reason names the exposures that were lost, so it usually needs a line of its own */
 .qlin .qwhy { flex: 1 1 100%; min-width: 0; font-size: 11.5px; line-height: 1.45; color: var(--muted); }
+.qlin .qcheck { flex: 1 1 100%; min-width: 0; font-size: 11.5px; line-height: 1.45; }
 .qlin .good { color: var(--ok); } .qlin .bad { color: var(--warn); } .qlin .none { color: var(--faint); }
 
 /* ---------- the numbers column ---------- */
@@ -321,6 +336,54 @@ body.quant-mode #figCol .col-head { gap: 9px; }
 /* ---------- the selected row, under the table ---------- */
 .qdetail { flex: 1; min-height: 0; overflow: auto; background: #fff; border-top: 1px solid var(--line); padding: 10px 14px 18px; }
 .qdetail:empty { display: none; }
+.qcontrol-badge { display: inline-block; margin-left: 5px; color: var(--accent); font-size: 10px; font-weight: 500; }
+.qtable td.qcontrol-cell { color: var(--muted); font-size: 10.5px; text-align: center; }
+#qRawDetails { flex: 0 0 auto; max-height: 35%; overflow: auto; border-top: 1px solid var(--line); padding: 8px 12px; }
+#qRawDetails > summary { color: var(--muted); cursor: pointer; font-size: 11.5px; }
+#qRawTable { overflow: auto; margin-top: 8px; }
+.qcontrol-source { display: block; color: var(--muted); font-size: 9px; font-weight: normal; }
+.qroi-dialog { box-sizing: border-box; width: min(1380px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 0; border: 1px solid var(--line); border-radius: var(--r); color: var(--text); background: var(--panel); overflow: hidden; }
+.qroi-dialog[open] { display: grid; grid-template-columns: minmax(0, 1fr) 360px; grid-template-rows: auto minmax(0, 1fr) auto; }
+.qroi-dialog::backdrop { background: #15233288; }
+.qroi-head, .qroi-tools, .qroi-footer, .qroi-navigation { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.qroi-head { grid-column: 1 / -1; padding: 14px 18px; border-bottom: 1px solid var(--line); justify-content: space-between; }
+.qroi-head .hint { margin: 3px 0 0; }
+.qroi-head h2 { margin: 0; flex: 1; font-size: 16px; }
+.qroi-head #qRoiClose { color: #445166; }
+.qroi-dialog > .hint { margin: 10px 0; }
+.qroi-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.qroi-fields label { display: grid; gap: 5px; min-width: 0; font-size: 11.5px; color: var(--muted); }
+.qroi-fields input, .qroi-fields select { box-sizing: border-box; min-width: 0; width: 100%; border: 1px solid #cbd3df; border-radius: var(--r-sm); padding: 6px 8px; background: #fff; font-size: 12px; }
+.qroi-fields input:focus, .qroi-fields select:focus { outline: 2px solid var(--accent-bg); border-color: var(--accent); }
+.qroi-main { padding: 16px; min-width: 0; overflow: auto; background: #f8f9fb; }
+.qroi-side { padding: 14px; border-left: 1px solid var(--line); min-width: 0; overflow: auto; }
+.qroi-side .adv { margin-top: 0; }
+.qroi-side .adv > .qroi-fields { margin-top: 12px; }
+.qroi-size-fields { grid-template-columns: 110px 110px minmax(0, 1fr); align-items: end; }
+.qroi-size { padding: 6px 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.qroi-navigation { margin: 10px 0; }
+.qroi-navigation select { width: 65px; }
+.qroi-navigation .hint { flex: 1; min-width: 140px; }
+.qroi-results-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 12px 0 8px; font-size: 12px; }
+.qroi-tools { margin: 10px 0; font-size: 12px; }
+.qroi-canvas-wrap { min-width: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+#qRoiCanvas { display: block; width: 100%; touch-action: none; cursor: crosshair; }
+.qroi-values { overflow: auto; }
+.qroi-values .qtable { width: 100%; font-size: 11px; }
+.qroi-values .qtable th { white-space: normal; }
+.qroi-values .qtable td:last-child { white-space: normal; min-width: 80px; }
+.qroi-values tr[data-lane-index] { cursor: pointer; }
+.qroi-values tr[data-lane-index]:hover { background: var(--accent-bg); }
+.qroi-footer { grid-column: 1 / -1; padding: 12px 18px; border-top: 1px solid var(--line); background: var(--panel); }
+.qroi-footer > .hint { flex: 1; min-width: 180px; }
+.box-dimensions { font-size: 11px; white-space: nowrap; color: var(--accent-dk); background: var(--accent-bg); border-radius: var(--r-sm); padding: 3px 6px; }
+.condition-layout { border: 1px solid var(--line); border-radius: var(--r-sm); padding: 8px; margin: 6px 0; }
+.condition-layout-name { color: var(--muted); font-size: 11.5px; overflow-wrap: anywhere; }
+.condition-layout .field { margin: 6px 0 0; }
+.condition-layout select { width: auto; }
+.qpreview-tabs { flex-wrap: wrap; }
+@media (max-width: 1150px) { .qroi-dialog[open] { grid-template-columns: minmax(0, 1fr) 310px; } }
+@media (max-width: 850px) { .qroi-dialog[open] { grid-template-columns: minmax(0, 1fr); overflow: auto; } .qroi-side { border-left: 0; border-top: 1px solid var(--line); max-height: 260px; } .qroi-footer { position: sticky; bottom: 0; } .qroi-size-fields { grid-template-columns: 90px 90px minmax(0, 1fr); } }
 .qd-h { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
 .qd-h b { font-size: 13px; }
 .qd-sub { color: var(--faint); font-size: 11.5px; }
@@ -509,6 +572,7 @@ body.quant-mode #figCol .col-head { gap: 9px; }
 .q-hl { position: absolute; border: 1px dashed rgba(47,111,235,.30); border-radius: 3px; }
 .q-hl.sel { border: 1.5px solid var(--accent); background: rgba(47,111,235,.07); }
 .q-hl.lane { border: 1.5px solid #1f57c3; background: rgba(47,111,235,.18); }
+.q-hl.q-integration { border: 1.5px solid #c56813; border-radius: 0; background: rgba(230,155,50,.15); }
 .rowtag { position: absolute; transform: translate(-100%, -50%); pointer-events: auto; cursor: grab; font-size: 10.5px; font-weight: 700; color: #6b7685;
   background: #eef1f5; border: 1px solid #dde2e8; border-radius: 5px; padding: 1px 5px; white-space: nowrap; user-select: none; }
 .rowtag:hover { color: var(--accent); border-color: #9db8ef; background: #fff; }

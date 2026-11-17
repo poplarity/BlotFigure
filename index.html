@@ -76,7 +76,7 @@
         <div class="inline"><button class="btn sm primary" id="btnDraftRestore" data-en="Restore">恢复</button><button class="btn sm ghost" id="btnDraftDrop" data-en="Discard">丢弃</button></div>
       </div>
       <p class="privacy" data-en-html="Pictures are processed only in this browser and never uploaded.<br>A saved project: File → Open project (top right).">图片只在本机浏览器处理，不会上传。<br>保存过的项目：右上角"文件 → 打开项目"。</p>
-      <p class="hint" id="offlineDownload"><a href="https://github.com/poplarity/BlotFigure/releases/download/v0.14.0/BlotFigure-v0.14.0.html" data-en="Download for offline use: one HTML file">下载离线版：只需一个 HTML 文件</a><br><span data-en="Save it to your computer, then open it in your browser. No installation or extraction.">保存到电脑，用浏览器打开；不用安装、不用解压。</span></p>
+      <p class="hint" id="offlineDownload"><a href="https://github.com/poplarity/BlotFigure/releases/download/v0.15.0/BlotFigure-v0.15.0.html" data-en="Download for offline use: one HTML file">下载离线版：只需一个 HTML 文件</a><br><span data-en="Save it to your computer, then open it in your browser. No installation or extraction.">保存到电脑，用浏览器打开；不用安装、不用解压。</span></p>
       <p class="hint storage-note hidden" data-en="Browser storage is unavailable. You can still edit and export; preferences and custom ladders stay in this tab only and there is no autosaved draft. Save a project before closing.">浏览器存储不可用，仍可编辑和导出；偏好与自定义 Marker 仅在本页暂存，也没有自动草稿。关闭前请保存项目。</p>
     </div>
 
@@ -207,7 +207,7 @@
           <!-- quantification is optional and reads the finished figure: a card here, not a sixth step -->
           <div class="qcard" id="qCard">
             <div class="qcard-h"><span class="qcard-i">▦</span><span data-en="Need the numbers too?">还要出数？</span></div>
-            <p class="hint" data-en="The figure is settled. Measure band volumes, normalise by a loading control or total protein, and see replicate mean ± SD — live, in a workspace of its own.">成图已经定稿。可以量条带体积、按内参或总蛋白归一化、看重复的 mean ± SD——在一个独立的工作区里实时显示。</p>
+            <p class="hint" data-en="Measure the selected source exposures and boxes, choose a loading control, and export quantitative plots and data — without changing the figure.">按成图选定的曝光与框选测量，指定内参后直接产出定量图与数据，不改变成图。</p>
             <button class="btn primary" id="btnQuantOpen" data-en="Open the quantification workspace →">打开定量工作台 →</button>
           </div>
         </div>
@@ -224,13 +224,39 @@
       <span class="qhead-title" data-en="Quantification">定量分析</span>
     </div>
     <div class="qbody">
+      <p class="hint" data-en="Uses the source pixels of the exposures and boxes in this figure, not the exported bitmap or display brightness.">使用当前成图曝光与框选对应的原图像素，不使用导出图片或显示亮度。</p>
+      <section class="qsec" id="qRoiSetup">
+        <div class="qsec-h"><span class="qnum">▭</span><span data-en="Quantification ROIs">定量框</span></div>
+        <label class="qrow" for="qRoiRow"><span data-en="Protein">蛋白</span><select id="qRoiRow"></select></label>
+        <p class="hint" id="qRoiSummary"></p>
+        <button class="btn primary" id="qRoiEdit" data-en="Adjust quantification ROIs…">调整定量框…</button>
+        <p class="hint" data-en="Review the control and each target. Dimensions are shared within a protein; the figure remains unchanged.">核对内参与各个目标。同一蛋白统一宽高，不改变成图。</p>
+      </section>
       <section class="qsec">
-        <div class="qsec-h"><span class="qnum">1</span><span data-en="Normalisation">归一化</span></div>
+        <div class="qsec-h"><span class="qnum">1</span><span data-en="Loading control">内参归一化</span></div>
         <div class="qopts" id="qMethodBox"></div>
         <div class="qdep hidden" id="qDep"></div>
       </section>
       <section class="qsec">
-        <div class="qsec-h"><span class="qnum">2</span><span data-en="Linearity">线性检验</span></div>
+        <div class="qsec-h"><span class="qnum">2</span><span data-en="Groups & reference">分组与对照</span></div>
+        <div id="qCond"></div>
+        <div id="qReferences"></div>
+        <div class="qrow"><label for="qSampleUnit" data-en="Measurements">样本类型</label><select id="qSampleUnit"><option value="unconfirmed" data-en="Independence not confirmed">尚未确认独立性</option><option value="independent" data-en="Independent samples">各道为独立样本</option><option value="technical" data-en="Technical repeats">同一样本的技术重复</option></select></div>
+        <p class="hint" data-en="A lane is not automatically an independent replicate. Group means and SD are plotted only after you confirm independent samples.">泳道不自动等于独立重复；确认各道为独立样本后，才绘制组均值与 SD。</p>
+      </section>
+      <section class="qsec">
+        <div class="qsec-h"><span class="qnum">3</span><span data-en="Quantitative plot">定量图</span></div>
+        <div id="qTargets" class="qtargets"></div>
+        <div class="qrow"><label for="qPlotStyle" data-en="Style">样式</label><select id="qPlotStyle"><option value="points" data-en="Points">散点</option><option value="bars" data-en="Bars + points">柱形＋散点</option></select></div>
+        <p class="hint" id="qPlotHint"></p>
+        <div class="qrow"><label for="qErrorBars" data-en="Error bars">误差线</label><select id="qErrorBars"><option value="sd" data-en="SD (independent samples, n > 1)">SD（独立样本且 n > 1）</option><option value="none" data-en="None">不显示</option></select></div>
+        <div class="qrow"><label for="qPlotScope" data-en="Plot/export">预览与导出</label><select id="qPlotScope"><option value="current" data-en="Current protein">当前蛋白</option><option value="selected" data-en="All checked proteins">全部勾选蛋白</option></select></div>
+        <div class="qbtns"><button class="btn sm primary" id="qPlotShow" data-en="Preview plot">预览定量图</button><button class="btn sm" id="qPlotPNG" data-en="Plot PNG">定量图 PNG</button><button class="btn sm" id="qPlotSVG" data-en="Plot SVG">定量图 SVG</button></div>
+      </section>
+      <details class="adv qsec" id="qAdvanced">
+        <summary data-en="Advanced quality checks (optional)">高级质控（可选）</summary>
+        <label class="qcheck-option"><input type="checkbox" id="qExposureCheck"><span data-en="Check multiple recorded exposure times">检验多个已知曝光时长</span></label>
+        <p class="hint" data-en="Not required to quantify or export. Exposure-time checks do not validate proportionality to protein amount.">不作为定量或导出的前提。曝光时间检验不能替代信号与蛋白量的验证。</p>
         <div id="qLin" class="qlin-list"></div>
         <details class="adv" id="qDilBox">
           <summary data-en="Dilution series (optional)">稀释序列（可选）</summary>
@@ -238,11 +264,7 @@
           <div class="qrow"><label id="qDilLabel" for="qDil" data-en="Fractions">上样比例</label><input id="qDil" type="text" placeholder="1, 0.5, 0.25"></div>
           <div id="qDilOut" class="qinfoline"></div>
         </details>
-      </section>
-      <section class="qsec">
-        <div class="qsec-h"><span class="qnum">3</span><span data-en="Replicates">重复与统计</span></div>
-        <div id="qCond"></div>
-      </section>
+      </details>
       <section class="qsec">
         <div class="qsec-h"><span class="qnum">4</span><span data-en="Export">导出</span></div>
         <div class="qbtns">
@@ -262,6 +284,7 @@
         <select id="viewBlot" class="hidden"></select>
         <div class="seg" id="imgTabs"></div>
         <span class="flex"></span>
+        <span id="boxDimensions" class="box-dimensions hidden"></span>
         <button class="btn sm ghost" id="fitFull" title="整张膜（滚轮缩放，空格或右键拖动平移）" data-en-title="Whole membrane (wheel zooms; Space or right-drag pans)" data-en="Fit">全图</button>
         <button class="btn sm ghost" id="fitSel" title="放大到选中的那一行的框" data-en-title="Zoom to the selected row's boxes" data-en="Selected">选中行</button>
         <span class="zoomlabel" id="zoomLabel"></span>
@@ -283,6 +306,8 @@
     </section>
     <section class="pane-col" id="figCol">
       <div class="col-head"><button class="btn sm ghost q-only" id="qSetBtn" data-en="⚙ Settings">⚙ 设置</button><span class="col-title" data-en="Figure">成图</span><span class="col-sub n-only" data-en="Click text to edit · click a band to select its row · drag bands up/down to reorder, left/right to align lanes">点文字直接编辑 · 点条带选中该行 · 上下拖条带排顺序、左右拖对齐泳道</span><span class="col-sub q-only" data-en="Click a band to select its row in the table">点条带选中表格里对应的那一行</span><span class="flex"></span><span class="zoomlabel" id="figSize"></span></div>
+      <div class="q-only qpreview-tabs"><div class="seg" id="qPreviewSeg"><button data-preview="figure" class="on" data-en="Blot figure">条带图</button><button data-preview="chart" data-en="Quantitative plot">定量图</button></div><button class="btn sm" id="qRoiToolbar" data-en="Adjust ROIs…">调整定量框…</button><span id="qSourceStatus" class="hint"></span></div>
+      <div id="qChartBox" class="hidden"></div>
       <div id="previewBox"><div id="preview"></div>
         <div id="figEmpty" class="fig-empty">
           <div class="fe-card">
@@ -303,17 +328,14 @@
     <!-- the numbers column of the quantification workspace -->
     <section class="pane-col hidden" id="quantData">
       <div class="col-head">
-        <span class="col-title" data-en="Numbers">数据</span>
-        <div class="seg" id="qViewSeg">
-          <button data-v="volume" class="on" data-en="Volume">体积</button>
-          <button data-v="norm" data-en="Normalised">归一化</button>
-        </div>
+        <span class="col-title" data-en="Quantitative results">定量结果</span>
         <span class="flex"></span>
         <button class="btn sm ghost" id="qCopyTop" data-en="Copy">复制</button>
       </div>
       <div id="qWarnBar" class="qwarnbar hidden"></div>
       <div class="qtablewrap" id="qTableWrap"></div>
       <div class="qdetail" id="qDetail"></div>
+      <details id="qRawDetails"><summary data-en="Raw signal details (background-subtracted)">原始信号明细（已扣局部背景）</summary><div id="qRawTable"></div></details>
     </section>
   </main>
 </div>
@@ -420,6 +442,8 @@
 <script src="js/wbrender.js"></script>
 <script src="js/pptx.js"></script>
 <script src="js/wbview.js"></script>
+<script src="js/wbquantplot.js"></script>
+<script src="js/wbquantroi.js"></script>
 <script src="js/wbui.js"></script>
 <script src="js/wbextras.js"></script>
 <script src="js/wbformat.js"></script>

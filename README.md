@@ -2,11 +2,11 @@
 
 # BlotFigure
 
-> **v0.14.0:** desktop typography, region annotations and magnified insets, plus feedback and local release history. See the [desktop editing guide](docs/desktop-editing.md).
+> **v0.15.0:** optional post-figure quantification, fixed-size ROI editing, loading-control ratios and live quantitative plots; condition-name alignment and source-pixel dimensions. See [Quantification](#exports).
 
 **Turn the raw pictures of a Western blot experiment into a publication-ready figure — in your browser, offline.**
 
-[**Download the single HTML file**](https://github.com/poplarity/BlotFigure/releases/download/v0.14.0/BlotFigure-v0.14.0.html) · [Use online](https://poplarity.github.io/BlotFigure/) · [中文说明](README.zh-CN.md)
+[**Download the single HTML file**](https://github.com/poplarity/BlotFigure/releases/download/v0.15.0/BlotFigure-v0.15.0.html) · [Use online](https://poplarity.github.io/BlotFigure/) · [中文说明](README.zh-CN.md)
 
 [![CI](https://github.com/poplarity/BlotFigure/actions/workflows/ci.yml/badge.svg)](https://github.com/poplarity/BlotFigure/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -19,13 +19,13 @@
 
 **Download one file, open it in your browser, and start making your figure. No installation, ZIP extraction or GitHub account is needed.**
 
-1. **[Download BlotFigure-v0.14.0.html](https://github.com/poplarity/BlotFigure/releases/download/v0.14.0/BlotFigure-v0.14.0.html)** (about 910 KB). Save it to your Desktop or Downloads folder.
+1. **[Download BlotFigure-v0.15.0.html](https://github.com/poplarity/BlotFigure/releases/download/v0.15.0/BlotFigure-v0.15.0.html)** (about 1.1 MB). Save it to your Desktop or Downloads folder.
 2. **Double-click the downloaded file.** It opens in your browser. If a text editor opens instead, right-click → **Open with** → Firefox, Chrome, Edge or Safari.
 3. **Drop in all pictures of one experiment**: every exposure of each membrane plus a picture that shows the marker (the white-light picture, or white light merged with chemiluminescence). Then follow the 5 steps on the left and choose **Export PNG**.
 
 That one HTML file is the complete tool. Keep it on your computer or send the same file to a colleague. Once downloaded, it works without an internet connection.
 
-**Get the right file:** choose the release attachment named **BlotFigure-v0.14.0.html**, not the repository's **index.html**, **Source code (zip)** or **Source code (tar.gz)**. If you reach the [release page](https://github.com/poplarity/BlotFigure/releases/latest), expand **Assets** and click the file ending in **.html**.
+**Get the right file:** choose the release attachment named **BlotFigure-v0.15.0.html**, not the repository's **index.html**, **Source code (zip)** or **Source code (tar.gz)**. If you reach the [release page](https://github.com/poplarity/BlotFigure/releases/latest), expand **Assets** and click the file ending in **.html**.
 
 **Keep your work:** use **File → Save project** (Ctrl+S) before closing. Your **.blotfig** file contains all the pictures and every adjustment; reopen it in BlotFigure to continue, on any computer.
 
@@ -104,7 +104,7 @@ In step 5 choose **Add a layout column**, then drag regions into it or use **⋯
 
 ## Versions
 
-The current version is **0.14.0**: desktop typography and coloured annotations, source-linked insets, side text, safe custom Marker imports and local release history/feedback. The WB workflow and per-region image settings are retained. See the [changelog](CHANGELOG.md).
+The current version is **0.15.0**: a post-figure quantification workspace with fixed-size per-protein ROIs, local background, one explicit figure loading control, interactive point/bar plots and traceable exports. Condition names support independent side/alignment; crop boxes show source-pixel dimensions. The five-step WB workflow, desktop typography and independent exposures remain intact. See the [changelog](CHANGELOG.md).
 
 ## Privacy
 
@@ -165,8 +165,22 @@ Exposures are recognised by their file names (`Chemi`, `ECL`, `_30s`, `2min` …
 | SVG | Vector text and lines; edit in Illustrator or Inkscape. |
 | Uncropped originals | Every exposure and marker picture used, as taken (not aligned or rotated), with each box, its lanes' figure columns and the protein names drawn where the bands really are. For the supplementary information. |
 | Processing log (JSON) | Each source's SHA-256, alignment, every row's boxes, lanes, exposure, levels and tilt, all layout parameters, legend notes. |
-| Quantification (CSV / JSON / methods paragraph) | Band volumes minus local background on the exposure shown, with saturated values flagged `SAT`. Normalise by a loading control on the same membrane, by total protein (Ponceau / Coomassie / stain-free), by the lane sum, or not at all. Includes a linearity check across exposures, an optional dilution-series fit, n / mean ± SD / CV for the lane ranges the figure labels, and a methods paragraph that states every parameter. |
+| Quantification (PNG / SVG / CSV / JSON / methods paragraph) | Local-background-subtracted measurements of the current figure's selected original exposures, protein boxes and visible lanes; saturated values are flagged `SAT`. Default lane-wise target / one explicitly selected figure loading control, with optional reference-group scaling. Preview and export current/all selected target plots, values, source provenance, exclusions and methods. |
 | Legend text | Suggested legend notes: membranes, inversion, ladder, exposure of every row, cut lanes, symbols. |
+
+After step 5, open **Quantification** from the optional workspace card (or Export ▾). One analysis reads one current figure, without pooling experiments. **Select one loading control from all visible figure rows**, without image-group partitions. All targets match the control by figure-lane number; confirm these lanes represent the same samples, as protein names are suggestions only. The default is target / control, **not a first-lane fold change**. Optionally choose an existing condition as reference: each ratio is then divided by that group's valid mean. Missing, saturated or non-positive control lanes remain missing with reasons; later lane matches never shift, and denominators are never silently replaced. Legacy projects with multiple different control choices require reselection.
+
+Switch between blot and quantitative-plot previews; selected points link to the data table and actual source integration window. The right panel shows **quantitative results** and the target/control formula directly. **Control cells show their actual background-subtracted source signals as denominators, not self-normalised ones**; original target signals remain in folded details. There are no competing Volume / Normalised modes. Top PNG / SVG actions export the visible preview; plot scope can include the current target or all selected targets. Display levels never supply quantitative values.
+
+Select any target or control and choose **Adjust quantification ROIs…**. Each protein defaults to a locked source-pixel width/height template, not signal-dependent widths per lane. Enter dimensions or draw a template, move one lane or all lanes, and optionally set equal spacing and relative angle. Proteins have independent templates. Two local background strips share a direction, gap and width within each protein. Blue outlines show integration, orange dashed outlines show background and grey outlines show the figure-source crop. Draft measurements update live; Apply is one undoable setting change, while Cancel or Esc discards the draft. Quantification ROIs never modify figure crops, lane layout or selected exposures; return to step 3 to change those sources. Outside/overlapping ROIs, invalid background and any saturated source pixel inside a fixed ROI exclude the measurement without silently resizing or zero-filling it. Suggested centres and dimensions require inspection for complete intended bands and clean background. Older projects warn that switching to fixed ROIs can change recalculated values; the historical adaptive peak-width method remains an explicitly labelled advanced alternative. Projects, CSV/JSON and Methods retain modes, dimensions, positions, actual background regions and exclusions.
+
+Open ROIs from the first sidebar section or the preview toolbar; the detail action remains a shortcut. Shared width/height and area stay visible. Choose One lane / All lanes / Draw, click a box to select, drag to move, or drag edge/corner handles to resize every ROI of that protein together. Previous/next buttons and the live results table select lanes, including when zoomed. Background, spacing, angle and algorithm settings are folded under Background & advanced. In figure step 3, selected crop boxes show their actual source-pixel width × height on the canvas and toolbar, independently of quantification dimensions; these editing badges are not exported.
+
+In step 5, each condition name can sit to the left or right of the lane grid and align left, centre or right within a shared same-side title column. Lane values stay in place. Each layout column retains its own settings, including in SVG/PNG and editable PPT exports.
+
+Individual points are the default. **Choosing Bars + points immediately opens/updates the preview**. Without confirmed independent samples and valid groups, each bar represents one lane's actual value, without group means or SD; this also applies to technical repeats, absent groups and overlapping conditions. Confirmed independent, nonoverlapping groups can use mean bars and optional sample SD where n > 1. Technical repeats do not become biological replicates. The software cannot establish sample independence, certify replication or guarantee publication suitability.
+
+**Advanced QC** is folded by default. Exposure checks are opt-in, not plot/export prerequisites. When requested they require at least three distinct recorded exposure times, never intensity-inferred factors; declared dilution series are checked separately. Exports retain points, coverage and failures, and distinguish unperformed checks from validation. Total protein, lane-sum and no normalisation remain under other methods; check the total-protein source and band polarity rather than inferring acquisition type from brightness.
 
 The **Layout** section shows the **effective resolution** of the bands themselves (picture pixels per lane ÷ printed lane width). If it is below 300 dpi, BlotFigure tells you the widest lane that keeps 300 dpi and offers to apply it. The total figure width can be set directly to a journal column (85 / 120 / 180 mm).
 
@@ -196,7 +210,7 @@ When the downloaded HTML is opened directly from disk, some browsers disable Ind
 ## Known limitations
 
 - Detection has been developed on real chemiluminescence blots and on synthetic membranes. If detection fails on your pictures, please [open an issue](https://github.com/poplarity/BlotFigure/issues/new/choose) (only with pictures you may share).
-- Quantification is not a publication guarantee: volume, background, saturation and detector linearity are checked, but "signal proportional to protein amount" can only come from a dilution series you declare or from independent experiments. No p-values are produced and no loading control is chosen for you. Quantify at least three independent experiments and do the statistics in your analysis software.
+- Quantification is not a publication guarantee: the tool records volumes, background and saturation; linearity checks run only when requested. It cannot establish signal proportionality to protein amount or loading-control stability automatically. Define independent samples, replication and statistical methods for the study design. The tool produces no p-values and does not certify publication suitability from a fixed replicate count.
 - Bio-Rad `.scn` / `.1sc` and other proprietary formats must be exported to TIFF first. BigTIFF and palette TIFFs are not supported. 16-bit PNGs are read as 8-bit by browsers.
 - No phone or tablet layout yet.
 
