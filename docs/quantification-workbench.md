@@ -1,6 +1,6 @@
 # 定量工作台 — 完整设计
 
-状态：**已实现并纳入 v0.15.0 发布批次**，维护者于 2026-11-16 明确授权发布；当前交互以 [quantification-plan.md](quantification-plan.md) §6.7–§6.8 为准，发布记录见 [releases/v0.15.0.md](releases/v0.15.0.md)。原始基线 `dev@e66685d` 与早期未发布说明仅为历史记录。
+状态：**已随 v0.15.0 正式发布**，维护者于 2026-11-16 明确授权，标签代码 `0943903`；当前交互以 [quantification-plan.md](quantification-plan.md) §6.7–§6.8 为准，发布记录见 [releases/v0.15.0.md](releases/v0.15.0.md)。原始基线 `dev@e66685d` 与早期未发布说明仅为历史记录。
 姊妹文档：[quantification-plan.md](quantification-plan.md)（算法与科学取舍）、[safari-plan.md](safari-plan.md)。
 
 ## 当前约定 — 2026-11-12
