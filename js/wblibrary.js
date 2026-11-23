@@ -12,7 +12,13 @@
       const timer = setTimeout(() => reject(new Error('IndexedDB timeout')), 3000);
       let rq; try { rq = indexedDB.open('blotfigure', 1); } catch(e) { clearTimeout(timer); reject(e); return; }
       rq.onupgradeneeded = () => rq.result.createObjectStore(STORE);
-      rq.onsuccess = () => { clearTimeout(timer); rq.result.onversionchange = () => { rq.result.close(); dbPromise = null; }; resolve(rq.result); };
+      rq.onsuccess = () => {
+        clearTimeout(timer); rq.result.onversionchange = () => { rq.result.close(); dbPromise = null; };
+        if (navigator.storage?.persisted && navigator.storage?.persist) {
+          navigator.storage.persisted().then(p => { if (!p) navigator.storage.persist().catch(() => {}); }).catch(() => {});
+        }
+        resolve(rq.result);
+      };
       rq.onerror = rq.onblocked = () => { clearTimeout(timer); reject(rq.error || new Error('IndexedDB blocked')); };
     });
     dbPromise.catch(() => { dbPromise = null; }); return dbPromise;

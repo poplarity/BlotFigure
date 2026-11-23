@@ -143,8 +143,8 @@
   /* the figure's layout. Text sizes per kind (lane names, marker labels, protein names; null = fontPt); a group
    * label wider than its line wraps ('wrap'), shrinks down to minFontPt ('shrink') or stays ('none') */
   const defaultStyle = () => ({ mmPerLane: 5, fontPt: 7, fontFamily:'Arial', laneItalic:false, lineWidthPt: 0.5, labelAngle: 'auto', rowGapPt: 2,
-    tickLenPt: 2.5, labelGapPt: 2.5, unitHeader: true, showMW: true, panelLetter: '', dpi: 600, invert: true, border: true, mwSide: 'left', nameSide: 'right',
-    laneNumbers: false, lanePt: null, markerPt: null, namePt: null, groupFit: 'wrap', minFontPt: 5, groupTicks: false,
+    tickLenPt: 2.5, labelGapPt: 2.5, unitHeader: true, mwUnit: 'kDa', markerWeight: null, showMW: true, panelLetter: '', dpi: 600, invert: true, border: true, mwSide: 'left', nameSide: 'right',
+    laneNumbers: false, laneNamesAboveConditions: true, lanePt: null, markerPt: null, namePt: null, groupFit: 'wrap', minFontPt: 5, groupTicks: false,
     columnGapMm: 6, alignColumnRows: false });
   App.defaultStyle = defaultStyle;
   /* step: how far the user has come (1 Marker picture confirmed → 2 pieces confirmed → 3 boxes → 4 marker →
@@ -324,7 +324,10 @@
     busy(true, L('打开项目…', 'Opening project…')); await tick();
     try {
       let buf = file.buffer || await file.arrayBuffer(), u8 = new Uint8Array(buf);
-      if (u8[0] === 0x1f && u8[1] === 0x8b) { buf = await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer(); u8 = new Uint8Array(buf); }
+      if (u8[0] === 0x1f && u8[1] === 0x8b) {
+        if (typeof DecompressionStream === 'undefined') throw new Error(L('当前浏览器不支持打开压缩项目，请更新浏览器', 'This browser cannot open compressed projects; please update it'));
+        buf = await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer(); u8 = new Uint8Array(buf);
+      }
       if (new TextDecoder().decode(u8.subarray(0, 8)) !== MAGIC) throw new Error(L('这不是 BlotFigure 项目文件（.blotfig）', 'This is not a BlotFigure project file (.blotfig)'));
       const n = new DataView(buf, 8, 4).getUint32(0, true), head = JSON.parse(new TextDecoder().decode(u8.subarray(12, 12 + n)));
       const bufs = [];
@@ -2278,9 +2281,9 @@
       figure: { defaultLaneCount: S.defaultLaneCount || null, widthMm: r1(f.w / MM), heightMm: r1(f.h / MM), columns: App.figLanes('main'), laneNames: App.figLanes('main').map(j => (S.lanes[j - 1] || {}).name || ''),
         layoutColumns: App.layoutColumns().map(c => ({ id: c.id, title: c.title, titleSide: c.titleSide, ...Object.fromEntries([...columnFields].map(k => [k, App.columnData(c.id)[k]])) })),
         effectiveBandDpi: Math.round(Math.min(99999, App.effectiveDpi())), exportDpi: S.style.dpi },
-      arrows: (S.arrows || []).map(a => ({ row: (App.row(a.row) || {}).name || null, symbol: a.sym, side: a.side, text: a.text || null, size: a.sym === '◀' ? (a.sizeText || App.arrowSize(a) || null) : null, userSize: a.sizeText || null })),
-      brackets: (S.brackets || []).map(k => ({ fromRow: (App.row(k.r0) || {}).name || null, toRow: (App.row(k.r1) || {}).name || null, fromFrac: k.f0, toFrac: k.f1, side: k.side, vertical: !!k.vertical, line: !!k.line, text: k.text || null })),
-      groups: S.groups, conditions: S.conditions, style: S.style,notes:S.notes||[],textFormats:S.rows.map(r=>({row:r.id,nameRuns:r.nameRuns,nameColor:r.nameColor})),
+      arrows: (S.arrows || []).map(a => ({ row: (App.row(a.row) || {}).name || null, symbol: a.sym, side: a.side, text: a.text || null, weight: a.weight || 400, size: a.sym === '◀' ? (a.sizeText || App.arrowSize(a) || null) : null, userSize: a.sizeText || null })),
+      brackets: (S.brackets || []).map(k => ({ fromRow: (App.row(k.r0) || {}).name || null, toRow: (App.row(k.r1) || {}).name || null, fromFrac: k.f0, toFrac: k.f1, side: k.side, vertical: !!k.vertical, line: !!k.line, text: k.text || null, weight: k.weight || 400 })),
+      groups: S.groups, conditions: S.conditions, style: S.style,notes:S.notes||[],textFormats:S.rows.map(r=>({row:r.id,nameRuns:r.nameRuns,nameColor:r.nameColor,weight:r.weight})),
       quantification: {
         software: 'BlotFigure ' + App.VERSION,
         method: 'lane volume above a per-lane local background, on the exposure shown in the figure',
@@ -2318,7 +2321,7 @@
    * (relative to the figure's first column), the protein names top to bottom, the ladder and the layout */
   App.template = function () {
     const S = App.S, fl = App.figLanes('main'), rel = j => fl.indexOf(j);
-    const formatted=l=>({name:l.name||'',...(l.nameRuns?{nameRuns:l.nameRuns}:{}),...(l.nameStyle?{nameStyle:l.nameStyle}:{}),...(l.nameColor?{nameColor:l.nameColor}:{})});
+    const formatted=l=>({name:l.name||'',...(l.nameRuns?{nameRuns:l.nameRuns}:{}),...(l.nameStyle?{nameStyle:l.nameStyle}:{}),...(l.nameColor?{nameColor:l.nameColor}:{}),...(l.weight?{weight:l.weight}:{})});
     return { blotfigTemplate: 1, defaultLaneCount: S.defaultLaneCount || null, app: 'BlotFigure ' + App.VERSION,
       layoutColumns: App.layoutColumns().map(c => ({ id: c.id, title: c.title, titleSide: c.titleSide, lanes: App.columnData(c.id).lanes.map(formatted), groups: App.columnData(c.id).groups, conditions: App.columnData(c.id).conditions })),
       rowColumns: S.rows.filter(r => !r.hidden).map(App.rowColumn),
@@ -2334,7 +2337,7 @@
     if (!t || !t.blotfigTemplate) throw new Error(L('不是 BlotFigure 样式文件', 'Not a BlotFigure style file'));
     const S = App.S, fl = App.figLanes('main'), vis = S.rows.filter(r => !r.hidden);
     const ids=G.ProteinLadders.importDefinitions(t.ladders||[]),ladderId=ids.get(t.ladderId)||t.ladderId;
-    const applyName=(o,n)=>{o.name=n.name||'';for(const k of ['nameRuns','nameStyle','nameColor']){if(n[k])o[k]=JSON.parse(JSON.stringify(n[k]));else delete o[k];}};
+    const applyName=(o,n)=>{o.name=n.name||'';for(const k of ['nameRuns','nameStyle','nameColor','weight']){if(n[k])o[k]=JSON.parse(JSON.stringify(n[k]));else delete o[k];}};
     if('defaultLaneCount' in t)App.setDefaultLaneCount(t.defaultLaneCount);
     const abs = k => fl[Math.max(0, Math.min(fl.length - 1, k))];
     (t.lanes || []).forEach((l, k) => { if (fl[k] != null) applyName(S.lanes[fl[k]-1],l); });

@@ -11,11 +11,21 @@
   const label=(obj,key='name')=>obj&&Array.isArray(obj[key+'Runs'])?{name:String(obj[key]||''),nameRuns:obj[key+'Runs']}:String(obj?.[key]||'');
   function slice(t,a,b){if(typeof t!=='object')return plain(t).slice(a,b);return {name:plain(t).slice(a,b),nameRuns:NT.slice(NT.runs(t),a,b)};}
   function lines(t,strings){let pos=0;return strings.map(s=>{const start=plain(t).indexOf(s,pos);if(start<0)return s;pos=start+s.length;return slice(t,start,pos);});}
-  function metrics(t,pt,family,italic=false){
+  const WEIGHTS=Object.freeze([400,500,600,700]);
+  const weightOf=w=>w===true?700:w===false||w==null||w===''?400:WEIGHTS.includes(+w)?+w:400;
+  const weightAttr=w=>{const n=weightOf(w);return n===400?'':` font-weight="${n}"`;};
+  function weightField(id,value){
+    const L=G.L||(zh=>zh),cur=weightOf(value);
+    return `<label class="inline-label annotation-weight-field" for="${id}"><span data-en="Weight" data-zh="字重">${L('字重','Weight')}</span><select id="${id}" class="annotation-weight">${[
+      [400,'常规','Regular'],[500,'中等','Medium'],[600,'半粗','Semibold'],[700,'粗体','Bold']
+    ].map(([w,zh,en])=>`<option value="${w}" data-en="${en} · ${w}" data-zh="${zh} · ${w}"${cur===w?' selected':''}>${L(zh,en)} · ${w}</option>`).join('')}</select></label>`;
+  }
+  function metrics(t,pt,family,italic=false,weight=400){
     italic=!!(italic||t?.italicDefault);
+    const wt=weightOf(weight);
     const source=typeof t==='object'?t:{name:plain(t)};let width=0,ascent=0,descent=0,left=0,right=0;
     const runs=NT.runs(source).map(r=>{const size=r.script?pt*.72:pt,shift=r.script==='sup'?-pt*.4:r.script==='sub'?pt*.22:0,it=r.italic??italic;
-      ctx.font=`${it?'italic ':''}${size*4}px ${fontStack(family)}`;const m=ctx.measureText(r.text),w=m.width/4;
+      ctx.font=`${it?'italic ':''}${wt} ${size*4}px ${fontStack(family)}`;const m=ctx.measureText(r.text),w=m.width/4;
       left=Math.min(left,width-(m.actualBoundingBoxLeft||0)/4);right=Math.max(right,width+(m.actualBoundingBoxRight||m.width)/4);
       ascent=Math.max(ascent,(m.actualBoundingBoxAscent||size*3.4)/4-shift);descent=Math.max(descent,(m.actualBoundingBoxDescent||0)/4+shift);width+=w;
       return {...r,pt:size,shift,italic:it};});return{runs,width,ascent,descent,left,right:Math.max(right,width)};
@@ -25,5 +35,5 @@
   }
   const angle=v=>v==null||v==='auto'||String(v).trim()===''||!Number.isFinite(+v)?'auto':String(Math.round(Math.max(0,Math.min(90,+v))));
   function edit(obj,key,value){const next={name:obj[key]||'',nameRuns:obj[key+'Runs']};NT.write(next,NT.edit(NT.runs(next),value));obj[key]=next.name;if(next.nameRuns)obj[key+'Runs']=next.nameRuns;else delete obj[key+'Runs'];}
-  G.FigureText={fonts,fontName,fontStack,color,esc,plain,label,slice,lines,metrics,svg,angle,edit};
+  G.FigureText={fonts,fontName,fontStack,color,esc,plain,label,slice,lines,metrics,svg,angle,edit,WEIGHTS,weightOf,weightAttr,weightField};
 })(window);

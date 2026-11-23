@@ -128,7 +128,7 @@
         <div class="step-body">
           <button class="btn sm" id="btnCustomMarker" data-en="+ Custom / import marker">＋自定义 / 导入 Marker</button>
           <div id="markerPanel"></div>
-          <div class="field inline"><label class="inline-label"><span data-en="Marker font">Marker 字号</span> <input id="markerFontQuick" type="number" min="4" max="14" step="0.5" class="num"> pt</label><button class="btn sm ghost" id="btnMarkerFit" data-en="Fit spacing">适配间距</button></div>
+          <div class="field inline"><label class="inline-label"><span data-en="Marker font">Marker 字号</span> <input id="markerFontQuick" type="number" min="4" max="14" step="0.5" class="num"> pt</label><label class="inline-label"><span data-en="Weight">字重</span> <select id="markerWeightQuick" class="annotation-weight" style="width:auto"><option value="400" data-en="Regular · 400">常规 · 400</option><option value="500" data-en="Medium · 500">中等 · 500</option><option value="600" data-en="Semibold · 600">半粗 · 600</option><option value="700" data-en="Bold · 700">粗体 · 700</option></select></label><button class="btn sm ghost" id="btnMarkerFit" data-en="Fit spacing">适配间距</button></div>
           <p class="hint" data-en="One font size for every marker label. Click a number to hide it; calibration is kept. Short ticks stay aligned to their bands.">所有 Marker 数字统一字号。点成图数字可隐藏刻度，校准点仍保留；短刻度始终对准条带。</p>
           <div class="step-next"><button class="btn primary big" id="next4" data-en="Done. Next: names →">标好了，下一步：填名称 →</button><button class="btn ghost" id="skip4" title="成图不显示分子量刻度（以后可以在第 4 步补标）" data-en-title="The figure shows no molecular-weight ticks (you can mark them in step 4 later)" data-en="No molecular weights this time">这次不标分子量</button></div>
         </div>
@@ -195,10 +195,13 @@
             <div class="field inline wrap">
               <label class="switch"><input type="checkbox" id="invert"><span data-en="Dark bands on white">白底黑带</span></label>
               <label class="switch"><input type="checkbox" id="showMW"><span data-en="MW ticks">分子量刻度</span></label>
-              <label class="switch"><input type="checkbox" id="unitHeader"><span data-en="kDa header">kDa 标题</span></label>
               <label class="switch"><input type="checkbox" id="border"><span data-en="Band borders">条带加边框</span></label>
               <label class="switch"><input type="checkbox" id="laneNumbers"><span data-en="Lane numbers">泳道编号</span></label>
               <label class="switch"><input type="checkbox" id="groupTicks"><span data-en="Group line ends">分组线端点</span></label>
+              <label class="switch"><input type="checkbox" id="laneNamesAboveConditions"><span data-en="Lane names above conditions">泳道名在条件行上方</span></label>
+            </div>
+            <div class="field inline wrap">
+              <label class="inline-label"><span data-en="MW unit">分子量单位</span> <select id="mwUnit" style="width:auto"><option value="kDa" data-en="kDa (header)">kDa（顶部标题）</option><option value="kDa-inline" data-en="kDa on each band">每条带带 kDa</option><option value="none" data-en="None">不显示单位</option></select></label>
               <label class="inline-label"><span data-en="Panel letter">面板字母</span> <input type="text" id="panelLetter" maxlength="2" class="num" placeholder="a"></label>
             </div>
             <button class="btn sm ghost" id="btnResetLayout" data-en="Reset layout">重置版式</button>
@@ -420,6 +423,23 @@
     <span class="flex"></span>
     <button class="btn" id="pfBack" data-en="Go back and fix">返回修改</button>
     <button class="btn primary" id="pfGo" data-en="Export anyway">仍然导出</button>
+  </div>
+</div></div>
+
+<div id="markerModelDlg" class="dlg hidden"><div class="dlg-body marker-model-body" role="dialog" aria-modal="true" aria-labelledby="markerModelTitle">
+  <button class="dlg-x" id="markerModelClose" aria-label="关闭" data-en-aria-label="Close">×</button>
+  <h3 id="markerModelTitle" data-en="Choose a Marker ladder">选择 Marker 型号</h3>
+  <p class="marker-model-target" id="markerModelTarget"></p>
+  <div class="field"><label for="markerModelSearch" id="markerModelSearchLabel" data-en="Search brand, model, catalogue number or band size">搜索品牌、型号、货号或条带大小</label><input id="markerModelSearch" type="search" placeholder="如：26619、Bio-Rad、180、碧云天…" data-en-placeholder="e.g. 26619, Bio-Rad, 180, Thermo…"></div>
+  <p class="hint" id="markerModelHint" data-en="Selecting previews the bands; click Apply to update this membrane. Star ☆ common ladders to pin them at the top.">选择仅预览条带；点「应用」后更新当前膜。点右侧 ☆ 可收藏为常用型号并置顶。</p>
+  <div class="marker-model-columns">
+    <div class="marker-model-results" id="markerModelResults" role="listbox"></div>
+    <div class="marker-model-preview" id="markerModelPreview"></div>
+  </div>
+  <div class="marker-model-footer">
+    <button class="btn sm" id="markerModelCustom" data-en="Missing your ladder? Custom / import…">没有我的型号？自定义 / 导入…</button>
+    <button class="btn sm" id="markerModelCancel" data-en="Cancel">取消</button>
+    <button class="btn sm primary" id="markerModelApply" data-en="Apply">应用</button>
   </div>
 </div></div>
 

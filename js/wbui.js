@@ -172,6 +172,29 @@
   window.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) document.body.classList.remove('dragging'); });
   window.addEventListener('dragover', e => e.preventDefault());
   window.addEventListener('drop', e => { e.preventDefault(); dragDepth = 0; document.body.classList.remove('dragging'); if (e.dataTransfer.files.length) (G.Extras ? G.Extras.importFiles([...e.dataTransfer.files]) : addFiles(e.dataTransfer.files)); });
+  function pasteName(f, i) {
+    const ext = (f.type.split('/')[1] || 'png').replace('svg+xml', 'svg').replace('jpeg', 'jpg').replace('tiff', 'tif');
+    const d = new Date(), p = n => String(n).padStart(2, '0');
+    return `pasted_blot_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}${i ? '_' + (i + 1) : ''}.${ext}`;
+  }
+  window.addEventListener('paste', e => {
+    if (inQuant() || !$('helpDlg').classList.contains('hidden') || !$('libraryDlg')?.classList.contains('hidden') || !$('markerModelDlg')?.classList.contains('hidden')) return;
+    const t = e.target;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    const dt = e.clipboardData;
+    if (!dt) return;
+    let files = [];
+    for (const it of dt.items || []) {
+      if (it.kind !== 'file' || !/^image\//.test(it.type)) continue;
+      const f = it.getAsFile(); if (f) files.push(f);
+    }
+    if (!files.length) files = [...(dt.files || [])].filter(f => /^(image\/|$)/.test(f.type));
+    if (!files.length) return;
+    e.preventDefault();
+    const named = files.map((f, i) => f.name ? f : new File([f], pasteName(f, i), { type: f.type || 'image/png' }));
+    (G.Extras ? G.Extras.importFiles(named) : addFiles(named));
+    toast(L('已粘贴图片', 'Image pasted'));
+  });
 
   /* ---------- top bar ---------- */
   $('btnUndo').onclick = () => App.undo();
@@ -1161,7 +1184,72 @@
   // Clicking a piece's chip marks that piece, zoomed in.
   const markState = s => ({ manual: L('可算分子量', 'MW ready'), few: L('已标 1 条', '1 tick marked'), none: L('未标', 'Not marked') })[s];
   // the ladder menu, grouped by maker
-  const ladderOptions = sel => G.ProteinLadders.groups().map(g => `<optgroup label="${esc(g.vendor)}">${g.ladders.map(l => `<option value="${l.id}"${l.id === sel ? ' selected' : ''}>${esc(l.name)}</option>`).join('')}</optgroup>`).join('');
+  const ladderOptions = sel => G.ProteinLadders.groups().map(g => `<optgroup label="${esc(g.vendor)}">${g.ladders.map(l => `<option value="${l.id}"${l.id === sel ? ' selected' : ''}>${G.ProteinLadders.isFavorite(l.id) ? '★ ' : ''}${esc(l.name)}</option>`).join('')}</optgroup>`).join('');
+  /* searchable + starred ladder chooser dialog */
+  let modelTarget = null, modelCandidate = '', modelReturn = null;
+  function closeLadderChooser(restore = true) {
+    const dlg = $('markerModelDlg');
+    if (dlg) dlg.classList.add('hidden');
+    const ret = modelReturn;
+    modelTarget = null; modelReturn = null;
+    if (restore && ret?.isConnected) ret.focus({ preventScroll: true });
+  }
+  function ladderMatches(lad, query) {
+    const words = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    const hay = `${lad.name} ${lad.zh || ''} ${lad.vendor || ''} ${lad.id} ${lad.sizes.join(' ')}`.toLowerCase();
+    return words.every(w => hay.includes(w));
+  }
+  function renderLadderChooser(keepScroll = false) {
+    if (!modelTarget || modelTarget.state !== App.S) { closeLadderChooser(false); return; }
+    const b = modelTarget.blot, query = $('markerModelSearch').value, resultsEl = $('markerModelResults');
+    const scroll = keepScroll === true ? resultsEl.scrollTop : 0;
+    const all = G.ProteinLadders.ordered().filter(l => ladderMatches(l, query));
+    if (!all.some(l => l.id === modelCandidate)) modelCandidate = all[0]?.id || '';
+    $('markerModelTarget').textContent = L(`为「${App.blotName(b)}」选择 Marker 型号`, `Choose ladder for "${App.blotName(b)}"`);
+    resultsEl.innerHTML = all.length ? all.map(l => {
+      const fav = G.ProteinLadders.isFavorite(l.id);
+      return `<div class="marker-model-row"><button type="button" data-model-id="${l.id}" aria-pressed="${l.id === modelCandidate}" class="marker-model-result${l.id === modelCandidate ? ' selected' : ''}"><span>${esc(G.ProteinLadders.label(l))}</span><small>${fav ? '★ ' : ''}${L(`${l.sizes.length} 条带`, `${l.sizes.length} bands`)} · kDa${l.id === b.ladderId ? ' · ' + L('当前', 'Current') : ''}</small></button><button type="button" class="marker-star-btn" data-star-id="${l.id}" aria-pressed="${fav}" aria-label="${fav ? L('取消收藏常用', 'Remove from starred') : L('收藏为常用', 'Star as common')}" title="${fav ? L('取消收藏常用', 'Remove from starred') : L('收藏为常用（排在列表顶部）', 'Star as common (pinned at top)')}">${fav ? '★' : '☆'}</button></div>`;
+    }).join('') : `<p class="marker-model-empty">${L('没有找到型号。试试品牌、货号或分子量数字，也可添加自定义型号。', 'No matching ladder. Try a brand, catalogue number or band size, or add a custom ladder.')}</p>`;
+    resultsEl.querySelectorAll('[data-model-id]').forEach(btn => btn.onclick = () => { modelCandidate = btn.dataset.modelId; renderLadderChooser(true); resultsEl.querySelector(`[data-model-id="${modelCandidate}"]`)?.focus({ preventScroll: true }); });
+    resultsEl.querySelectorAll('[data-star-id]').forEach(btn => btn.onclick = () => { G.ProteinLadders.toggleFavorite(btn.dataset.starId); renderLadderChooser(true); if (S()) renderMarker(); resultsEl.querySelector(`[data-star-id="${btn.dataset.starId}"]`)?.focus({ preventScroll: true }); });
+    resultsEl.scrollTop = scroll;
+    const lad = G.ProteinLadders.get(modelCandidate);
+    $('markerModelApply').disabled = !lad;
+    $('markerModelPreview').innerHTML = lad ? `<h4>${esc(G.ProteinLadders.label(lad))}</h4><p class="hint">${L('从大到小', 'Largest to smallest')} · kDa</p><div class="model-size-chips">${lad.sizes.map(k => `<span class="${(lad.ref || []).includes(k) ? 'reference' : ''}">${k}${(lad.ref || []).includes(k) ? ' ★' : ''}</span>`).join('')}</div><p class="hint">${L('★ 为厂家标明的彩色 / 加粗参考带。', '★ marks manufacturer coloured / bold reference bands.')}</p><button class="btn sm" id="markerModelFavorite">${G.ProteinLadders.isFavorite(lad.id) ? L('★ 已收藏为常用', '★ Starred as common') : L('☆ 收藏为常用', '☆ Star as common')}</button>`
+      : `<p class="hint">${L('可在下方添加自定义条带大小或导入文件。', 'Add custom band sizes or import a file below.')}</p>`;
+    if ($('markerModelFavorite')) $('markerModelFavorite').onclick = () => { G.ProteinLadders.toggleFavorite(lad.id); renderLadderChooser(true); if (S()) renderMarker(); $('markerModelFavorite')?.focus(); };
+  }
+  function openLadderChooser(b, anchor) {
+    if (!App.S || !b) return;
+    modelTarget = { blot: b, state: App.S }; modelCandidate = b.ladderId || ''; modelReturn = anchor || document.activeElement;
+    $('markerModelSearch').value = '';
+    $('markerModelDlg').classList.remove('hidden');
+    renderLadderChooser();
+    $('markerModelResults').querySelector('.selected')?.scrollIntoView({ block: 'nearest' });
+    $('markerModelSearch').focus();
+  }
+  $('markerModelSearch').oninput = () => renderLadderChooser();
+  $('markerModelClose').onclick = () => closeLadderChooser();
+  $('markerModelCancel').onclick = () => closeLadderChooser();
+  $('markerModelDlg').addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !e.isComposing) { e.stopPropagation(); closeLadderChooser(); }
+  });
+  $('markerModelApply').onclick = () => {
+    if (!modelTarget || modelTarget.state !== App.S) return closeLadderChooser(false);
+    const b = modelTarget.blot, id = modelCandidate, lad = G.ProteinLadders.get(id);
+    if (!lad) return;
+    App.setLadder(b, id);
+    const more = S().blots.filter(o => o !== b && !o.ladderId);
+    more.forEach(o => App.setLadder(o, id));
+    App.commit();
+    closeLadderChooser();
+    toast(L(`已选 ${shortName(lad.name)}${more.length ? '，其他膜也用它（不同就在那张膜下面改）' : ''}`, `Chose ${shortName(lad.name)}${more.length ? ' for the other membranes too' : ''}`), 3400);
+  };
+  $('markerModelCustom').onclick = () => {
+    const b = modelTarget?.blot;
+    closeLadderChooser(false);
+    G.Extras?.customMarker(b);
+  };
   /* while marking: the ladder as its maker shows it — the bands spaced by log size (about how a gradient gel runs
    * them), the coloured reference bands in orange; the sizes the piece in view already has are ticked */
   let cardHidden = false;
@@ -1196,7 +1284,7 @@
       const pcs = (b.pieces || []).slice().sort((p, q) => (used.has(q.id) - used.has(p.id)) || (p.letter || '').localeCompare(q.letter || ''));
       html += `<div class="mk-blot" data-blot="${b.id}">${st.blots.length > 1 ? `<div class="mk-title">${esc(App.blotName(b))}</div>` : ''}
         <label class="mk-label">${L('Marker 型号', 'Ladder')}${b.ladderId && b.ladderId === App.prefLadder ? `<span class="mk-note">${L('上次用的', 'used last time')}</span>` : ''}</label>
-        <select class="ladder-sel${lad ? '' : ' todo'}"><option value=""${lad ? '' : ' selected'}>${L('— 选你用的 Marker —', '— Choose your ladder —')}</option>${ladderOptions(lad ? b.ladderId : null)}</select>
+        <div class="ladder-sel-row"><select class="ladder-sel${lad ? '' : ' todo'}"><option value=""${lad ? '' : ' selected'}>${L('— 选你用的 Marker —', '— Choose your ladder —')}</option>${ladderOptions(lad ? b.ladderId : null)}</select><button type="button" class="btn sm ladder-search-btn">${L('搜索 / 收藏…', 'Search / star…')}</button></div>
         ${lad ? `<div class="mk-sizes" title="${L('这个型号的条带（官方列表），橙色是彩色 / 加粗的参考带', "This ladder's bands (the maker's list); orange = coloured / bold reference bands")}">${lad.sizes.map(k => `<span class="${(lad.ref || []).includes(k) ? 'ref' : ''}">${k}</span>`).join('')}</div>` : ''}
         ${hasM ? '' : `<p class="hint warn-t">${L('这张膜没有 Marker 图（第 1 步）：在曝光图上看得见 Marker 的话也可以标。', 'This membrane has no marker picture (step 1): if the marker shows on an exposure, you can mark it there.')}</p>`}
         <div class="mk-chips">${pcs.map(pc => {
@@ -1212,6 +1300,7 @@
     box.innerHTML = html;
     box.querySelectorAll('.mk-blot').forEach(div => {
       const b = App.blot(div.dataset.blot);
+      div.querySelector('.ladder-search-btn').onclick = e => openLadderChooser(b, e.currentTarget);
       div.querySelector('.ladder-sel').addEventListener('change', done(e => {
         const id = e.target.value;
         App.setLadder(b, id);
@@ -1521,18 +1610,20 @@
   }
   $('btnMarkerFit').onclick = done(() => { const f=G.BRender.build(false); S().style.markerPt=Math.max(4,Math.floor(Math.min(S().style.markerPt||S().style.fontPt,f.markerFit||4)*2)/2); toast(L('已统一适配字号；仍有重叠时可点数字隐藏次要刻度', 'Global font fitted; if labels still overlap, click a number to hide an unneeded tick')); });
   $('markerFontQuick').onchange = done(e => { S().style.markerPt = e.target.value === '' ? null : clamp(+e.target.value || 7, 4, 14); });
+  $('markerWeightQuick').onchange = done(e => { const w = +e.target.value; S().style.markerWeight = w === 400 ? null : w; });
   function markerPopover(row, at) {
     if (!row) return;
     const marks = new Map(); row.segs.forEach(sg => App.pieceTicks(App.blot(row.blot), App.piece(App.blot(row.blot), sg.piece), sg).forEach(t => marks.set(t.id, t.k)));
     pop.innerHTML = `<h4>${esc(App.rowLabel(row))} · ${L('区域标注', 'Region labels')}</h4>
       ${App.layoutColumns().length > 1 ? `<div class="field"><label>${L('移到排版列', 'Move to column')} <select id="regionColumn">${App.layoutColumns().map(c => `<option value="${c.id}">${esc(columnName(c))}</option>`).join('')}</select></label></div>` : ''}
-      <label>${L('全部 Marker 字号', 'Global marker font')} <input id="globalMarkerPt" type="number" min="4" max="14" step="0.5" class="num" value="${S().style.markerPt || ''}" placeholder="${S().style.markerPt || S().style.fontPt}"> pt</label>
-      <p class="hint">${L('修改字号会应用到所有区域。取消勾选只隐藏数字，不删除校准点。', 'Font changes apply to every region. Unchecking hides a label; calibration is kept.')}</p>
+      <div class="field inline"><label>${L('全部 Marker 字号', 'Global marker font')} <input id="globalMarkerPt" type="number" min="4" max="14" step="0.5" class="num" value="${S().style.markerPt || ''}" placeholder="${S().style.markerPt || S().style.fontPt}"> pt</label>${G.FigureText.weightField('globalMarkerWeight', S().style.markerWeight)}</div>
+      <p class="hint">${L('修改字号或字重会应用到所有区域。取消勾选只隐藏数字，不删除校准点。', 'Font changes apply to every region. Unchecking hides a label; calibration is kept.')}</p>
       <div class="marker-visibility">${[...marks].map(([id,k]) => `<label><input type="checkbox" data-mark-toggle="${id}" ${!(row.hiddenMarkers || []).includes(id) ? 'checked' : ''}>${k} kDa</label>`).join('')}</div>
       <div class="actions"><button class="btn sm danger" id="deleteProteinBox">${L('删除此蛋白框', 'Delete this protein box')}</button><button class="btn sm primary" id="markerDisplayDone">${L('完成', 'Done')}</button></div>`;
     placePopNear(at);
     const dest = pop.querySelector('#regionColumn'); if (dest) { dest.value = App.rowColumn(row); dest.onchange = () => { App.moveToColumn(row, dest.value); closePop(); App.commit(); }; }
     pop.querySelector('#globalMarkerPt').onchange = done(e => { S().style.markerPt = e.target.value === '' ? null : clamp(+e.target.value || 7, 4, 14); });
+    pop.querySelector('#globalMarkerWeight').onchange = done(e => { const w = +e.target.value; S().style.markerWeight = w === 400 ? null : w; });
     pop.querySelectorAll('[data-mark-toggle]').forEach(i => i.onchange = done(() => { row.hiddenMarkers = (row.hiddenMarkers || []).filter(id => id !== i.dataset.markToggle); if (!i.checked) row.hiddenMarkers.push(i.dataset.markToggle); }));
     pop.querySelector('#deleteProteinBox').onclick = () => { closePop(); App.deleteBox(row, App.curSeg(row)); };
     pop.querySelector('#markerDisplayDone').onclick = closePop;
@@ -1570,12 +1661,13 @@
       <div class="field inline"><label class="inline-label">${L('字号', 'Font size')}</label><input type="number" id="pbPt" min="4" max="14" step="0.5" class="num" placeholder="${S().style.fontPt}" value="${bk.pt || ''}"> pt
         <span class="hint" style="margin:0">${L('留空 = 跟随全局字号', 'Empty = the figure font size')}</span></div>
       <div class="field inline"><label><input type="checkbox" id="pbVertical" ${bk.vertical ? 'checked' : ''}>${L('竖排文字', 'Vertical text')}</label><label><input type="checkbox" id="pbLine" ${bk.line ? 'checked' : ''}>${L('直线样式', 'Straight line')}</label></div>
-      <div class="field inline"><label>${L('颜色','Colour')} <select id="pbColor"><option value="">${L('默认','Default')}</option><option value="red">${L('红色','Red')}</option></select></label></div>
+      <div class="field inline">${G.FigureText.weightField('pbWeight', bk.weight)}<label>${L('颜色','Colour')} <select id="pbColor"><option value="">${L('默认','Default')}</option><option value="red">${L('红色','Red')}</option></select></label></div>
       <p class="hint">${L('在成图上拖动括号两端的小方块，可以直接修改覆盖范围。', 'Drag the small handles at the bracket ends on the figure to change its span.')}</p>
       <div class="actions"><button class="btn sm danger" id="pbDel">${L('删除', 'Delete')}</button><button class="btn sm primary" id="pbOk">${L('完成', 'Done')}</button></div>`;
     placePopNear(at);
     const q = id => pop.querySelector('#' + id);
     q('pbVertical').onchange = done(e => { bk.vertical = e.target.checked; }); q('pbLine').onchange = done(e => { bk.line = e.target.checked; });
+    q('pbWeight').onchange = done(e => { const w = +e.target.value; if (w === 400) delete bk.weight; else bk.weight = w; });
     q('pbColor').value=bk.color||'';q('pbColor').onchange=done(e=>{bk.color=e.target.value;});
     q('pbText').addEventListener('input', live(e => { G.FigureText.edit(bk,'text',e.target.value.replace(/\s*↵\s*/g, '\n')); }));
     G.NoteUI?.formats(q('pbText'),bk,'text');
@@ -1610,11 +1702,12 @@
         <span class="hint" style="margin:0">${L('在成图上上下拖动箭头，可以移到这一行的另一条带', 'Drag the arrow up or down on the figure to move it to another band of this row')}</span></div>
       <div class="field inline"><label class="inline-label">${L('字号', 'Font size')}</label><input type="number" id="paPt" min="4" max="14" step="0.5" class="num" placeholder="${S().style.fontPt}" value="${a.pt || ''}"> pt
         <span class="hint" style="margin:0">${L('留空 = 跟随全局字号', 'Empty = the figure font size')}</span></div>
-      <div class="field inline"><label>${L('颜色','Colour')} <select id="paColor"><option value="">${L('默认','Default')}</option><option value="red">${L('红色','Red')}</option></select></label></div>
+      <div class="field inline">${G.FigureText.weightField('paWeight', a.weight)}<label>${L('颜色','Colour')} <select id="paColor"><option value="">${L('默认','Default')}</option><option value="red">${L('红色','Red')}</option></select></label></div>
       <div class="actions"><button class="btn sm danger" id="paDel">${L('删除', 'Delete')}</button><button class="btn sm primary" id="paOk">${L('完成', 'Done')}</button></div>`;
     pop.querySelector('#paSym').value = a.sym;
     placePopNear(at);
     const q = id => pop.querySelector('#' + id);
+    q('paWeight').onchange = done(e => { const w = +e.target.value; if (w === 400) delete a.weight; else a.weight = w; });
     q('paColor').value=a.color||'';q('paColor').onchange=done(e=>{a.color=e.target.value;});
     q('paText').addEventListener('input', live(e => { G.FigureText.edit(a,'text',e.target.value); }));
     G.NoteUI?.formats(q('paText'),a,'text');
@@ -1669,7 +1762,8 @@
   ['lanePt', 'namePt', 'markerPt'].forEach(id => $(id).addEventListener('change', done(e => { const v = +e.target.value; S().style[id] = e.target.value === '' || !(v > 0) ? null : clamp(v, 4, 14); })));
   $('labelAngle').addEventListener('change', done(e => { S().style.labelAngle = e.target.value; }));
   $('groupFit').addEventListener('change', done(e => { S().style.groupFit = e.target.value; }));
-  ['invert', 'showMW', 'unitHeader', 'border', 'laneNumbers', 'groupTicks'].forEach(id => $(id).addEventListener('change', done(e => { S().style[id] = e.target.checked; })));
+  ['invert', 'showMW', 'border', 'laneNumbers', 'groupTicks', 'laneNamesAboveConditions'].forEach(id => $(id).addEventListener('change', done(e => { S().style[id] = e.target.checked; })));
+  $('mwUnit').addEventListener('change', done(e => { S().style.mwUnit = e.target.value; S().style.unitHeader = e.target.value === 'kDa'; }));
   $('panelLetter').addEventListener('change', done(e => { S().style.panelLetter = e.target.value.trim(); }));
   ['mwSide', 'nameSide'].forEach(id => $(id).addEventListener('change', done(e => { S().style[id] = e.target.value; })));
   // a journal column = the figure's total width, labels included: solved for the lane width (as GelFigure)
@@ -2449,13 +2543,17 @@
   function syncLayout() {
     const y = S().style;
     $('markerFontQuick').value = y.markerPt || ''; $('markerFontQuick').placeholder = y.fontPt;
+    $('markerWeightQuick').value = String(G.FigureText.weightOf(y.markerWeight));
     $('mmPerLane').value = y.mmPerLane; $('fontPt').value = y.fontPt; $('rowGap').value = y.rowGapPt; $('labelAngle').value = String(y.labelAngle);
     $('lineW').value = y.lineWidthPt;
     ['lanePt', 'namePt', 'markerPt'].forEach(id => { $(id).value = y[id] || ''; $(id).placeholder = y.fontPt; });
     $('groupFit').value = y.groupFit || 'wrap'; $('minFontPt').value = y.minFontPt || 5;
     $('minFontRow').classList.toggle('hidden', (y.groupFit || 'wrap') !== 'shrink');
-    $('invert').checked = y.invert; $('showMW').checked = y.showMW; $('unitHeader').checked = y.unitHeader; $('border').checked = !!y.border; $('panelLetter').value = y.panelLetter || '';
+    $('invert').checked = y.invert; $('showMW').checked = y.showMW; $('border').checked = !!y.border; $('panelLetter').value = y.panelLetter || '';
     $('laneNumbers').checked = !!y.laneNumbers; $('groupTicks').checked = !!y.groupTicks;
+    $('laneNamesAboveConditions').checked = y.laneNamesAboveConditions !== false;
+    const mwUnit = ['kDa', 'kDa-inline', 'none'].includes(y.mwUnit) ? y.mwUnit : (y.unitHeader === false ? 'none' : 'kDa');
+    $('mwUnit').value = y.unitHeader === false && mwUnit === 'kDa' ? 'none' : mwUnit;
     $('mwSide').value = y.mwSide || 'left'; $('nameSide').value = y.nameSide || 'right';
     $('dpiTop').value = String(y.dpi);
     $('stLayout').textContent = L(`${y.mmPerLane} mm/泳道 · ${y.fontPt} pt`, `${y.mmPerLane} mm/lane · ${y.fontPt} pt`);

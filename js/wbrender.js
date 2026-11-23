@@ -32,31 +32,32 @@
   }
   const runs = t => { t = String(t); return (t.includes(TOG) ? t.split(TOG) : litStar(t).split('*')).map((s, i) => ({ t: s.replace(/\uE000/g, '*'), it: i % 2 === 1 })).filter(r => r.t); };
   function measure(text, pt, bold) {
-    if(typeof text==='object')return FT.metrics(text,pt,family).width;
-    let w = 0;
-    runs(text).forEach(r => { mctx.font = `${r.it ? 'italic ' : ''}${bold ? 'bold ' : ''}${pt * 4}px ${FT.fontStack(family)}`; w += mctx.measureText(r.t).width / 4; });
+    if(typeof text==='object')return FT.metrics(text,pt,family,false,bold).width;
+    let w = 0, wt = FT.weightOf(bold);
+    runs(text).forEach(r => { mctx.font = `${r.it ? 'italic ' : ''}${wt} ${pt * 4}px ${FT.fontStack(family)}`; w += mctx.measureText(r.t).width / 4; });
     return w;
   }
   const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const f = v => (Math.round(v * 100) / 100).toString();
   const PH = '#aab3be';                 // grey placeholders in the preview (never exported)
   let usedMin = Infinity;               // the smallest text printed in this build (pre-flight)
-  function text(t, x, y, pt, anchor, extra) {
-    if(typeof t==='object'){const m=FT.metrics(t,pt,family);if(!(extra||'').includes(PH))for(const r of m.runs)usedMin=Math.min(usedMin,r.pt);return FT.svg(m,x,y,pt,anchor,extra);}
+  function text(t, x, y, pt, anchor, extra, weight) {
+    const wa = FT.weightAttr(weight);
+    if(typeof t==='object'){const m=FT.metrics(t,pt,family,false,weight);if(!(extra||'').includes(PH))for(const r of m.runs)usedMin=Math.min(usedMin,r.pt);return FT.svg(m,x,y,pt,anchor,wa+(extra||''));}
     if (!(extra || '').includes(PH) && String(t).trim()) usedMin = Math.min(usedMin, pt);
-    return `<text x="${f(x)}" y="${f(y)}" font-size="${f(pt)}" text-anchor="${anchor}"${extra || ''}>${runs(t).map(r => r.it ? `<tspan font-style="italic">${esc(r.t)}</tspan>` : esc(r.t)).join('')}</text>`;
+    return `<text x="${f(x)}" y="${f(y)}" font-size="${f(pt)}" text-anchor="${anchor}"${wa}${extra || ''}>${runs(t).map(r => r.it ? `<tspan font-style="italic">${esc(r.t)}</tspan>` : esc(r.t)).join('')}</text>`;
   }
   // a symbol as it is (in text() a * starts italics)
-  const symText = (t, x, y, pt, anchor) => { usedMin = Math.min(usedMin, pt); return `<text x="${f(x)}" y="${f(y)}" font-size="${f(pt)}" text-anchor="${anchor}">${esc(t)}</text>`; };
-  const symWidth = (t, pt) => { mctx.font = `${pt * 4}px ${FT.fontStack(family)}`; return mctx.measureText(t).width / 4; };
+  const symText = (t, x, y, pt, anchor, weight) => { usedMin = Math.min(usedMin, pt); return `<text x="${f(x)}" y="${f(y)}" font-size="${f(pt)}" text-anchor="${anchor}"${FT.weightAttr(weight)}>${esc(t)}</text>`; };
+  const symWidth = (t, pt, weight) => { mctx.font = `${FT.weightOf(weight)} ${pt * 4}px ${FT.fontStack(family)}`; return mctx.measureText(t).width / 4; };
   const line = (x1, y1, x2, y2, lw) => `<line x1="${f(x1)}" y1="${f(y1)}" x2="${f(x2)}" y2="${f(y2)}" stroke="#000" stroke-width="${f(lw)}"/>`;
 
   // ---- multi-line labels (as GelFigure) ----
   const LEAD = 1.18;   // line spacing, × font size
   // lines whose last baseline is y (they stack upwards from the line they label)
-  const textLines = (labels, positionX, baselineY, size, anchor, extra, leading = size * LEAD) => '<g data-pptx-lines="1">' + labels.map((label, index) => text(label, positionX, baselineY - (labels.length - 1 - index) * leading, size, anchor, extra)).join('') + '</g>';
-  function vertical(t, pt) {
-    mctx.font = `${pt * 4}px ${FT.fontStack(family)}`;
+  const textLines = (labels, positionX, baselineY, size, anchor, extra, leading = size * LEAD, weight = 400) => '<g data-pptx-lines="1">' + labels.map((label, index) => text(label, positionX, baselineY - (labels.length - 1 - index) * leading, size, anchor, extra, weight)).join('') + '</g>';
+  function vertical(t, pt, weight) {
+    mctx.font = `${FT.weightOf(weight)} ${pt * 4}px ${FT.fontStack(family)}`;
     const m=mctx.measureText(t);
     return {ascent:(m.fontBoundingBoxAscent || m.actualBoundingBoxAscent || pt*3.8)/4, descent:(m.fontBoundingBoxDescent || m.actualBoundingBoxDescent || pt*.8)/4};
   }
@@ -65,7 +66,7 @@
   const CJK = '\\u2E80-\\u9FFF\\uF900-\\uFAFF\\uFF00-\\uFFEF\\u3000-\\u303F';
   // (the italic switches as TOG: a line that ends or starts inside italics is closed / reopened unambiguously)
   const TOKENS = new RegExp(`${TOG}|[${CJK}]|\\s+|[^\\s${TOG}${CJK}]+?[-/]|[^\\s${TOG}${CJK}]+`, 'g');
-  function wrapText(t, pt, maxW) {
+  function wrapText(t, pt, maxW, weight) {
     const out = [];
     let it = false;
     litStar(t).replace(/\*/g, TOG).split('\n').forEach(par => {
@@ -73,7 +74,7 @@
       const ln = (s, endIt) => (startIt ? TOG : '') + s.replace(new RegExp(`\\s+(${TOG}*)$`), '$1') + (endIt ? TOG : '');
       for (const tk of par.match(TOKENS) || []) {
         if (tk === TOG) { cur += tk; it = !it; continue; }
-        if (cur.split(TOG).join('').trim() && measure(ln(cur + tk, it), pt) > maxW) { out.push(ln(cur, it)); startIt = it; cur = /^\s+$/.test(tk) ? '' : tk; }
+        if (cur.split(TOG).join('').trim() && measure(ln(cur + tk, it), pt, weight) > maxW) { out.push(ln(cur, it)); startIt = it; cur = /^\s+$/.test(tk) ? '' : tk; }
         else cur += tk;
       }
       out.push(ln(cur, it));
@@ -81,11 +82,11 @@
     return out.filter((l, i, a) => l.split(TOG).join('').trim() || a.length === 1);
   }
   // as few lines as wrapText needs, evened out ("磷酸化 / 蛋白" rather than "磷酸化蛋 / 白")
-  function balancedWrap(t, pt, maxW) {
-    const first = wrapText(t, pt, maxW);
+  function balancedWrap(t, pt, maxW, weight) {
+    const first = wrapText(t, pt, maxW, weight);
     if (first.length < 2) return first;
     let lo = maxW * 0.2, hi = maxW, best = first;
-    for (let i = 0; i < 14; i++) { const mid = (lo + hi) / 2, l = wrapText(t, pt, mid); if (l.length <= first.length) { hi = mid; best = l; } else lo = mid; }
+    for (let i = 0; i < 14; i++) { const mid = (lo + hi) / 2, l = wrapText(t, pt, mid, weight); if (l.length <= first.length) { hi = mid; best = l; } else lo = mid; }
     return best;
   }
 
@@ -163,14 +164,17 @@
       });
       // Every hand-set tick is retained, including single marks and marks from other boxes in a joined row.
       const b = App.blot(row.blot);
+      const mwUnit = ['kDa', 'kDa-inline', 'none'].includes(st.mwUnit) ? st.mwUnit : (st.unitHeader === false ? 'none' : 'kDa');
+      const mwWeight = FT.weightOf(st.markerWeight);
       if (st.showMW) row.segs.forEach(sg => {
         const all = App.pieceTicks(b, App.piece(b, sg.piece), sg);
         const inside = all.filter(t => t.v >= sg.vc - App.boxAbove(row, sg) && t.v <= sg.vc + App.boxBelow(row, sg));
         inside.filter(t => !(row.hiddenMarkers || []).includes(t.id)).forEach(t => {
           const yy = y + (t.v - sg.vc + row.above) * sc;
           if (ticksOut.some(o => o.row === row.id && o.k === t.k && Math.abs(o.y - yy) < 0.6)) return;
-          ticksOut.push({ id: t.id, k: t.k, pt: mp, y: yy, row: row.id, box: App.boxId(sg) });
-          tickLabW = Math.max(tickLabW, measure(String(t.k), mp));
+          const lab = mwUnit === 'kDa-inline' ? `${t.k} kDa` : String(t.k);
+          ticksOut.push({ id: t.id, k: t.k, label: lab, pt: mp, y: yy, row: row.id, box: App.boxId(sg) });
+          tickLabW = Math.max(tickLabW, measure(lab, mp, mwWeight));
         });
         if (all.length && !inside.length) warnings.push(L(`框 ${App.boxLabel(sg)} 内没有已标的 Marker 刻度；可扩大框的上下范围或在附近补标。`,
           `Box ${App.boxLabel(sg)} has no marked ticks within its crop; enlarge its vertical range or mark a nearby band.`));
@@ -181,31 +185,34 @@
     const H = y;
     // beside the bands, outwards: the kDa scale, the target-band arrows, the names (each on its own side)
     // Fixed short ticks and a single aligned label column. Calibration positions never move.
+    const mwUnit = ['kDa', 'kDa-inline', 'none'].includes(st.mwUnit) ? st.mwUnit : (st.unitHeader === false ? 'none' : 'kDa');
+    const mwWeight = FT.weightOf(st.markerWeight);
     let previous = null, markerFit = mp;
     ticksOut.sort((a,b) => a.y-b.y).forEach(t => {
-      mctx.font = `${mp * 4}px ${FT.fontStack(family)}`;
-      const metric = mctx.measureText(String(t.k)), asc = (metric.actualBoundingBoxAscent || mp * 2.8) / 4;
+      mctx.font = `${mwWeight} ${mp * 4}px ${FT.fontStack(family)}`;
+      const metric = mctx.measureText(t.label), asc = (metric.actualBoundingBoxAscent || mp * 2.8) / 4;
       const desc = (metric.actualBoundingBoxDescent || 0) / 4, height = asc + desc, margin = 0.3;
       const crowded = previous && t.y - previous.y < (height + previous.height) / 2 + margin;
       if (previous) markerFit = Math.min(markerFit, mp * Math.max(0, t.y - previous.y - margin) / Math.max(0.1, (height + previous.height) / 2));
       if (crowded) overlap(L('Marker 数字确实重叠：可统一缩小字号、加大行距，或点数字隐藏不需要的刻度。', 'Marker numbers overlap: reduce the global font, increase the row gap, or click a number to hide an unneeded tick.'));
-      const d = st.tickLenPt + 2.5, tx = mwRight ? W + d : -d, tw = measure(String(t.k), mp);
+      const d = st.tickLenPt + 2.5, tx = mwRight ? W + d : -d, tw = measure(t.label, mp, mwWeight);
       const mark = line(mwRight ? W + 1 : -d + 1, t.y, mwRight ? W + d - 1 : -1, t.y, lw)
         + `<rect x="${f(mwRight ? tx - .5 : tx - tw - .5)}" y="${f(t.y - height / 2 - .3)}" width="${f(tw + 1)}" height="${f(height + .6)}" fill="${P && crowded ? '#fff2d8' : '#fff'}"/>`
-        + text(String(t.k), tx, t.y + (asc - desc) / 2, mp, mwRight ? 'start' : 'end');
+        + text(t.label, tx, t.y + (asc - desc) / 2, mp, mwRight ? 'start' : 'end', '', mwWeight);
       els.push(`<g data-marker-box="${t.box}" data-marker-size="${t.k}">${ed(`data-edit="marker" data-row="${t.row}" data-mark="${t.id}"`, mark)}</g>`);
       grow(mwRight ? W : tx - tickLabW, t.y - height / 2, mwRight ? tx + tickLabW : 0, t.y + height / 2);
       previous = { y: t.y, height };
     });
-    const hasUnit = st.showMW && st.unitHeader && ticksOut.length > 0;
+    const hasUnit = st.showMW && st.unitHeader !== false && mwUnit === 'kDa' && ticksOut.length > 0;
     const unitText = '(kDa)', unitY = Math.min((rowBoxes[0]?.y || 0) + mp + 1, ...ticksOut.map(t=>t.y-mp*1.2));
-    const scaleW = ticksOut.length ? st.tickLenPt + 2.5 + Math.max(tickLabW,hasUnit?measure(unitText,mp):0) : 0;
+    const scaleW = ticksOut.length ? st.tickLenPt + 2.5 + Math.max(tickLabW,hasUnit?measure(unitText,mp,mwWeight):0) : 0;
     if (mwRight) maxRight = scaleW; else maxLeft = scaleW;
     const scaleOn = right => (right === mwRight && scaleW ? scaleW + 2 : 0), arrowW = { left: 0, right: 0 };
     arrowsOut.forEach(t => {
       t.right = t.a.side !== 'left';
       t.as = t.pt * 0.8;
-      t.w = (t.a.sym === '◀' ? t.as : symWidth(t.a.sym, t.pt)) + (t.label ? 2 + measure(t.label, t.pt) : 0);
+      t.wt = FT.weightOf(t.a.weight);
+      t.w = (t.a.sym === '◀' ? t.as : symWidth(t.a.sym, t.pt, t.wt)) + (t.label ? 2 + measure(t.label, t.pt, t.wt) : 0);
       arrowW[t.right ? 'right' : 'left'] = Math.max(arrowW[t.right ? 'right' : 'left'], t.w);
     });
     arrowsOut.forEach(t => {
@@ -214,11 +221,11 @@
       let g;
       if (t.a.sym === '◀') {
         const b = x0 + dir * t.as;
-        g = `<path d="M${f(x0)} ${f(t.y)}L${f(b)} ${f(t.y - t.as * 0.55)}L${f(b)} ${f(t.y + t.as * 0.55)}Z"/>` + (t.label ? text(t.label, b + dir * 2, t.y + apt * 0.35, apt, anchor, t.wait ? ph : '') : '');
+        g = `<path d="M${f(x0)} ${f(t.y)}L${f(b)} ${f(t.y - t.as * 0.55)}L${f(b)} ${f(t.y + t.as * 0.55)}Z"/>` + (t.label ? text(t.label, b + dir * 2, t.y + apt * 0.35, apt, anchor, t.wait ? ph : '', t.wt) : '');
       } else {
         // (an asterisk sits high in its line: lowered onto the band)
-        const sw = symWidth(t.a.sym, apt);
-        g = symText(t.a.sym, x0, t.y + apt * (t.a.sym === '*' ? 0.55 : 0.35), apt, anchor) + (t.label ? text(t.label, x0 + dir * (sw + 2), t.y + apt * 0.35, apt, anchor) : '');
+        const sw = symWidth(t.a.sym, apt, t.wt);
+        g = symText(t.a.sym, x0, t.y + apt * (t.a.sym === '*' ? 0.55 : 0.35), apt, anchor, t.wt) + (t.label ? text(t.label, x0 + dir * (sw + 2), t.y + apt * 0.35, apt, anchor, '', t.wt) : '');
       }
       const hit = P ? `<rect x="${f(Math.min(x0, x0 + dir * t.w))}" y="${f(t.y - apt * 0.7)}" width="${f(t.w)}" height="${f(apt * 1.4)}" fill="transparent"/>` : '';
       els.push(ed(`data-edit="arrow" data-k="${t.k}"`, hit + `<g fill="${FT.color(t.a.color)}">${g}</g>`));
@@ -228,11 +235,11 @@
     const sideW = nameLeft ? arrowW.left : arrowW.right;
     const off = 3 + ((nameLeft ? !mwRight : mwRight) && scaleW ? scaleW + 2 : 0) + (sideW ? sideW + 4 : 0);
     rowNames.forEach((n, i) => {
-      const x = nameLeft ? -off : W + off, anchor = nameLeft ? 'end' : 'start';
+      const x = nameLeft ? -off : W + off, anchor = nameLeft ? 'end' : 'start', wt = FT.weightOf(n.row.weight);
       if (n.nm) {
-        els.push(ed(`data-edit="rowname" data-row="${n.row.id}"`, text(n.nm, x, n.y + np * 0.35, np, anchor, n.row.name ? ` fill="${FT.color(n.row.nameColor)}"` : ph)));
-        const w = off + measure(n.nm, np);
-        if(typeof n.nm==='object'){const m=FT.metrics(n.nm,np,family),start=nameLeft?x-m.width:x;grow(start+m.left,n.y+np*.35-m.ascent,start+m.right,n.y+np*.35+m.descent);}
+        els.push(ed(`data-edit="rowname" data-row="${n.row.id}"`, text(n.nm, x, n.y + np * 0.35, np, anchor, n.row.name ? ` fill="${FT.color(n.row.nameColor)}"` : ph, wt)));
+        const w = off + measure(n.nm, np, wt);
+        if(typeof n.nm==='object'){const m=FT.metrics(n.nm,np,family,false,wt),start=nameLeft?x-m.width:x;grow(start+m.left,n.y+np*.35-m.ascent,start+m.right,n.y+np*.35+m.descent);}
         if (nameLeft) maxLeft = Math.max(maxLeft, w); else maxRight = Math.max(maxRight, w);
         // names of neighbouring thin rows run into each other
         const nx = rowNames[i + 1];
@@ -272,125 +279,132 @@
       const xb = (side === 'right' ? W : 0) + dir * (off + tk), tx = xb + dir * 2;
       const path = o.bk.line ? `M${f(xb)} ${f(o.y1)}L${f(xb)} ${f(o.y2)}` : `M${f(xb - dir * tk)} ${f(o.y1)}L${f(xb)} ${f(o.y1)}L${f(xb)} ${f(o.y2)}L${f(xb - dir * tk)} ${f(o.y2)}`;
       const hit = P ? `<rect x="${f(Math.min(xb - dir * tk, tx + dir * tw) - 1)}" y="${f(yy1 - 1)}" width="${f(tk + 2 + tw + 2)}" height="${f(yy2 - yy1 + 2)}" fill="transparent"/>` : '';
-      const labelLines=FT.lines(FT.label(o.bk,'text'),ls),colour=FT.color(o.bk.color),extra=o.bk.text?` fill="${colour}"`:ph;
+      const labelLines=FT.lines(FT.label(o.bk,'text'),ls),colour=FT.color(o.bk.color),extra=o.bk.text?` fill="${colour}"`:ph,bwt=FT.weightOf(o.bk.weight);
       const handles=P?[o.y1,o.y2].map((yy,end)=>`<rect data-bracket-end="${end}" data-bracket="${o.k}" x="${f(xb-2)}" y="${f(yy-2)}" width="4" height="4" fill="#fff" stroke="#2f6feb" stroke-width=".6"/>`).join(''):'';
       els.push(ed(`data-edit="bracket" data-k="${o.k}"`, hit + `<path d="${path}" fill="none" stroke="${colour}" stroke-width="${f(lw)}"/>` +
-        (ls.length ? (vertical ? `<g transform="translate(${f(tx + dir * tw / 2)},${f(ym)}) rotate(-90)">${textLines(labelLines, 0, bp * 0.35 + (ls.length - 1) * bp * LEAD / 2, bp, 'middle', extra)}</g>` : textLines(labelLines, tx, ym + bp * 0.35 + (ls.length - 1) * bp * LEAD / 2, bp, side === 'right' ? 'start' : 'end', extra)) : '')+handles));
+        (ls.length ? (vertical ? `<g transform="translate(${f(tx + dir * tw / 2)},${f(ym)}) rotate(-90)">${textLines(labelLines, 0, bp * 0.35 + (ls.length - 1) * bp * LEAD / 2, bp, 'middle', extra, bp * LEAD, bwt)}</g>` : textLines(labelLines, tx, ym + bp * 0.35 + (ls.length - 1) * bp * LEAD / 2, bp, side === 'right' ? 'start' : 'end', extra, bp * LEAD, bwt)) : '')+handles));
       const end = off + tk + 2 + tw;
       placedBr[side].push({ y1: yy1, y2: yy2, end });
       if (side === 'right') maxRight = Math.max(maxRight, end); else maxLeft = Math.max(maxLeft, end);
       grow(0, yy1, W, yy2);
     });
     grow(-maxLeft, 0, W + maxRight, H);
-    const notes=G.WBNoteRender.build({S,column,preview:P,forPPT,regions:sourceRegions,rowBoxes,W,H,pt,measure,text,grow,left:maxLeft,right:maxRight});
+    const notes=G.WBNoteRender.build({S,column,preview:P,forPPT,regions:sourceRegions,rowBoxes,W,H,pt,measure,vertical,text,textLines,grow,left:maxLeft,right:maxRight});
     els.push(notes.content);exportSlices.push(...notes.slices);
 
-    /* ---- top stack (y grows negative): lane numbers, conditions, lane names, groups ---- */
+    /* ---- top stack (y grows negative): lane numbers, then either conditions -> lane names (default)
+     * or lane names hugging the bands -> conditions above them, then groups ---- */
     let yTop = -st.labelGapPt;
     if (st.laneNumbers) {
       lanes.forEach((j, i) => { els.push(text(String(i + 1), X.get(j), yTop, lp, 'middle')); });
       grow(0, yTop - lp, W, yTop);
       yTop -= lp * 1.25;
     }
-    const conditionWidths = { left: 0, right: 0 };
-    const conditions = S.conditions.map((condition, rowIndex) => ({ condition, rowIndex }))
-      .filter(({ condition }) => P || condition.name || condition.values.some(value => value))
-      .map(({ condition, rowIndex }) => {
-        const size = condition.pt || pt, side = condition.nameSide === 'right' ? 'right' : 'left';
-        const alignment = ['left', 'center', 'right'].includes(condition.nameAlign) ? condition.nameAlign : side === 'right' ? 'left' : 'right';
-        const fraction = { left: 0, center: 0.5, right: 1 }[alignment], anchor = { left: 'start', center: 'middle', right: 'end' }[alignment];
-        const titleRuns = condition.name ? G.NameText.runs(condition) : P ? [{ text: L('条件', 'Condition') }] : [];
-        const title = { name: G.NameText.plain(titleRuns), nameRuns: titleRuns };
-        const labels = title.name ? FT.lines(title, title.name.split('\n')) : [];
-        const lines = labels.map(label => {
-          const metrics = FT.metrics(label, size, family);
-          const heights = metrics.runs.map(run => ({ ...vertical(run.text, run.pt), shift: run.shift }));
-          return { metrics, ascent: Math.max(0, ...heights.map(height => height.ascent - height.shift)), descent: Math.max(0, ...heights.map(height => height.descent + height.shift)) };
+    const drawConditions = () => {
+      const conditionWidths = { left: 0, right: 0 };
+      const conditions = S.conditions.map((condition, rowIndex) => ({ condition, rowIndex }))
+        .filter(({ condition }) => P || condition.name || condition.values.some(value => value))
+        .map(({ condition, rowIndex }) => {
+          const size = condition.pt || pt, cw = FT.weightOf(condition.weight), side = condition.nameSide === 'right' ? 'right' : 'left';
+          const alignment = ['left', 'center', 'right'].includes(condition.nameAlign) ? condition.nameAlign : side === 'right' ? 'left' : 'right';
+          const fraction = { left: 0, center: 0.5, right: 1 }[alignment], anchor = { left: 'start', center: 'middle', right: 'end' }[alignment];
+          const titleRuns = condition.name ? G.NameText.runs(condition) : P ? [{ text: L('条件', 'Condition') }] : [];
+          const title = { name: G.NameText.plain(titleRuns), nameRuns: titleRuns };
+          const labels = title.name ? FT.lines(title, title.name.split('\n')) : [];
+          const lines = labels.map(label => {
+            const metrics = FT.metrics(label, size, family, false, cw);
+            const heights = metrics.runs.map(run => ({ ...vertical(run.text, run.pt, cw), shift: run.shift }));
+            return { metrics, ascent: Math.max(0, ...heights.map(height => height.ascent - height.shift)), descent: Math.max(0, ...heights.map(height => height.descent + height.shift)) };
+          });
+          const leading = Math.max(size * LEAD, ...lines.slice(1).map((label, index) => lines[index].descent + label.ascent + size * 0.15));
+          lines.forEach((label, index) => {
+            const offset = (labels.length - 1 - index) * leading;
+            label.top = -offset - label.ascent;
+            label.bottom = -offset + label.descent;
+          });
+          const valueHeight = vertical('Mg', size);
+          const ascent = Math.max(valueHeight.ascent, ...lines.map(label => -label.top)), descent = Math.max(valueHeight.descent, ...lines.map(label => label.bottom));
+          conditionWidths[side] = Math.max(conditionWidths[side], ...lines.map(label => label.metrics.width));
+          return { condition, rowIndex, size, cw, side, fraction, anchor, labels, lines, leading, ascent, descent };
+        }).reverse();
+      let previousCondition = null;
+      conditions.forEach(condition => {
+        if (previousCondition) yTop = previousCondition.baseline - Math.max(previousCondition.size * 1.3,
+          previousCondition.ascent + condition.descent + Math.max(previousCondition.size, condition.size) * 0.15);
+        condition.baseline = yTop;
+        const width = conditionWidths[condition.side];
+        condition.titleX = (condition.side === 'right' ? W + st.labelGapPt * 2 : -st.labelGapPt * 2 - width) + condition.fraction * width;
+        condition.lines.forEach(label => {
+          const start = condition.titleX - condition.fraction * label.metrics.width;
+          label.left = start + label.metrics.left;
+          label.right = start + label.metrics.right;
         });
-        const leading = Math.max(size * LEAD, ...lines.slice(1).map((label, index) => lines[index].descent + label.ascent + size * 0.15));
-        lines.forEach((label, index) => {
-          const offset = (labels.length - 1 - index) * leading;
-          label.top = -offset - label.ascent;
-          label.bottom = -offset + label.descent;
-        });
-        const valueHeight = vertical('Mg', size);
-        const ascent = Math.max(valueHeight.ascent, ...lines.map(label => -label.top)), descent = Math.max(valueHeight.descent, ...lines.map(label => label.bottom));
-        conditionWidths[side] = Math.max(conditionWidths[side], ...lines.map(label => label.metrics.width));
-        return { condition, rowIndex, size, side, fraction, anchor, labels, lines, leading, ascent, descent };
-      }).reverse();
-    let previousCondition = null;
-    conditions.forEach(condition => {
-      if (previousCondition) yTop = previousCondition.baseline - Math.max(previousCondition.size * 1.3,
-        previousCondition.ascent + condition.descent + Math.max(previousCondition.size, condition.size) * 0.15);
-      condition.baseline = yTop;
-      const width = conditionWidths[condition.side];
-      condition.titleX = (condition.side === 'right' ? W + st.labelGapPt * 2 : -st.labelGapPt * 2 - width) + condition.fraction * width;
-      condition.lines.forEach(label => {
-        const start = condition.titleX - condition.fraction * label.metrics.width;
-        label.left = start + label.metrics.left;
-        label.right = start + label.metrics.right;
+        previousCondition = condition;
       });
-      previousCondition = condition;
-    });
-    let conditionShift = 0;
-    if (hasUnit && conditions.length) {
-      const headerX = mwRight ? W + st.tickLenPt + 2.5 : -st.tickLenPt - 2.5;
-      const headerWidth = measure(unitText, mp), headerHeight = vertical(unitText, mp);
-      const headerLeft = mwRight ? headerX : headerX - headerWidth, headerRight = mwRight ? headerX + headerWidth : headerX;
-      const headerTop = unitY - headerHeight.ascent, headerBottom = unitY + headerHeight.descent;
-      const candidates = conditions.filter(condition => (condition.side === 'right') === mwRight)
-        .flatMap(condition => condition.lines.filter(label => label.left < headerRight && label.right > headerLeft)
-          .map(label => ({ top: condition.baseline + label.top, bottom: condition.baseline + label.bottom, gap: 0.5 + Math.max(mp, condition.size) / 8 })));
-      if (candidates.some(label => label.top < headerBottom && label.bottom + label.gap > headerTop)) {
-        conditionShift = Math.max(0, ...candidates.map(label => label.bottom + label.gap - headerTop));
-      }
-    }
-    conditions.forEach(({ condition, rowIndex, size, anchor, labels, lines, leading, titleX, baseline, ascent, descent }) => {
-      const conditionY = baseline - conditionShift;
-      lanes.forEach(lane => {
-        const value = condition.values[lane - 1] || '';
-        const hit = P ? `<rect x="${f(X.get(lane) - laneW * 0.45)}" y="${f(conditionY - size)}" width="${f(laneW * 0.9)}" height="${f(size * 1.25)}" fill="transparent"/>` : '';
-        if (value || P) els.push(ed(`data-edit="cond" data-r="${rowIndex}" data-j="${lane}"`, hit + text(value || '·', X.get(lane), conditionY, size, 'middle', value ? ` fill="${FT.color(condition.color)}"` : ph)));
-      });
-      if (labels.length) {
-        els.push(ed(`data-edit="condname" data-r="${rowIndex}"`, textLines(labels, titleX, conditionY, size, anchor, condition.name ? ` fill="${FT.color(condition.color)}"` : ph, leading)));
-        lines.forEach(label => grow(label.left, conditionY + label.top, label.right, conditionY + label.bottom));
-      }
-      grow(0, conditionY - ascent, W, conditionY + descent);
-    });
-    if (previousCondition) yTop = previousCondition.baseline - conditionShift - Math.max(previousCondition.size * 1.3,
-      previousCondition.ascent + lp * 0.3 + Math.max(previousCondition.size, lp) * 0.15);
-    // placeholders count the lanes shown (hidden ladder lanes skipped), the order bulk paste fills them in (with the
-    // lane numbers printed: a dot, not the number twice)
-    const names = lanes.map((j, i) => {const l=S.lanes[j-1];return l.name?(st.laneItalic?{name:l.name,nameRuns:l.nameRuns,italicDefault:true}:FT.label(l)):(P?(st.laneNumbers?'·':String(i+1)):'');});
-    let angle = 0;
-    if (names.some(t => t)) {
-      const maxW = Math.max(...names.map(t => measure(t, lp)));
-      angle = st.labelAngle === 'auto' ? (maxW <= laneW * 0.92 ? 0 : laneW >= lp * 1.6 ? 45 : 90) : +st.labelAngle;
-      let hMax = lp, anyTilt=angle!==0;
-      lanes.forEach((j, i) => {
-        const t = names[i]; if (!t) return;
-        const lane=S.lanes[j-1],own=G.NameText.style(lane.nameStyle),size=own.pt||lp,tw=measure(t,size),xc=X.get(j),extra=lane.name?'':ph;
-        const la=!lane.name?0:own.angle==='auto'?(tw<=laneW*.92?0:laneW>=size*1.6?45:90):own.angle!=null?+own.angle:angle;
-        const rad=la*Math.PI/180,sn=Math.sin(rad),cs=Math.cos(rad),metrics=FT.metrics(typeof t==='object'?t:{name:t},size,family);
-        anyTilt=anyTilt||la!==0;
-        if (la === 0) { els.push(ed(`data-edit="lane" data-j="${j}"`, text(t, xc, yTop, size, 'middle', extra))); grow(xc-tw/2+metrics.left,yTop-Math.max(size,metrics.ascent),xc-tw/2+metrics.right,yTop+metrics.descent);hMax=Math.max(hMax,size*1.3+metrics.descent); }
-        else {
-          const ox = xc + size * 0.35 * sn;
-          els.push(ed(`data-edit="lane" data-j="${j}"`, `<g transform="translate(${f(ox)},${f(yTop)}) rotate(${-la})">${text(t, 0, 0, size, 'start', extra)}</g>`));
-          hMax = Math.max(hMax, metrics.right*sn+Math.max(size,metrics.ascent)*cs);
-          grow(ox-Math.max(size,metrics.ascent)*sn,yTop-metrics.right*sn-Math.max(size,metrics.ascent)*cs,ox+metrics.right*cs+metrics.descent*sn,yTop+metrics.descent*cs);
+      let conditionShift = 0;
+      if (hasUnit && conditions.length) {
+        const headerX = mwRight ? W + st.tickLenPt + 2.5 : -st.tickLenPt - 2.5;
+        const headerWidth = measure(unitText, mp, mwWeight), headerHeight = vertical(unitText, mp, mwWeight);
+        const headerLeft = mwRight ? headerX : headerX - headerWidth, headerRight = mwRight ? headerX + headerWidth : headerX;
+        const headerTop = unitY - headerHeight.ascent, headerBottom = unitY + headerHeight.descent;
+        const candidates = conditions.filter(condition => (condition.side === 'right') === mwRight)
+          .flatMap(condition => condition.lines.filter(label => label.left < headerRight && label.right > headerLeft)
+            .map(label => ({ top: condition.baseline + label.top, bottom: condition.baseline + label.bottom, gap: 0.5 + Math.max(mp, condition.size) / 8 })));
+        if (candidates.some(label => label.top < headerBottom && label.bottom + label.gap > headerTop)) {
+          conditionShift = Math.max(0, ...candidates.map(label => label.bottom + label.gap - headerTop));
         }
+      }
+      conditions.forEach(({ condition, rowIndex, size, cw, anchor, labels, lines, leading, titleX, baseline, ascent, descent }) => {
+        const conditionY = baseline - conditionShift;
+        lanes.forEach(lane => {
+          const value = condition.values[lane - 1] || '';
+          const hit = P ? `<rect x="${f(X.get(lane) - laneW * 0.45)}" y="${f(conditionY - size)}" width="${f(laneW * 0.9)}" height="${f(size * 1.25)}" fill="transparent"/>` : '';
+          if (value || P) els.push(ed(`data-edit="cond" data-r="${rowIndex}" data-j="${lane}"`, hit + text(value || '·', X.get(lane), conditionY, size, 'middle', value ? ` fill="${FT.color(condition.color)}"` : ph)));
+        });
+        if (labels.length) {
+          els.push(ed(`data-edit="condname" data-r="${rowIndex}"`, textLines(labels, titleX, conditionY, size, anchor, condition.name ? ` fill="${FT.color(condition.color)}"` : ph, leading, cw)));
+          lines.forEach(label => grow(label.left, conditionY + label.top, label.right, conditionY + label.bottom));
+        }
+        grow(0, conditionY - ascent, W, conditionY + descent);
       });
-      const named = lanes.filter(j => S.lanes[j - 1].name).map(j => measure(S.lanes[j - 1].name, lp));
-      if (angle !== 0 && named.length && laneW < lp * 1.15) overlap(L('泳道太窄：即使 90° 泳道名也会重叠，请减小泳道名字号或加宽每道', 'Lanes are too narrow: lane names overlap even at 90°; use a smaller font size for lane names or wider lanes'));
-      if (angle === 0 && st.labelAngle !== 'auto' && named.length && Math.max(...named) > laneW * 1.02) overlap(L('水平的泳道名互相重叠：改用"自动"或倾斜角度，或减小字号', 'Horizontal lane names overlap: use "Auto" or a tilted angle, or a smaller font size'));
-      yTop -= anyTilt ? hMax + lp * .35 : Math.max(lp*1.3,hMax);
-    }
+      if (previousCondition) yTop = previousCondition.baseline - conditionShift - Math.max(previousCondition.size * 1.3,
+        previousCondition.ascent + lp * 0.3 + Math.max(previousCondition.size, lp) * 0.15);
+    };
+    let angle = 0;
+    const drawLaneNames = () => {
+      // placeholders count the lanes shown (hidden ladder lanes skipped), the order bulk paste fills them in (with the
+      // lane numbers printed: a dot, not the number twice)
+      const names = lanes.map((j, i) => {const l=S.lanes[j-1];return l.name?(st.laneItalic?{name:l.name,nameRuns:l.nameRuns,italicDefault:true}:FT.label(l)):(P?(st.laneNumbers?'·':String(i+1)):'');});
+      if (names.some(t => t)) {
+        const maxW = Math.max(...names.map((t, i) => measure(t, lp, S.lanes[lanes[i] - 1]?.weight)));
+        angle = st.labelAngle === 'auto' ? (maxW <= laneW * 0.92 ? 0 : laneW >= lp * 1.6 ? 45 : 90) : +st.labelAngle;
+        let hMax = lp, anyTilt=angle!==0;
+        lanes.forEach((j, i) => {
+          const t = names[i]; if (!t) return;
+          const lane=S.lanes[j-1],own=G.NameText.style(lane.nameStyle),size=own.pt||lp,wt=FT.weightOf(lane.weight),tw=measure(t,size,wt),xc=X.get(j),extra=lane.name?'':ph;
+          const la=!lane.name?0:own.angle==='auto'?(tw<=laneW*.92?0:laneW>=size*1.6?45:90):own.angle!=null?+own.angle:angle;
+          const rad=la*Math.PI/180,sn=Math.sin(rad),cs=Math.cos(rad),metrics=FT.metrics(typeof t==='object'?t:{name:t},size,family,false,wt);
+          anyTilt=anyTilt||la!==0;
+          if (la === 0) { els.push(ed(`data-edit="lane" data-j="${j}"`, text(t, xc, yTop, size, 'middle', extra, wt))); grow(xc-tw/2+metrics.left,yTop-Math.max(size,metrics.ascent),xc-tw/2+metrics.right,yTop+metrics.descent);hMax=Math.max(hMax,size*1.3+metrics.descent); }
+          else {
+            const ox = xc + size * 0.35 * sn;
+            els.push(ed(`data-edit="lane" data-j="${j}"`, `<g transform="translate(${f(ox)},${f(yTop)}) rotate(${-la})">${text(t, 0, 0, size, 'start', extra, wt)}</g>`));
+            hMax = Math.max(hMax, metrics.right*sn+Math.max(size,metrics.ascent)*cs);
+            grow(ox-Math.max(size,metrics.ascent)*sn,yTop-metrics.right*sn-Math.max(size,metrics.ascent)*cs,ox+metrics.right*cs+metrics.descent*sn,yTop+metrics.descent*cs);
+          }
+        });
+        const named = lanes.filter(j => S.lanes[j - 1].name).map(j => measure(S.lanes[j - 1].name, lp, S.lanes[j - 1].weight));
+        if (angle !== 0 && named.length && laneW < lp * 1.15) overlap(L('泳道太窄：即使 90° 泳道名也会重叠，请减小泳道名字号或加宽每道', 'Lanes are too narrow: lane names overlap even at 90°; use a smaller font size for lane names or wider lanes'));
+        if (angle === 0 && st.labelAngle !== 'auto' && named.length && Math.max(...named) > laneW * 1.02) overlap(L('水平的泳道名互相重叠：改用"自动"或倾斜角度，或减小字号', 'Horizontal lane names overlap: use "Auto" or a tilted angle, or a smaller font size'));
+        yTop -= anyTilt ? hMax + lp * .35 : Math.max(lp*1.3,hMax);
+      }
+    };
+    if (st.laneNamesAboveConditions === false) { drawLaneNames(); drawConditions(); }
+    else { drawConditions(); drawLaneNames(); }
     if (hasUnit) {
       const ux=mwRight?W+st.tickLenPt+2.5:-st.tickLenPt-2.5;
-      els.push(`<g data-unit-header="1">${text(unitText,ux,unitY,mp,mwRight?'start':'end')}</g>`);
-      grow(mwRight?W:ux-measure(unitText,mp),unitY-mp*1.2,mwRight?ux+measure(unitText,mp):0,unitY+mp*.3);
+      els.push(`<g data-unit-header="1">${text(unitText,ux,unitY,mp,mwRight?'start':'end','',mwWeight)}</g>`);
+      grow(mwRight?W:ux-measure(unitText,mp,mwWeight),unitY-mp*1.2,mwRight?ux+measure(unitText,mp,mwWeight):0,unitY+mp*.3);
     }
     /* groups: a line over the lanes (one piece per run of neighbouring columns: a group line never bridges a white
      * gap) and its text above; a text wider than its line is wrapped (default), shrunk (not below minFontPt) or
@@ -402,16 +416,16 @@
         const a = Math.min(g.from, g.to), b = Math.max(g.from, g.to), parts = [];
         segs.forEach(run => { const ins = run.filter(j => j >= a && j <= b); if (ins.length) parts.push([X.get(ins[0]) - half, X.get(ins[ins.length - 1]) + half]); });
         const x0 = parts[0][0], x1 = parts[parts.length - 1][1], cx = (x0 + x1) / 2;
-        const gp = g.pt || pt, txt = g.text || (P ? L('点击输入', 'Click to type') : '');
+        const gp = g.pt || pt, gw = FT.weightOf(g.weight), txt = g.text || (P ? L('点击输入', 'Click to type') : '');
         let size = gp, ls = txt ? String(txt).split('\n') : [];
-        const widest = () => Math.max(0, ...ls.map(t => measure(t, size)));
+        const widest = () => Math.max(0, ...ls.map(t => measure(t, size, gw)));
         const room = Math.max(x1 - x0, gp * 2);
         if (g.text && widest() > room) {
-          if (fit === 'wrap') ls = balancedWrap(g.text, size, room);
+          if (fit === 'wrap') ls = balancedWrap(g.text, size, room, gw);
           else if (fit === 'shrink') size = Math.max(Math.min(minPt, gp), gp * room / widest());
         }
         const tw = widest(), th = ls.length ? size * 0.3 + (ls.length - 1) * size * LEAD + size : pt;
-        return { g, parts, x0, x1, cx, size, ls, tw, th, ext0: Math.min(x0, cx - tw / 2), ext1: Math.max(x1, cx + tw / 2) };
+        return { g, gw, parts, x0, x1, cx, size, ls, tw, th, ext0: Math.min(x0, cx - tw / 2), ext1: Math.max(x1, cx + tw / 2) };
       });
       // tiers: a group goes to the lowest tier where neither its line nor its text touches another's (narrow first)
       const tiers = [], pad = pt * 0.25;
@@ -429,7 +443,7 @@
           els.push(segment.replace(/stroke="#000"/g,`stroke="${colour}"`));
         });
         if (o.ls.length) {
-          els.push(ed(`data-edit="group" data-k="${o.g.k}"`, textLines(FT.lines(FT.label(o.g,'text'),o.ls), o.cx, yy - o.size * 0.3, o.size, 'middle', o.g.text ? ` fill="${FT.color(o.g.color)}"` : ph)));
+          els.push(ed(`data-edit="group" data-k="${o.g.k}"`, textLines(FT.lines(FT.label(o.g,'text'),o.ls), o.cx, yy - o.size * 0.3, o.size, 'middle', o.g.text ? ` fill="${FT.color(o.g.color)}"` : ph, o.size * LEAD, o.gw)));
           grow(o.cx - o.tw / 2, yy - o.th, o.cx + o.tw / 2, yy);
         }
         grow(o.x0, yy - pt, o.x1, yy);

@@ -99,7 +99,10 @@
     const out = [];
     function visit(n) {
       if (n.nodeType === 3) {
-        if (n.textContent) out.push({ text: n.textContent, italic: inherited(n.parentElement, 'font-style', '') === 'italic', bold: inherited(n.parentElement, 'font-weight', '') === 'bold', fill: inherited(n.parentElement, 'fill', '#000'),pt:+inherited(n.parentElement,'font-size',0)||undefined,baseline:+inherited(n.parentElement,'data-name-baseline',0)||0 });
+        if (n.textContent) {
+          const weight = inherited(n.parentElement, 'font-weight', ''), num = +weight;
+          out.push({ text: n.textContent, italic: inherited(n.parentElement, 'font-style', '') === 'italic', bold: weight === 'bold' || (Number.isFinite(num) && num >= 600), fill: inherited(n.parentElement, 'fill', '#000'),pt:+inherited(n.parentElement,'font-size',0)||undefined,baseline:+inherited(n.parentElement,'data-name-baseline',0)||0 });
+        }
       } else n.childNodes.forEach(visit);
     }
     visit(el); return out;
@@ -233,7 +236,8 @@
       ctx.putImageData(id,0,0);
       const blob=await new Promise(resolve=>cv.toBlob(resolve,'image/png'));
       if(!blob)throw new Error(G.L('图片编码失败，请关闭其他标签页后重试','Image encoding failed; close other tabs and retry'));
-      media.push(new Uint8Array(await blob.arrayBuffer()));cv.width=cv.height=1;
+      const clean=G.Export?.pngDecorate?await G.Export.pngDecorate(blob,0,null):blob;
+      media.push(new Uint8Array(await clean.arrayBuffer()));cv.width=cv.height=1;
     }
     return packageFile(fig,objects,media);
   }

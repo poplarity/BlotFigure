@@ -29,6 +29,7 @@ import { quantFigureChecks } from './quantfigure.mjs';
 import { quantRoiChecks } from './quantroi.mjs';
 import { quantUxChecks } from './quantux.mjs';
 import { conditionLayoutChecks } from './conditionlayout.mjs';
+import { gelParityChecks } from './gelfigure-parity.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const arg = name => (process.argv.find(a => a.startsWith(`--${name}=`)) || '').split('=')[1];
@@ -79,6 +80,7 @@ async function runIn(name, base) {
     if (arg('suite') === 'quantroi') { add(await quantRoiChecks(browser, base)); return out; }
     if (arg('suite') === 'quantux') { add(await quantUxChecks(browser, base)); return out; }
     if (arg('suite') === 'conditionlayout') { add(await conditionLayoutChecks(browser, base)); return out; }
+    if (arg('suite') === 'gelparity') { add(await gelParityChecks(browser, base, ROOT)); return out; }
     add(await startupChecks(browser, base, ROOT));
     const ctx = await browser.newContext({ viewport: { width: 1600, height: 960 } });
     for (const [what, url, prefix] of PAGES) {
@@ -118,6 +120,7 @@ async function runIn(name, base) {
     add(await quantRoiChecks(browser,base));
     add(await quantUxChecks(browser,base));
     add(await conditionLayoutChecks(browser,base));
+    add(await gelParityChecks(browser, base, ROOT));
     // privacy: the Content Security Policy must stop every request to another origin
     {
       const c2 = await browser.newContext(), page = await c2.newPage();

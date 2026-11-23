@@ -26,17 +26,17 @@
   $('angleMode').onchange=e=>angle(e.target.value==='auto'?'auto':$('angleNumber').value||45,true);
   $('angleSlider').oninput=e=>angle(e.target.value,false);$('angleSlider').onchange=e=>angle(e.target.value,true);
   $('angleNumber').onchange=e=>angle(e.target.value,true);
-  const controls=document.createElement('div');controls.className='text-formats';controls.innerHTML=`<div class="format-buttons">${[['normal','正体','Upright'],['italic','斜体','Italic'],['sup','上标','Superscript'],['sub','下标','Subscript'],['red','标红','Red'],['autoColor','默认色','Default colour'],['clear','清除格式','Clear format']].map(([v,zh,en])=>`<button type="button" data-format="${v}" data-en="${en}">${zh}</button>`).join('')}</div><label id="nameOverrideLabel"><input type="checkbox" id="nameOverride"><span data-en="Only this lane name">仅此泳道名设置</span></label><label id="nameOwnAngleLabel"><span data-en="Angle">角度</span><input id="nameOwnAngle" class="num" type="number" min="0" max="90" step="1">° <button type="button" id="resetOwnAngle" data-en="Auto">自动</button></label>`;
+  const controls=document.createElement('div');controls.className='text-formats';controls.innerHTML=`<div class="format-buttons">${[['normal','正体','Upright'],['italic','斜体','Italic'],['sup','上标','Superscript'],['sub','下标','Subscript'],['red','标红','Red'],['autoColor','默认色','Default colour'],['clear','清除格式','Clear format']].map(([v,zh,en])=>`<button type="button" data-format="${v}" data-en="${en}">${zh}</button>`).join('')}</div>${FT.weightField('fedWeight',400)}<label id="nameOverrideLabel"><input type="checkbox" id="nameOverride"><span data-en="Only this lane name">仅此泳道名设置</span></label><label id="nameOwnAngleLabel"><span data-en="Angle">角度</span><input id="nameOwnAngle" class="num" type="number" min="0" max="90" step="1">° <button type="button" id="resetOwnAngle" data-en="Auto">自动</button></label>`;
   $('fedBar').append(controls);
   $('fedBar').addEventListener('focusout',()=>setTimeout(()=>{if(state&&document.activeElement!==state.box&&!$('fedBar').contains(document.activeElement))api.close(false);},0));
   $('fedBar').addEventListener('keydown',e=>{if(state&&e.key==='Escape'&&!e.isComposing){e.preventDefault();e.stopImmediatePropagation();api.close(true);}});
   let state=null;
-  const fields=s=>[s.key,s.key+'Runs','nameStyle','color','nameColor'];
+  const fields=s=>[s.key,s.key+'Runs','nameStyle','color','nameColor','weight'];
   const snapshot=s=>JSON.stringify({values:Object.fromEntries(fields(s).map(k=>[k,s.obj[k]])),lanePt:App.S.style.lanePt,namePt:App.S.style.namePt});
   function restore(s,json){const d=JSON.parse(json);for(const k of fields(s)){if(k in d.values)s.obj[k]=d.values[k];else delete s.obj[k];}App.S.style.lanePt=d.lanePt;App.S.style.namePt=d.namePt;s.box.value=s.obj[s.key]||'';}
   function record(){if(!state)return;const value=snapshot(state);if(value!==state.undo.at(-1)){state.undo.push(value);state.redo=[];}}
   function refresh(){App.refresh();api.refresh();syncOwn();}
-  function syncOwn(){if(!state)return;const lane=state.edit.kind==='lane',own=state.obj.nameStyle;$('nameOverrideLabel').classList.toggle('hidden',!lane);$('nameOwnAngleLabel').classList.toggle('hidden',!lane||!own);$('nameOverride').checked=!!own;$('nameOwnAngle').value=own?.angle==='auto'?'':own?.angle??'';}
+  function syncOwn(){if(!state)return;const lane=state.edit.kind==='lane',own=state.obj.nameStyle;$('nameOverrideLabel').classList.toggle('hidden',!lane);$('nameOwnAngleLabel').classList.toggle('hidden',!lane||!own);$('nameOverride').checked=!!own;$('nameOwnAngle').value=own?.angle==='auto'?'':own?.angle??'';const wt=String(FT.weightOf(state.obj.weight));$('fedWeight').value=wt;state.box.style.fontWeight=wt;}
   function opened(edit,box){const obj=api.target(edit),key=edit.kind==='group'?'text':'name';state={edit,obj,key,box,original:null,undo:[],redo:[]};state.original=snapshot(state);
     const normalized={name:obj[key]||'',nameRuns:obj[key+'Runs']};NT.write(normalized,NT.runs(normalized));obj[key]=normalized.name;if(normalized.nameRuns)obj[key+'Runs']=normalized.nameRuns;else delete obj[key+'Runs'];box.value=obj[key];record();syncOwn();}
   function closed(revert){if(!state)return;if(revert)restore(state,state.original);state=null;}
@@ -46,6 +46,7 @@
     if((a===z||a===0&&z===n.name.length)&&['group','condname'].includes(s.edit.kind)&&['red','autoColor','clear'].includes(b.dataset.format)){if(b.dataset.format==='red')s.obj.color='red';else delete s.obj.color;}
     record();refresh();s.box.focus();s.box.setSelectionRange(a,z);
   });
+  $('fedWeight').onchange=e=>{if(!state)return;const w=+e.target.value;if(w===400)delete state.obj.weight;else state.obj.weight=w;record();refresh();};
   $('nameOverride').onchange=e=>{if(!state)return;if(e.target.checked)state.obj.nameStyle={pt:App.S.style.lanePt||App.S.style.fontPt,angle:FT.angle(App.S.style.labelAngle)};else delete state.obj.nameStyle;record();refresh();};
   $('nameOwnAngle').onchange=e=>{if(state?.obj.nameStyle){state.obj.nameStyle.angle=FT.angle(e.target.value);record();refresh();}};
   $('resetOwnAngle').onclick=()=>{if(state?.obj.nameStyle){state.obj.nameStyle.angle='auto';record();refresh();}};

@@ -37,17 +37,20 @@
    * never passed off as the raster's. */
   async function pngDecorate(blob, dpi, texts) {
     const src = new Uint8Array(await blob.arrayBuffer());
-    const ppm = Math.round(dpi / 0.0254), ph = new Uint8Array(9), dv = new DataView(ph.buffer);
-    dv.setUint32(0, ppm); dv.setUint32(4, ppm); ph[8] = 1;
-    const parts = [chunk('pHYs', ph), chunk('sRGB', Uint8Array.of(0))];
+    const parts = [];
+    if (dpi) {
+      const ppm = Math.round(dpi / 0.0254), ph = new Uint8Array(9), dv = new DataView(ph.buffer);
+      dv.setUint32(0, ppm); dv.setUint32(4, ppm); ph[8] = 1;
+      parts.push(chunk('pHYs', ph), chunk('sRGB', Uint8Array.of(0)));
+    }
     Object.entries(texts || {}).forEach(([k, v]) => parts.push(itxt(k, v)));
     // the encoder's own chunks, without the ones replaced (each may appear only once; iCCP and sRGB exclude
-    // each other), ours right after IHDR
+    // each other), WebKit's eXIf or encoder text chunks, ours right after IHDR
     const keep = [src.subarray(0, 33)];
     for (let p = 33; p + 8 <= src.length;) {
       const len = ((src[p] << 24) | (src[p + 1] << 16) | (src[p + 2] << 8) | src[p + 3]) >>> 0;
       const type = String.fromCharCode(src[p + 4], src[p + 5], src[p + 6], src[p + 7]);
-      if (!['pHYs', 'sRGB', 'iCCP', 'gAMA', 'cHRM'].includes(type)) keep.push(src.subarray(p, p + 12 + len));
+      if (!['pHYs', 'sRGB', 'iCCP', 'gAMA', 'cHRM', 'eXIf', 'tEXt', 'iTXt', 'zTXt'].includes(type)) keep.push(src.subarray(p, p + 12 + len));
       p += 12 + len;
     }
     return new Blob([keep[0], ...parts, ...keep.slice(1)], { type: 'image/png' });

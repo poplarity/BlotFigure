@@ -55,12 +55,14 @@
     { id: 'sg_c610210', vendor: 'Chinese vendors', name: 'Sangon RealBand Two-color 10–250 kDa (C610210)', zh: 'Sangon 生工 RealBand Two-color 10–250 kDa (C610210)', sizes: [250, 150, 100, 70, 50, 40, 35, 25, 20, 15, 10], ref: [70, 25] }
   ];
   const KEY = 'blotfig.customLadders';
+  const FAV_KEY = 'blotfig.favLadders';
   function validCustom(list){
     if(!Array.isArray(list))return [];
     return list.flatMap(l=>{try{if(!l||!l.id||!Array.isArray(l.sizes))return [];return [{...l,name:String(l.name||'My marker'),sizes:parseSizes(l.sizes.join(' ')),custom:true,vendor:'Custom'}];}catch{return [];}});
   }
   function readLegacy(){try{return validCustom(JSON.parse(G.PrefStorage?.getItem(KEY)||'[]'));}catch{return [];}}
-  let custom=readLegacy(),dbPromise=null,writeQueue=Promise.resolve(),durable=false;
+  function readFavs(){try{const raw=JSON.parse(G.PrefStorage?.getItem(FAV_KEY)||'[]');return Array.isArray(raw)?raw.filter(x=>typeof x==='string'):[];}catch{return [];}}
+  let custom=readLegacy(),favIds=readFavs(),dbPromise=null,writeQueue=Promise.resolve(),durable=false;
   const loadCustom=()=>custom;
   const changed=()=>G.dispatchEvent(new Event('blotfigure-markers-changed'));
   function merge(incoming){const map=new Map(incoming.map(l=>[l.id,l]));for(const l of custom){const old=map.get(l.id);if(!old||(l.updatedAt||0)>=(old.updatedAt||0))map.set(l.id,l);}custom=[...map.values()];}
@@ -74,36 +76,72 @@
     });
     return dbPromise;
   }
-  async function transaction(mode,value){const db=await database();return new Promise((resolve,reject)=>{
-    const tx=db.transaction('catalog',mode),st=tx.objectStore('catalog'),r=st.get('ladders');let result;
+  async function transaction(mode,value,favsValue){const db=await database();return new Promise((resolve,reject)=>{
+    const tx=db.transaction('catalog',mode),st=tx.objectStore('catalog'),r=st.get('ladders'),rf=st.get('favorites');let result={ladders:undefined,favorites:undefined};
     r.onsuccess=()=>{
-      if(mode==='readonly'){result=r.result;return;}
+      if(mode==='readonly'){result.ladders=r.result;return;}
       // Merge inside the write transaction so another tab's imports cannot be lost.
       const merged=new Map(validCustom(r.result).map(l=>[l.id,l]));
       for(const l of value){const old=merged.get(l.id);if(!old||(l.updatedAt||0)>=(old.updatedAt||0))merged.set(l.id,l);}
-      result=[...merged.values()];st.put(result,'ladders');
+      result.ladders=[...merged.values()];st.put(result.ladders,'ladders');
+    };
+    rf.onsuccess=()=>{
+      if(mode==='readonly'){result.favorites=rf.result;return;}
+      if(Array.isArray(favsValue)){result.favorites=[...new Set(favsValue)];st.put(result.favorites,'favorites');}
     };
     tx.oncomplete=()=>resolve(result);tx.onerror=tx.onabort=()=>reject(tx.error||new Error('Marker cache failed'));
   });}
   const ready=(async()=>{
-    try{merge(validCustom(await transaction('readonly')));if(custom.length)await transaction('readwrite',JSON.parse(JSON.stringify(custom)));durable=true;}
+    try{
+      const r=await transaction('readonly');
+      merge(validCustom(r?.ladders));
+      if(Array.isArray(r?.favorites)&&r.favorites.length&&!favIds.length)favIds=[...new Set(r.favorites.filter(x=>typeof x==='string'))];
+      if(custom.length||favIds.length)await transaction('readwrite',JSON.parse(JSON.stringify(custom)),favIds.slice());
+      durable=true;
+    }
     catch{durable=false;}
-    if(custom.length)G.PrefStorage?.setItem(KEY,JSON.stringify(custom));changed();
+    if(custom.length)G.PrefStorage?.setItem(KEY,JSON.stringify(custom));
+    if(favIds.length)G.PrefStorage?.setItem(FAV_KEY,JSON.stringify(favIds));
+    changed();
   })();
   function persist(){
     G.PrefStorage?.setItem(KEY,JSON.stringify(custom));
+    G.PrefStorage?.setItem(FAV_KEY,JSON.stringify(favIds));
     writeQueue=writeQueue.catch(()=>{}).then(async()=>{
       await ready;
-      try{merge(await transaction('readwrite',JSON.parse(JSON.stringify(custom))));durable=true;}catch{durable=false;}
+      try{const r=await transaction('readwrite',JSON.parse(JSON.stringify(custom)),favIds.slice());merge(r?.ladders||[]);durable=true;}catch{durable=false;}
       return durable||!!G.PrefStorage?.persistent;
     });return writeQueue;
   }
-  G.addEventListener('storage',e=>{if(e.key===KEY){try{merge(validCustom(JSON.parse(e.newValue||'[]')));changed();}catch{}}});
+  G.addEventListener('storage',e=>{
+    if(e.key===KEY){try{merge(validCustom(JSON.parse(e.newValue||'[]')));changed();}catch{}}
+    if(e.key===FAV_KEY){try{const v=JSON.parse(e.newValue||'[]');if(Array.isArray(v)){favIds=[...new Set(v.filter(x=>typeof x==='string'))];changed();}}catch{}}
+  });
   function parseSizes(raw) {
-    const tokens=String(raw).replace(/kda/ig,'').trim().split(/[\s,，;；、]+/).filter(Boolean);
-    if(!tokens.length || tokens.some(t=>!/^\d+(?:\.\d+)?$/.test(t) || +t<=0 || +t>2000)) throw new Error((G.L|| (zh=>zh))('请输入 0–2000 之间的分子量数字，以空格、逗号或换行分隔。','Enter molecular weights between 0 and 2000, separated by spaces, commas or new lines.'));
-    const sizes=[...new Set(tokens.map(Number))].sort((a,b)=>b-a);
-    if(sizes.length>100)throw new Error((G.L|| (zh=>zh))('最多支持 100 条刻度','Up to 100 bands are supported'));
+    const text=String(raw==null?'':raw).trim();
+    const err=msg=>{throw new Error((G.L||(zh=>zh))(...msg));};
+    if(!text)err(['请输入 0–2000 之间的分子量数字（kDa），以空格、逗号或换行分隔。','Enter molecular weights between 0 and 2000 kDa, separated by spaces, commas or new lines.']);
+    const chunks=text.split(/[,，;；、+\n\/／|]+/).map(t=>t.trim()).filter(Boolean),tokens=[];
+    for(const ch of chunks){
+      const words=ch.split(/\s+/).filter(Boolean);
+      for(let i=0;i<words.length;i++){
+        if(/^\d+(?:\.\d+)?$/.test(words[i])&&/^(kbp|kb|bp|kda|kd|da)$/i.test(words[i+1]||''))tokens.push(words[i]+words[++i]);
+        else tokens.push(words[i]);
+      }
+    }
+    const vals=[];
+    for(const tok of tokens){
+      const m=tok.match(/^(\d+(?:\.\d+)?)\s*(kbp|kb|bp|kda|kd|da)?$/i);
+      if(!m)err(['请输入 0–2000 之间的分子量数字，可带 kDa 或 Da 单位（如 250kDa, 15000 Da）。','Enter numbers between 0 and 2000 kDa; optional kDa or Da units are accepted (e.g. 250kDa, 15000 Da).']);
+      const u=(m[2]||'').toLowerCase();
+      if(u==='bp'||u==='kb'||u==='kbp')err(['BlotFigure 为蛋白印迹工具，请使用 kDa 或 Da（不支持 bp/kb）。','BlotFigure is for Western blots; use kDa or Da (bp/kb is not supported).']);
+      const v=u==='da'?+m[1]/1000:+m[1];
+      if(!(v>0&&v<=2000))err(['分子量必须在 0–2000 kDa 之间。','Molecular weights must be between 0 and 2000 kDa.']);
+      vals.push(Math.round(v*1000)/1000);
+    }
+    const sizes=[...new Set(vals)].sort((a,b)=>b-a);
+    if(!sizes.length)err(['请输入至少 1 个分子量数字。','Enter at least 1 molecular weight.']);
+    if(sizes.length>100)err(['最多支持 100 条刻度','Up to 100 bands are supported']);
     return sizes;
   }
   function saveCustom(name, sizes, options={}) {
@@ -143,11 +181,21 @@
   }
   const all = () => loadCustom().concat(L);
   const get = id => all().find(l => l.id === id);
+  const favorites = () => favIds.filter(id => get(id));
+  const isFavorite = id => favorites().includes(id);
+  function setFavorites(ids){favIds=[...new Set((ids||[]).filter(id=>get(id)))];persist();changed();}
+  function toggleFavorite(id){if(!get(id))return false;if(isFavorite(id))favIds=favIds.filter(x=>x!==id);else favIds=[...favorites(),id];persist();changed();return isFavorite(id);}
+  function ordered(){const favs=favorites().map(get).filter(Boolean);return favs.concat(all().filter(l=>!favs.some(x=>x.id===l.id)));}
   // the vendors in list order, each with its ladders (for grouped menus), in the interface language (custom
   // ladders saved by earlier versions say 自定义)
   const VENDOR_ZH = { 'Chinese vendors': '国内厂家', Custom: '我的 Marker', '自定义': '自定义', Other: '其他' };
   const vendorLabel = v => { const L = G.L || (zh => zh), en = v === '自定义' ? 'Custom' : v; return VENDOR_ZH[v] ? L(VENDOR_ZH[v], en) : v; };
-  const groups = () => { const out = []; all().forEach(l => { const v = vendorLabel(l.vendor || 'Other'); let g = out.find(x => x.vendor === v); if (!g) out.push(g = { vendor: v, ladders: [] }); g.ladders.push(l); }); return out; };
+  const groups = () => {
+    const L = G.L || (zh => zh), out = [], favs = favorites().map(get).filter(Boolean);
+    if (favs.length) out.push({ vendor: L('★ 常用 Marker', '★ Starred'), ladders: favs });
+    all().forEach(l => { const v = vendorLabel(l.vendor || 'Other'); let g = out.find(x => x.vendor === v); if (!g) out.push(g = { vendor: v, ladders: [] }); g.ladders.push(l); });
+    return out;
+  };
   // a ladder's name on screen: Chinese vendors' with their Chinese brand in the Chinese interface; figures,
   // legends and logs always use the English .name
   const label = l => (l ? ((G.L || (zh => zh))(l.zh || l.name, l.name)) : '');
@@ -163,5 +211,5 @@
   }
   const LOADING_RE = /gapdh|actin|tubulin|vinculin|lamin|histone|h3\b|hsp90|pcna|cofilin|total protein|ponceau|内参/i;
 
-  G.ProteinLadders = { ready, flush:()=>writeQueue, custom:()=>JSON.parse(JSON.stringify(custom)), get persistent(){return durable||!!G.PrefStorage?.persistent;}, all, get, groups, label, saveCustom, parseSizes, parseImport, importDefinitions, suggest, LOADING_RE };
+  G.ProteinLadders = { ready, flush:()=>writeQueue, custom:()=>JSON.parse(JSON.stringify(custom)), get persistent(){return durable||!!G.PrefStorage?.persistent;}, all, get, groups, ordered, favorites, setFavorites, isFavorite, toggleFavorite, label, saveCustom, parseSizes, parseImport, importDefinitions, suggest, LOADING_RE };
 })(window);
